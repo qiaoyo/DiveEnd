@@ -1,0 +1,33 @@
+# Binaries
+diveend
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+*.obj
+*.a
+*.test
+*.prof
+/Godeps/
+/bin/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data directory (data should be synced separately)
+data/*
+!data/.gitkeep
+
+# Config
+config.json
