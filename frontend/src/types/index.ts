@@ -1,4 +1,48 @@
-// Paper types
+export interface LLMConfig {
+  providerId: string;
+  providerName: string;
+  providerType: 'openai_compatible' | 'anthropic';
+  baseUrl: string;
+  wireApi: 'responses' | 'chat_completions' | 'anthropic_messages';
+  requiresOpenAIAuth: boolean;
+  apiKey: string;
+  hasApiKey: boolean;
+  model: string;
+  reasoningEffort: string;
+  disableResponseStorage: boolean;
+  clearApiKey: boolean;
+}
+
+export interface SearchAPIConfig {
+  semanticScholarApiKey: string;
+  hasSemanticScholarApiKey: boolean;
+  clearSemanticScholarApiKey: boolean;
+}
+
+export interface BaiduCloudConfig {
+  enabled: boolean;
+  token: string;
+  hasToken: boolean;
+  quota: number;
+  clearToken: boolean;
+}
+
+export interface AppConfig {
+  llm: LLMConfig;
+  search: SearchAPIConfig;
+  baiduCloud: BaiduCloudConfig;
+  theme: 'light' | 'dark';
+  leftPanelWidth: number;
+  rightPanelWidth: number;
+  dataPath: string;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface Paper {
   id: string;
   title: string;
@@ -6,95 +50,164 @@ export interface Paper {
   abstract: string;
   year: number;
   journal: string;
+  url: string;
   pdfPath?: string;
+  folderId: string;
   category: string;
   tags: string[];
   addedAt: string;
   updatedAt: string;
 }
 
-export interface TranslationCache {
-  paperId: string;
-  section: string;
-  original: string;
-  translated: string;
-  model: string;
+export interface SearchPaper {
+  id: string;
+  title: string;
+  authors: string;
+  abstract: string;
+  year: number;
+  journal: string;
+  url: string;
+  category: string;
+  tags: string[];
 }
 
-export interface Folder {
+export interface DeepStartSessionSummary {
   id: string;
-  name: string;
-  parentId?: string;
+  title: string;
+  rootPrompt: string;
+  currentQuery: string;
+  targetFolderId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeepStartMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant';
+  content: string;
   createdAt: string;
 }
 
-// Config types
-export interface Config {
-  openaiApiKey: string;
-  anthropicApiKey: string;
-  selectedModel: 'openai' | 'anthropic';
-  semanticScholarApiKey: string;
-  baiduCloud: {
-    enabled: boolean;
-    token: string;
-    quota: number;
-  };
-  theme: 'light' | 'dark';
-  leftPanelWidth: number;
-  rightPanelWidth: number;
-  dataPath: string;
+export interface DeepStartDirection {
+  id: string;
+  name: string;
+  summary: string;
+  why: string;
+  paperIds: string[];
 }
 
-// Search types
-export interface SearchResult {
+export interface DeepStartPaperNote {
+  paperId: string;
+  tier: 'core' | 'important' | 'optional';
+  reason: string;
+  directionIds: string[];
+}
+
+export interface DeepStartAnalysis {
+  overview: string;
+  directions: DeepStartDirection[];
+  paperNotes: DeepStartPaperNote[];
+  followUpQuestions: string[];
+  suggestedQueries: string[];
+  recommendedPaperIds: string[];
+}
+
+export interface DeepStartSessionDetail {
+  summary: DeepStartSessionSummary;
+  messages: DeepStartMessage[];
+  currentResults: SearchPaper[];
+  currentAnalysis: DeepStartAnalysis | null;
+  selectedPaperIds: string[];
+}
+
+export interface TranslationRecord {
+  id: string;
+  paperId: string;
+  section: string;
+  originalText: string;
+  translatedText: string;
+  summary: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InitialState {
+  config: AppConfig;
+  folders: Folder[];
   papers: Paper[];
-  total: number;
-  query: string;
+  activeFolderId: string;
+  deepStartSessions: DeepStartSessionSummary[];
+  activeDeepStartSession: DeepStartSessionDetail | null;
 }
 
-// LLM types
-export interface LLMRequest {
-  prompt: string;
-  model?: string;
-  stream?: boolean;
+export interface SaveConfigResult {
+  config: AppConfig;
+  restartRequired: boolean;
 }
 
-export interface LLMResponse {
-  content: string;
-  model: string;
-  tokens: number;
-}
-
-// UI types
 export type Panel = 'deepstart' | 'deepread';
 
 export interface AppState {
-  // Current view
   activePanel: Panel;
+  activeFolderId: string;
   selectedPaper: Paper | null;
-  
-  // Papers
   papers: Paper[];
   folders: Folder[];
-  
-  // Search
+  deepStartSessions: DeepStartSessionSummary[];
+  activeDeepStartSession: DeepStartSessionDetail | null;
   searchQuery: string;
-  searchResults: Paper[];
-  isSearching: boolean;
-  
-  // Reading
-  isTranslating: boolean;
-  translationProgress: number;
-  
-  // Config
-  config: Config;
-  
-  // UI state
+  searchResults: SearchPaper[];
+  translations: TranslationRecord[];
+  config: AppConfig;
   leftPanelCollapsed: boolean;
   rightPanelCollapsed: boolean;
   theme: 'light' | 'dark';
-  
-  // Loading states
-  isLoading: boolean;
+  isHydrating: boolean;
+  isSearching: boolean;
+  isSavingConfig: boolean;
+  isTranslating: boolean;
   error: string | null;
 }
+
+export const defaultConfig: AppConfig = {
+  llm: {
+    providerId: 'anthropic',
+    providerName: 'Anthropic',
+    providerType: 'anthropic',
+    baseUrl: 'https://api.anthropic.com/v1',
+    wireApi: 'anthropic_messages',
+    requiresOpenAIAuth: false,
+    apiKey: '',
+    hasApiKey: false,
+    model: 'claude-3-5-sonnet-20241022',
+    reasoningEffort: '',
+    disableResponseStorage: true,
+    clearApiKey: false,
+  },
+  search: {
+    semanticScholarApiKey: '',
+    hasSemanticScholarApiKey: false,
+    clearSemanticScholarApiKey: false,
+  },
+  baiduCloud: {
+    enabled: false,
+    token: '',
+    hasToken: false,
+    quota: 0,
+    clearToken: false,
+  },
+  theme: 'light',
+  leftPanelWidth: 280,
+  rightPanelWidth: 340,
+  dataPath: './DiveEndData',
+};
+
+export const defaultInitialState: InitialState = {
+  config: defaultConfig,
+  folders: [],
+  papers: [],
+  activeFolderId: '',
+  deepStartSessions: [],
+  activeDeepStartSession: null,
+};

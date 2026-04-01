@@ -1,99 +1,125 @@
 import { create } from 'zustand';
-import type { AppState, Paper, Config, Panel } from '../types';
-
-const defaultConfig: Config = {
-  openaiApiKey: '',
-  anthropicApiKey: '',
-  selectedModel: 'anthropic',
-  semanticScholarApiKey: '',
-  baiduCloud: {
-    enabled: false,
-    token: '',
-    quota: 0,
-  },
-  theme: 'light',
-  leftPanelWidth: 240,
-  rightPanelWidth: 320,
-  dataPath: './data',
-};
+import type {
+  AppConfig,
+  AppState,
+  DeepStartSessionDetail,
+  DeepStartSessionSummary,
+  Folder,
+  InitialState,
+  Panel,
+  Paper,
+  SearchPaper,
+  TranslationRecord,
+} from '../types';
+import { defaultConfig } from '../types';
 
 interface AppStore extends AppState {
-  // Actions
+  hydrate: (state: InitialState) => void;
   setActivePanel: (panel: Panel) => void;
+  setActiveFolderId: (folderId: string) => void;
   setSelectedPaper: (paper: Paper | null) => void;
   setPapers: (papers: Paper[]) => void;
-  addPaper: (paper: Paper) => void;
-  removePaper: (id: string) => void;
-  
+  setFolders: (folders: Folder[]) => void;
+  setDeepStartSessions: (sessions: DeepStartSessionSummary[]) => void;
+  setActiveDeepStartSession: (session: DeepStartSessionDetail | null) => void;
+  upsertDeepStartSession: (session: DeepStartSessionDetail) => void;
+  addFolder: (folder: Folder) => void;
   setSearchQuery: (query: string) => void;
-  setSearchResults: (papers: Paper[]) => void;
+  setSearchResults: (papers: SearchPaper[]) => void;
+  setTranslations: (translations: TranslationRecord[]) => void;
+  prependTranslation: (translation: TranslationRecord) => void;
   setIsSearching: (isSearching: boolean) => void;
-  
+  setSavingConfig: (isSavingConfig: boolean) => void;
   setIsTranslating: (isTranslating: boolean) => void;
-  setTranslationProgress: (progress: number) => void;
-  
-  setConfig: (config: Partial<Config>) => void;
-  
+  setConfig: (config: AppConfig) => void;
+  setHydrating: (isHydrating: boolean) => void;
   toggleLeftPanel: () => void;
   toggleRightPanel: () => void;
-  toggleTheme: () => void;
-  
-  setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
-  // Initial state
   activePanel: 'deepstart',
+  activeFolderId: '',
   selectedPaper: null,
   papers: [],
   folders: [],
+  deepStartSessions: [],
+  activeDeepStartSession: null,
   searchQuery: '',
   searchResults: [],
-  isSearching: false,
-  isTranslating: false,
-  translationProgress: 0,
+  translations: [],
   config: defaultConfig,
   leftPanelCollapsed: false,
   rightPanelCollapsed: false,
-  theme: 'light',
-  isLoading: false,
+  theme: defaultConfig.theme,
+  isHydrating: true,
+  isSearching: false,
+  isSavingConfig: false,
+  isTranslating: false,
   error: null,
-  
-  // Actions
-  setActivePanel: (panel) => set({ activePanel: panel }),
-  setSelectedPaper: (paper) => set({ selectedPaper: paper }),
-  
+
+  hydrate: (initialState) =>
+    set({
+      config: initialState.config,
+      folders: initialState.folders,
+      papers: initialState.papers,
+      activeFolderId: initialState.activeFolderId,
+      deepStartSessions: initialState.deepStartSessions,
+      activeDeepStartSession: initialState.activeDeepStartSession,
+      theme: initialState.config.theme,
+      isHydrating: false,
+      error: null,
+    }),
+
+  setActivePanel: (activePanel) => set({ activePanel }),
+  setActiveFolderId: (activeFolderId) => set({ activeFolderId }),
+  setSelectedPaper: (selectedPaper) => set({ selectedPaper }),
   setPapers: (papers) => set({ papers }),
-  addPaper: (paper) => set((state) => ({ 
-    papers: [paper, ...state.papers] 
-  })),
-  removePaper: (id) => set((state) => ({ 
-    papers: state.papers.filter(p => p.id !== id) 
-  })),
-  
-  setSearchQuery: (query) => set({ searchQuery: query }),
-  setSearchResults: (papers) => set({ searchResults: papers }),
+  setFolders: (folders) => set({ folders }),
+  setDeepStartSessions: (deepStartSessions) => set({ deepStartSessions }),
+  setActiveDeepStartSession: (activeDeepStartSession) => set({ activeDeepStartSession }),
+  upsertDeepStartSession: (session) =>
+    set((state) => {
+      const nextSummaries = [
+        session.summary,
+        ...state.deepStartSessions.filter((item) => item.id !== session.summary.id),
+      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+      return {
+        deepStartSessions: nextSummaries,
+        activeDeepStartSession: session,
+      };
+    }),
+  addFolder: (folder) =>
+    set((state) => ({
+      folders: state.folders.some((item) => item.id === folder.id)
+        ? state.folders
+        : [...state.folders, folder],
+    })),
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  setSearchResults: (searchResults) => set({ searchResults }),
+  setTranslations: (translations) => set({ translations }),
+  prependTranslation: (translation) =>
+    set((state) => ({
+      translations: [translation, ...state.translations],
+    })),
   setIsSearching: (isSearching) => set({ isSearching }),
-  
+  setSavingConfig: (isSavingConfig) => set({ isSavingConfig }),
   setIsTranslating: (isTranslating) => set({ isTranslating }),
-  setTranslationProgress: (progress) => set({ translationProgress: progress }),
-  
-  setConfig: (config) => set((state) => ({ 
-    config: { ...state.config, ...config } 
-  })),
-  
-  toggleLeftPanel: () => set((state) => ({ 
-    leftPanelCollapsed: !state.leftPanelCollapsed 
-  })),
-  toggleRightPanel: () => set((state) => ({ 
-    rightPanelCollapsed: !state.rightPanelCollapsed 
-  })),
-  toggleTheme: () => set((state) => ({ 
-    theme: state.theme === 'light' ? 'dark' : 'light',
-    config: { ...state.config, theme: state.theme === 'light' ? 'dark' : 'light' }
-  })),
-  
-  setLoading: (isLoading) => set({ isLoading }),
+  setConfig: (config) =>
+    set({
+      config,
+      theme: config.theme,
+    }),
+  setHydrating: (isHydrating) => set({ isHydrating }),
+  toggleLeftPanel: () =>
+    set((state) => ({
+      leftPanelCollapsed: !state.leftPanelCollapsed,
+    })),
+  toggleRightPanel: () =>
+    set((state) => ({
+      rightPanelCollapsed: !state.rightPanelCollapsed,
+    })),
   setError: (error) => set({ error }),
 }));

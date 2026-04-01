@@ -3,15 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
 // App struct - Main Wails application
 type App struct {
-	ctx       context.Context
-	db        *DB
-	llm       *LLMClient
-	search    *SearchClient
+	ctx    context.Context
+	config AppConfig
+	db     *DB
+	llm    llmService
+	search paperSearchService
 }
 
 // NewApp creates a new App application struct
@@ -22,26 +24,22 @@ func NewApp() *App {
 // startup is called when the app starts
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	
-	// Initialize database
-	db, err := NewDB("./data")
+
+	config, err := LoadAppConfig()
 	if err != nil {
-		fmt.Printf("Failed to initialize database: %v\n", err)
-		return
+		fmt.Printf("Failed to load config, fallback to defaults: %v\n", err)
+		config = defaultAppConfig()
 	}
-	a.db = db
-	
-	// Initialize LLM client (default to Anthropic)
-	a.llm = NewLLMClient("", "claude-3-5-sonnet-20241022", "anthropic")
-	
-	// Initialize search client
-	a.search = NewSearchClient("")
+
+	if err := a.applyConfig(config, true); err != nil {
+		fmt.Printf("Failed to initialize app: %v\n", err)
+	}
 }
 
 // shutdown is called when the app closes
 func (a *App) shutdown(ctx context.Context) {
 	if a.db != nil {
-		a.db.Close()
+		_ = a.db.Close()
 	}
 }
 
@@ -50,94 +48,231 @@ func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
 
-// SearchPapers searches for papers based on query
+func (a *App) GetInitialState() (*InitialState, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+
+	folders, err := a.db.GetFolders()
+	if err != nil {
+		return nil, err
+	}
+
+	deepStartSessions, err := a.db.ListDeepStartSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	var activeDeepStartSession *DeepStartSessionDetail
+	if len(deepStartSessions) > 0 {
+		activeDeepStartSession, err = a.db.GetDeepStartSession(deepStartSessions[0].ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	activeFolderID := ""
+	if activeDeepStartSession != nil && strings.TrimSpace(activeDeepStartSession.Summary.TargetFolderID) != "" {
+		activeFolderID = activeDeepStartSession.Summary.TargetFolderID
+	} else if len(folders) > 0 {
+		activeFolderID = folders[0].ID
+	}
+
+	papers, err := a.db.GetPapers(activeFolderID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &InitialState{
+		Config:                 sanitizeAppConfig(a.config),
+		Folders:                folders,
+		Papers:                 papers,
+		ActiveFolderID:         activeFolderID,
+		DeepStartSessions:      deepStartSessions,
+		ActiveDeepStartSession: activeDeepStartSession,
+	}, nil
+}
+
+func (a *App) SaveConfig(config AppConfig) (*SaveConfigResult, error) {
+	previousDataPath := a.config.DataPath
+	mergedConfig := mergeAppConfigSecrets(a.config, config)
+	mergedConfig = normalizeAppConfig(mergedConfig)
+
+	if err := SaveAppConfig(mergedConfig); err != nil {
+		return nil, err
+	}
+
+	restartRequired := a.db != nil && strings.TrimSpace(previousDataPath) != "" && previousDataPath != mergedConfig.DataPath
+	if err := a.applyConfig(mergedConfig, !restartRequired); err != nil {
+		return nil, err
+	}
+
+	return &SaveConfigResult{
+		Config:          sanitizeAppConfig(a.config),
+		RestartRequired: restartRequired,
+	}, nil
+}
+
 func (a *App) SearchPapers(query string, limit int) ([]SearchPaper, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
 	if a.search == nil {
 		return nil, fmt.Errorf("search not initialized")
 	}
-	
-	papers, err := a.search.Search(query, limit)
+
+	return a.search.Search(query, limit)
+}
+
+func (a *App) GetFolders() ([]Folder, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.db.GetFolders()
+}
+
+func (a *App) CreateFolder(name string) (*Folder, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	folder, err := a.db.CreateFolder(name)
 	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		return nil, err
 	}
-	
-	return papers, nil
+	return &folder, nil
 }
 
-// TranslateText translates text using LLM
-func (a *App) TranslateText(text string, targetLang string) (string, error) {
-	if a.llm == nil {
-		return "", fmt.Errorf("LLM not initialized")
+func (a *App) GetPapers(folderID string) ([]Paper, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
 	}
-	
-	result, err := a.llm.Translate(text, targetLang)
-	if err != nil {
-		return "", fmt.Errorf("translation failed: %w", err)
-	}
-	
-	return result, nil
+	return a.db.GetPapers(folderID)
 }
 
-// GetPapers returns all papers from the database
-func (a *App) GetPapers() ([]Paper, error) {
-	if a.db == nil {
-		return nil, fmt.Errorf("database not initialized")
+func (a *App) ImportPapers(folderID string, papers []SearchPaper) ([]Paper, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
 	}
-	
-	return a.db.GetPapers()
+
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		folders, err := a.db.GetFolders()
+		if err != nil {
+			return nil, err
+		}
+		if len(folders) == 0 {
+			return nil, fmt.Errorf("no folder available")
+		}
+		folderID = folders[0].ID
+	}
+
+	imported := make([]Paper, 0, len(papers))
+	for _, searchPaper := range papers {
+		paper := Paper{
+			ID:        strings.TrimSpace(searchPaper.ID),
+			Title:     strings.TrimSpace(searchPaper.Title),
+			Authors:   strings.TrimSpace(searchPaper.Authors),
+			Abstract:  strings.TrimSpace(searchPaper.Abstract),
+			Year:      searchPaper.Year,
+			Journal:   strings.TrimSpace(searchPaper.Journal),
+			URL:       strings.TrimSpace(searchPaper.URL),
+			FolderID:  folderID,
+			Category:  strings.TrimSpace(searchPaper.Category),
+			Tags:      searchPaper.Tags,
+			AddedAt:   time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		if paper.ID == "" {
+			paper.ID = fmt.Sprintf("paper-%d", time.Now().UnixNano())
+		}
+		if err := a.db.UpsertPaper(&paper); err != nil {
+			return nil, err
+		}
+
+		imported = append(imported, paper)
+	}
+
+	return imported, nil
 }
 
-// AddPaper adds a paper to the database
-func (a *App) AddPaper(paper *Paper) error {
-	if a.db == nil {
-		return fmt.Errorf("database not initialized")
-	}
-	
-	if paper.AddedAt.IsZero() {
-		paper.AddedAt = time.Now()
-	}
-	if paper.UpdatedAt.IsZero() {
-		paper.UpdatedAt = time.Now()
-	}
-	
-	return a.db.AddPaper(paper)
-}
-
-// DeletePaper deletes a paper from the database
 func (a *App) DeletePaper(id string) error {
-	if a.db == nil {
-		return fmt.Errorf("database not initialized")
+	if err := a.ensureReady(); err != nil {
+		return err
 	}
-	
 	return a.db.DeletePaper(id)
 }
 
-// GetConfig returns the configuration value for a key
-func (a *App) GetConfig(key string) (string, error) {
-	if a.db == nil {
-		return "", fmt.Errorf("database not initialized")
+func (a *App) TranslatePaperSection(paperID, section, text string) (*TranslationRecord, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
 	}
-	
-	return a.db.GetConfig(key)
+	if a.llm == nil {
+		return nil, fmt.Errorf("LLM not initialized")
+	}
+
+	section = strings.TrimSpace(section)
+	if section == "" {
+		section = "Untitled Section"
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, fmt.Errorf("text cannot be empty")
+	}
+
+	translated, summary, err := a.llm.TranslateSection(section, text)
+	if err != nil {
+		return nil, err
+	}
+
+	record := &TranslationRecord{
+		PaperID:        paperID,
+		Section:        section,
+		OriginalText:   text,
+		TranslatedText: translated,
+		Summary:        summary,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	if err := a.db.SaveTranslation(record); err != nil {
+		return nil, err
+	}
+
+	return record, nil
 }
 
-// SetConfig sets a configuration value
-func (a *App) SetConfig(key, value string) error {
-	if a.db == nil {
-		return fmt.Errorf("database not initialized")
+func (a *App) GetTranslations(paperID string) ([]TranslationRecord, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
 	}
-	
-	return a.db.SetConfig(key, value)
+	return a.db.GetTranslations(paperID)
 }
 
-// SetLLMProvider sets the LLM provider and API key
-func (a *App) SetLLMProvider(providerType, apiKey, model string) error {
-	a.llm = NewLLMClient(apiKey, model, providerType)
+func (a *App) ensureReady() error {
+	if a.db == nil {
+		return a.applyConfig(a.config, true)
+	}
 	return nil
 }
 
-// SetSearchAPIKey sets the Semantic Scholar API key
-func (a *App) SetSearchAPIKey(apiKey string) error {
-	a.search = NewSearchClient(apiKey)
+func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
+	a.config = normalizeAppConfig(config)
+	a.llm = NewLLMClient(a.config)
+	a.search = NewSearchClient(a.config)
+
+	if !reloadDB {
+		return nil
+	}
+
+	if a.db != nil {
+		_ = a.db.Close()
+		a.db = nil
+	}
+
+	db, err := NewDB(a.config.DataPath)
+	if err != nil {
+		return err
+	}
+	a.db = db
 	return nil
 }

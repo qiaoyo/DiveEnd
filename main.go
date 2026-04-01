@@ -19,10 +19,10 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "DiveEnd",
-		Width:  1280,
-		Height: 800,
-		MinWidth: 1024,
+		Title:     "DiveEnd",
+		Width:     1280,
+		Height:    800,
+		MinWidth:  1024,
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
