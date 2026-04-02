@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  pdf-service:
+    build: .
+    image: diveend/pdf-service:latest
+    container_name: diveend-pdf-service
+    ports:
+      - "50051:50051"
+    environment:
+      - PDF_HOST=0.0.0.0
+      - PDF_PORT=50051
+      - PDF_WORKERS=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:50051/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: diveend-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
