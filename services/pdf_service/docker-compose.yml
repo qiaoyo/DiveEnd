@@ -1,38 +1,66 @@
+# DiveEnd PDF Processing Service - Docker Compose
+#
+# Usage:
+#   docker-compose up -d          # Start services
+#   docker-compose down           # Stop services
+#   docker-compose logs -f        # View logs
+#   docker-compose build          # Rebuild images
+
 version: '3.8'
 
 services:
   pdf-service:
-    build: .
-    image: diveend/pdf-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: diveend-pdf-service
+    restart: unless-stopped
     ports:
       - "50051:50051"
     environment:
+      # LLM API Keys (required)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+      # PDF Service Configuration
       - PDF_HOST=0.0.0.0
       - PDF_PORT=50051
       - PDF_WORKERS=1
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+      # Logging
+      - LOG_LEVEL=info
+
     volumes:
-      - ./data:/app/data
+      # Mount for temporary PDF storage
+      - pdf-temp:/tmp/pdf-service
+
+      # Mount for logs (optional)
       - ./logs:/app/logs
-    restart: unless-stopped
+
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:50051/health/"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:50051/health/')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 5s
 
-  # Optional: Redis for caching
-  redis:
-    image: redis:7-alpine
-    container_name: diveend-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
+  # Optional: Redis for caching (can be enabled if needed)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: diveend-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   command: redis-server --appendonly yes
 
 volumes:
-  redis_data:
+  pdf-temp:
+    driver: local
+  # redis-data:
+  #   driver: local
+
+networks:
+  default:
+    name: diveend-network
