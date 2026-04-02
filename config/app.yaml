@@ -1,0 +1,40 @@
+app:
+  name: "DiveEnd"
+  version: "0.1.0"
+  data_dir: "~/DiveEndData"
+
+# Sync configuration
+sync:
+  enabled: true
+  provider: "baidu_cloud"
+  local_sync_dir: "~/DiveEndData/sync"
+  remote_path: "/apps/DiveEnd"
+  auto_sync_on_startup: true
+  auto_sync_on_change: true
+  sync_debounce_seconds: 5
+
+# UI configuration
+ui:
+  theme: "dark"  # dark | light | system
+  font_size: 14
+  sidebar_width: 280
+  right_panel_width: 320
+
+# Feature toggles
+features:
+  deepstart_enabled: true
+  deepread_enabled: true
+  screening_pipeline_enabled: true
+
+# PDF Service configuration
+pdf_service:
+  host: "localhost"
+  port: 50051
+  auto_start: true
+  python_path: "python3"
+  service_script: "services/pdf_service/main.py"
+
+# LLM configuration paths
+llm:
+  weak_config_path: "config/weak_llm.json"
+  strong_config_path: "config/strong_llm.json"
