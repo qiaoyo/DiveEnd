@@ -41,7 +41,7 @@
 |------|------|------|------------|
 | **Phase 1** | Foundation (基础架构) | ✅ 已完成 | Config系统、LLM Client、Database基础 |
 | **Phase 2** | PDF Service (PDF服务) | ✅ 已完成 | Python microservice、Marker集成、FastAPI |
-| **Phase 3** | DeepRead (沉浸式阅读) | 🔄 进行中 | 分屏阅读UI、翻译视图、PDF查看器 |
+| **Phase 3** | DeepRead (沉浸式阅读) | ✅ 已完成 | 分屏阅读UI、翻译视图、PDF查看器 |
 | Phase 4 | DeepStart (领域探索) | ⏳ 待开始 | 搜索集成、AI引导选择、导入流程 |
 | Phase 5 | Screening Pipeline (论文筛选) | ⏳ 待开始 | 三阶段Pipeline、决策树UI |
 | Phase 6 | Sync & Polish (同步与优化) | ⏳ 待开始 | 百度云同步、冲突解决、测试文档 |
