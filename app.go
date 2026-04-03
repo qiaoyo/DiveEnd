@@ -276,3 +276,37 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.db = db
 	return nil
 }
+
+// SearchPapers searches for papers across multiple sources
+func (a *App) SearchPapers(query string, limit int) ([]SearchResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	if a.search == nil {
+		return nil, fmt.Errorf("search service not initialized")
+	}
+
+	results, err := a.search.Search(query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to SearchResult format
+	searchResults := make([]SearchResult, len(results))
+	for i, r := range results {
+		searchResults[i] = SearchResult{
+			ID:          r.ID,
+			Title:       r.Title,
+			Authors:     r.Authors,
+			Abstract:    r.Abstract,
+			Year:        r.Year,
+			Journal:     r.Journal,
+			URL:         r.URL,
+			Source:      r.Source,
+			Citations:   r.Citations,
+			PDFURL:      r.PDFURL,
+		}
+	}
+
+	return searchResults, nil
+}
