@@ -59,8 +59,69 @@ type InitialState struct {
 	Folders                []Folder                  `json:"folders"`
 	Papers                 []Paper                   `json:"papers"`
 	ActiveFolderID         string                    `json:"activeFolderId"`
-	DeepStartSessions      []DeepStartSessionSummary `json:"deepStartSessions"`
+	DeepStartSessions      []DeepStartSessionSummary `json:"deepstartSessions"`
 	ActiveDeepStartSession *DeepStartSessionDetail   `json:"activeDeepStartSession,omitempty"`
+}
+
+type ScreeningPaper struct {
+	ID           string    `json:"id"`
+	SessionID     string    `json:"sessionId"`
+	FileName      string    `json:"fileName"`
+	FilePath      string    `json:"filePath"`
+	FileSize      int64     `json:"fileSize"`
+	Status        string    `json:"status"` // "pending", "extracting", "extracted", "screening", "selected", "rejected"
+	Title         string    `json:"title,omitempty"`
+	Authors       string    `json:"authors,omitempty"`
+	Abstract      string    `json:"abstract,omitempty"`
+	FullText      string    `json:"fullText,omitempty"`
+	SectionsJSON  string    `json:"sectionsJson,omitempty"`
+	Selection     string    `json:"selection,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	TargetFolderID string    `json:"targetFolderId,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type ScreeningSession struct {
+	ID               string    `json:"id"`
+	Title             string    `json:"title"`
+	Status            string    `json:"status"` // "upload", "extract", "screen", "complete"
+	TotalPapers       int       `json:"totalPapers"`
+	CurrentNodeJSON   string   `json:"currentNodeJson,omitempty"`
+	SelectedOptionsJSON string   `json:"selectedOptionsJson,omitempty"`
+	PathHistoryJSON   string    `json:"pathHistoryJson,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+type ScreeningDecisionNode struct {
+	ID               string    `json:"id"`
+	Message          string    `json:"message"`
+	Dimension        string    `json:"dimension"`
+	OptionsJSON      string    `json:"optionsJson"`
+	AllowMultiSelect  bool      `json:"allowMultiSelect"`
+	AllowSkip       bool      `json:"allowSkip"`
+	RemainingPaperIDsJSON string `json:"remainingPaperIdsJson,omitempty"`
+}
+
+type ExtractProgress struct {
+	SessionID   string    `json:"sessionId"`
+	Total       int       `json:"total"`
+	Completed   int       `json:"completed"`
+	Current     string    `json:"current"`
+	Status      string    `json:"status"` // "processing", "completed", "error"
+}
+
+type ScreeningSessionDetail struct {
+	Session       ScreeningSession        `json:"session"`
+	Papers        []ScreeningPaper       `json:"papers"`
+	CurrentNode   *ScreeningDecisionNode `json:"currentNode,omitempty"`
+	PathHistory    []PathHistoryItem       `json:"pathHistory"`
+}
+
+type PathHistoryItem struct {
+	Dimension string   `json:"dimension"`
+	Choice   string   `json:"choice"`
 }
 
 type Folder struct {
@@ -156,4 +217,80 @@ type TranslationRecord struct {
 	Summary        string    `json:"summary"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+// ========== Phase 6: Baidu Cloud Sync 相关数据模型 ==========
+
+// BaiduToken 百度网盘 OAuth token
+type BaiduToken struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ClientID    string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	ExpiresIn   int    `json:"expires_in"`
+}
+
+// SyncRecord 同步记录
+type SyncRecord struct {
+	ID           string    `json:"id"`
+	Type         string    `json:"type"` // "upload", "download", "conflict"
+	FileName     string    `json:"fileName"`
+	FileSize     int64     `json:"fileSize"`
+	RemotePath   string    `json:"remotePath"`
+	LocalPath    string    `json:"localPath"`
+	Status       string    `json:"status"` // "pending", "success", "failed"
+	ErrorMessage string    `json:"errorMessage,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	CompletedAt  time.Time `json:"completedAt,omitempty"`
+}
+
+// SyncConflict 同步冲突
+type SyncConflict struct {
+	ID          string    `json:"id"`
+	FileName    string    `json:"fileName"`
+	LocalPath   string    `json:"localPath"`
+	LocalTime   time.Time `json:"localTime"`
+	RemotePath  string    `json:"remotePath"`
+	RemoteTime  time.Time `json:"remoteTime"`
+	Resolution  string    `json:"resolution"` // "local", "remote", "skipped"
+	ResolvedAt  time.Time `json:"resolvedAt,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// SyncStatus 同步状态
+type SyncStatus struct {
+	Enabled         bool       `json:"enabled"`
+	Provider        string     `json:"provider"`
+	LastSync        *time.Time  `json:"lastSync,omitempty"`
+	SyncInProgress  bool       `json:"syncInProgress"`
+	PendingFiles    int        `json:"pendingFiles"`
+	Conflicts       int        `json:"conflicts"`
+	TotalSynced     int        `json:"totalSynced"`
+	TotalFailed     int        `json:"totalFailed"`
+}
+
+// SyncSettings 同步设置
+type SyncSettings struct {
+	AutoSync           bool   `json:"autoSync"`
+	SyncOnStartup      bool   `json:"syncOnStartup"`
+	SyncInterval       int    `json:"syncInterval"` // minutes
+	ConflictResolution string `json:"conflictResolution"` // "timestamp" (always use newest)
+}
+
+// SyncProgress 同步进度
+type SyncProgress struct {
+	Total        int            `json:"total"`
+	Completed    int            `json:"completed"`
+	CurrentFile  string         `json:"currentFile"`
+	Status       string         `json:"status"` // "preparing", "uploading", "downloading", "resolving", "complete", "error"
+	Message      string         `json:"message,omitempty"`
+}
+
+// FileInfo 文件信息
+type FileInfo struct {
+	Path     string    `json:"path"`
+	Size     int64     `json:"size"`
+	IsDir    bool      `json:"isDir"`
+	Modified time.Time `json:"modified"`
+	MD5      string    `json:"md5,omitempty"`
 }

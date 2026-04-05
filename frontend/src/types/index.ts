@@ -71,6 +71,33 @@ export interface SearchPaper {
   tags: string[];
 }
 
+export interface SearchResult {
+  ID: string;
+  Title: string;
+  Authors: string;
+  Abstract: string;
+  Year: number;
+  Journal: string;
+  URL: string;
+  Source: string;
+  Citations: number;
+  PDFURL: string;
+}
+
+export interface CategoryNode {
+  id: string;
+  name: string;
+  count: number;
+  children?: CategoryNode[];
+}
+
+export interface SelectionStep {
+  id: string;
+  dimension: string;
+  selected: string[];
+  remainingCount: number;
+}
+
 export interface DeepStartSessionSummary {
   id: string;
   title: string;
@@ -146,7 +173,7 @@ export interface SaveConfigResult {
   restartRequired: boolean;
 }
 
-export type Panel = 'deepstart' | 'deepread';
+export type Panel = 'deepstart' | 'deepread' | 'screening' | 'sync';
 
 export interface AppState {
   activePanel: Panel;

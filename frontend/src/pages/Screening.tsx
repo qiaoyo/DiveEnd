@@ -33,6 +33,9 @@ type ScreeningStage = 'upload' | 'extract' | 'screen' | 'results';
 export const Screening: React.FC = () => {
   const [currentStage, setCurrentStage] = useState<ScreeningStage>('upload');
   const [papers, setPapers] = useState<Paper[]>([]);
+  const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
+  const [categories, setCategories] = useState<Array<{name: string; count: number}>>([]);
+  const [selectionSteps, setSelectionSteps] = useState<Array<{dimension: string; choice: string}>>([]);
   const [currentNode, setCurrentNode] = useState<DecisionNode | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [screeningHistory, setScreeningHistory] = useState<Array<{ dimension: string; choice: string }>>([]);

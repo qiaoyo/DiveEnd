@@ -1,5 +1,5 @@
 import React from 'react';
-import { SearchResult, SelectionStep } from '../../pages/DeepStart';
+import type { SearchResult, SelectionStep } from '../../types';
 
 interface SelectionPanelProps {
   papers: SearchResult[];

@@ -1,5 +1,5 @@
 import React from 'react';
-import { SearchResult } from '../../pages/DeepStart';
+import type { SearchResult } from '../../types';
 
 interface SearchResultsProps {
   results: SearchResult[];

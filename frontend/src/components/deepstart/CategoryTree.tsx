@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CategoryNode } from '../../pages/DeepStart';
+import type { CategoryNode } from '../../types';
 
 interface CategoryTreeProps {
   categories: CategoryNode[];

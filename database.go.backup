@@ -146,21 +146,7 @@ func (db *DB) migrate() error {
 	}
 
 	_, err = db.conn.Exec(`UPDATE papers SET folder_id = ? WHERE folder_id IS NULL OR TRIM(folder_id) = ''`, defaultFolder.ID)
-	if err != nil {
-		return err
-	}
-
-	// 创建 screening 相关的表
-	if err := db.migrateScreening(); err != nil {
-		return err
-	}
-
-	// 创建 sync baidu 相关的表
-	if err := db.migrateSync(); err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (db *DB) ensurePaperColumn(columnName, columnType string) error {
@@ -753,20 +739,4 @@ func decodeTags(raw string) []string {
 	}
 
 	return tags
-}
-
-// nullIfTime 将 time.Time 转换为 sql.NullTime
-func nullIfTime(t time.Time) sql.NullTime {
-	if t.IsZero() {
-		return sql.NullTime{}
-	}
-	return sql.NullTime{Time: t, Valid: true}
-}
-
-// nullIfTimePtr 将 *time.Time 转换为 sql.NullTime
-func nullIfTimePtr(t *time.Time) sql.NullTime {
-	if t == nil || t.IsZero() {
-		return sql.NullTime{}
-	}
-	return sql.NullTime{Time: *t, Valid: true}
 }

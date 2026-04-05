@@ -1,20 +1,29 @@
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
+import { useLocation } from 'react-router-dom';
 import { useAppStore } from '../../stores/appStore';
 import { DeepReadPanel } from '../deepread/DeepReadPanel';
 import { DeepStartPanel } from '../deepstart/DeepStartPanel';
+import { Screening as ScreeningPanel } from '../../pages/Screening';
+import { Sync as SyncPanel } from '../../pages/Sync';
 import { PaperListPanel } from '../paperlist/PaperListPanel';
 import { SettingsPanel } from '../settings/SettingsPanel';
 
 export function AppLayout() {
+  const location = useLocation();
   const {
-    activePanel,
     config,
     error,
     isHydrating,
     leftPanelCollapsed,
     rightPanelCollapsed,
   } = useAppStore();
+
+  // Determine active panel based on current route
+  const activePanel = location.pathname === '/deepread' ? 'deepread' :
+                       location.pathname === '/screening' ? 'screening' :
+                       location.pathname === '/sync' ? 'sync' :
+                       'deepstart';
 
   return (
     <div className="h-full bg-[#f5f1e8] text-stone-900 dark:bg-[#151515] dark:text-stone-100">
@@ -42,7 +51,10 @@ export function AppLayout() {
             </Allotment.Pane>
 
             <Allotment.Pane minSize={520}>
-              {activePanel === 'deepread' ? <DeepReadPanel /> : <DeepStartPanel />}
+              {activePanel === 'deepread' ? <DeepReadPanel /> :
+               activePanel === 'screening' ? <ScreeningPanel /> :
+               activePanel === 'sync' ? <SyncPanel /> :
+               <DeepStartPanel />}
             </Allotment.Pane>
 
             <Allotment.Pane
