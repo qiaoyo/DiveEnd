@@ -65,11 +65,11 @@ func (db *DB) SaveSyncRecord(record *SyncRecord) error {
 	}
 
 	_, err := db.conn.Exec(`
-		INSERT INTO sync_records (
-			id, type, file_name, file_size, remote_path, local_path,
-			status, error_message, created_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
+			INSERT INTO sync_records (
+				id, type, file_name, file_size, remote_path, local_path,
+				status, error_message, created_at, completed_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
 		record.ID,
 		record.Type,
 		record.FileName,
@@ -86,18 +86,18 @@ func (db *DB) SaveSyncRecord(record *SyncRecord) error {
 }
 
 // GetSyncRecords 获取同步记录
-func (db *) GetSyncRecords(limit int) ([]SyncRecord, error) {
+func (db *DB) GetSyncRecords(limit int) ([]SyncRecord, error) {
 	query := `
-		SELECT id, type, file_name, file_size, remote_path, local_path,
-		       status, error_message, created_at, completed_at
-		FROM sync_records
-		ORDER BY created_at DESC
-	`
+			SELECT id, type, file_name, file_size, remote_path, local_path,
+			       status, error_message, created_at, completed_at
+			FROM sync_records
+			ORDER BY created_at DESC
+		`
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-.rows, err := db.conn.Query(query)
+	rows, err := db.conn.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -135,11 +135,101 @@ func (db *) GetSyncRecords(limit int) ([]SyncRecord, error) {
 	return records, rows.Err()
 }
 
+// SaveSyncConflict 保存冲突记录
+func (db *DB) SaveSyncConflict(conflict *SyncConflict) error {
+	now := time.Now()
+	if conflict.ID == "" {
+		conflict.ID = uuid.NewString()
+	}
+	if conflict.CreatedAt.IsZero() {
+		conflict.CreatedAt = now
+	}
+
+	_, err := db.conn.Exec(`
+			INSERT INTO sync_conflicts (
+				id, file_name, local_path, local_time, remote_path,
+				remote_time, resolution, resolved_at, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+		conflict.ID,
+		conflict.FileName,
+		conflict.LocalPath,
+		conflict.LocalTime,
+		conflict.RemotePath,
+		conflict.RemoteTime,
+		nullIfBlank(conflict.Resolution),
+		nullIfTime(conflict.ResolvedAt),
+		conflict.CreatedAt,
+	)
+
+	return err
+}
+
+// GetSyncConflicts 获取冲突列表
+func (db *DB) GetSyncConflicts(limit int) ([]SyncConflict, error) {
+	query := `
+			SELECT id, file_name, local_path, local_time, remote_path,
+			       remote_time, resolution, resolved_at, created_at
+			FROM sync_conflicts
+			ORDER BY created_at DESC
+		`
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var conflicts []SyncConflict
+	for rows.Next() {
+		var conflict SyncConflict
+		var resolution sql.NullString
+		var resolvedAt sql.NullTime
+
+		if err := rows.Scan(
+			&conflict.ID,
+			&conflict.FileName,
+			&conflict.LocalPath,
+			&conflict.LocalTime,
+			&conflict.RemotePath,
+			&conflict.RemoteTime,
+			&resolution,
+			&resolvedAt,
+			&conflict.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		conflict.Resolution = resolution.String
+		conflict.ResolvedAt = resolvedAt.Time
+
+		conflicts = append(conflicts, conflict)
+	}
+
+	return conflicts, rows.Err()
+}
+
+// ResolveSyncConflict 解决冲突
+func (db *DB) ResolveSyncConflict(conflictID, resolution string) error {
+	now := time.Now()
+	_, err := db.conn.Exec(`
+			UPDATE sync_conflicts
+			SET resolution = ?, resolved_at = ?
+			WHERE id = ?
+		`, nullIfBlank(resolution), nullIfTime(now), conflictID)
+
+	return err
+}
+
 // SyncManager 同步管理器
 type SyncManager struct {
 	db          *DB
 	baiduClient *BaiduPCSClient
 	config      AppConfig
+	progress    *SyncProgress
 }
 
 // NewSyncManager 创建同步管理器
@@ -159,6 +249,7 @@ func NewSyncManager(db *DB, config AppConfig) *SyncManager {
 		db:          db,
 		baiduClient: baiduClient,
 		config:      config,
+		progress:    &SyncProgress{Status: "idle"},
 	}
 }
 
@@ -168,20 +259,30 @@ func (sm *SyncManager) SyncOnStartup() error {
 		return fmt.Errorf("baidu client not initialized")
 	}
 
+	sm.progress.Status = "preparing"
+	sm.progress.Message = "准备启动时同步..."
+
 	fmt.Println("[Sync] 开始启动时同步...")
 
 	// 获取云端文件列表
 	remotePath := fmt.Sprintf("/apps/%s", syncApp)
 	remoteFiles, err := sm.baiduClient.ListFiles(remotePath)
 	if err != nil {
+		sm.progress.Status = "error"
+		sm.progress.Message = fmt.Sprintf("获取云端文件失败: %v", err)
 		return fmt.Errorf("failed to list remote files: %w", err)
 	}
 
 	// 获取本地数据库中的文件
 	localFiles, err := sm.getLocalDataFiles()
 	if err != nil {
+		sm.progress.Status = "error"
+		sm.progress.Message = fmt.Sprintf("获取本地文件失败: %v", err)
 		return fmt.Errorf("failed to get local files: %w", err)
 	}
+
+	sm.progress.Total = len(localFiles)
+	sm.progress.Completed = 0
 
 	// 比较并同步
 	for _, remoteFile := range remoteFiles {
@@ -192,11 +293,32 @@ func (sm *SyncManager) SyncOnStartup() error {
 		_, exists := localFiles[remoteFile.Path]
 		if !exists {
 			// 云端有，本地没有 → 下载
+			sm.progress.CurrentFile = remoteFile.Path
+			sm.progress.Status = "downloading"
 			fmt.Printf("[Sync] 下载新文件: %s\n", remoteFile.Path)
-			sm.downloadFile(remoteFile.Path)
+
+			if err := sm.downloadFile(remoteFile.Path); err != nil {
+				sm.progress.Message = fmt.Sprintf("下载失败: %v", err)
+				continue
+			}
+
+			// 保存同步记录
+			record := &SyncRecord{
+				Type:       "download",
+				FileName:   filepath.Base(remoteFile.Path),
+				FileSize:   remoteFile.Size,
+				RemotePath: remoteFile.Path,
+				LocalPath:  filepath.Join(sm.config.DataPath, filepath.Base(remoteFile.Path)),
+				Status:     "success",
+				CompletedAt: time.Now(),
+			}
+			sm.db.SaveSyncRecord(record)
 		}
+		sm.progress.Completed++
 	}
 
+	sm.progress.Status = "complete"
+	sm.progress.Message = "启动时同步完成"
 	fmt.Println("[Sync] 启动时同步完成")
 	return nil
 }
@@ -207,20 +329,68 @@ func (sm *SyncManager) SyncToCloud() error {
 		return fmt.Errorf("baidu client not initialized")
 	}
 
+	sm.progress.Status = "preparing"
+	sm.progress.Message = "准备同步到云端..."
+
 	fmt.Println("[Sync] 开始同步到云端...")
 
 	localFiles, err := sm.getLocalDataFiles()
 	if err != nil {
+		sm.progress.Status = "error"
+		sm.progress.Message = fmt.Sprintf("获取本地文件失败: %v", err)
 		return fmt.Errorf("failed to get local files: %w", err)
 	}
 
-	for localPath := range localFiles {
+	sm.progress.Total = len(localFiles)
+	sm.progress.Completed = 0
+
+	for localPath, localFile := range localFiles {
+		sm.progress.CurrentFile = localPath
+		sm.progress.Status = "uploading"
 		fmt.Printf("[Sync] 上传文件: %s\n", localPath)
-		sm.baiduClient.UploadFile(localPath, "")
+
+		if err := sm.baiduClient.UploadFile(localPath, ""); err != nil {
+			sm.progress.Status = "error"
+			sm.progress.Message = fmt.Sprintf("上传失败: %v", err)
+
+			// 保存失败的同步记录
+			record := &SyncRecord{
+				Type:         "upload",
+				FileName:     filepath.Base(localPath),
+				FileSize:     localFile.Size,
+				LocalPath:    localPath,
+				RemotePath:   fmt.Sprintf("/apps/%s/%s", syncApp, filepath.Base(localPath)),
+				Status:       "failed",
+				ErrorMessage: err.Error(),
+			}
+			sm.db.SaveSyncRecord(record)
+			continue
+		}
+
+		// 保存成功的同步记录
+		record := &SyncRecord{
+			Type:       "upload",
+			FileName:   filepath.Base(localPath),
+			FileSize:   localFile.Size,
+			LocalPath:  localPath,
+			RemotePath: fmt.Sprintf("/apps/%s/%s", syncApp, filepath.Base(localPath)),
+			Status:     "success",
+			CompletedAt: time.Now(),
+		}
+		sm.db.SaveSyncRecord(record)
+
+		sm.progress.Completed++
 	}
 
+	sm.progress.Status = "complete"
+	sm.progress.Message = "同步到云端完成"
 	fmt.Println("[Sync] 同步到云端完成")
 	return nil
+}
+
+// GetSyncProgress 获取同步进度
+func (sm *SyncManager) GetSyncProgress() *SyncProgress {
+	return sm.progress
 }
 
 // getLocalDataFiles 获取本地数据文件列表
@@ -252,4 +422,48 @@ func (sm *SyncManager) getLocalDataFiles() (map[string]FileInfo, error) {
 func (sm *SyncManager) downloadFile(remotePath string) error {
 	localPath := filepath.Join(sm.config.DataPath, filepath.Base(remotePath))
 	return sm.baiduClient.DownloadFile(remotePath, localPath)
+}
+
+// DetectConflicts 检测冲突
+func (sm *SyncManager) DetectConflicts() ([]SyncConflict, error) {
+	if sm.baiduClient == nil {
+		return nil, fmt.Errorf("baidu client not initialized")
+	}
+
+	remotePath := fmt.Sprintf("/apps/%s", syncApp)
+	remoteFiles, err := sm.baiduClient.ListFiles(remotePath)
+	if err != nil {
+		return nil, err
+	}
+
+	localFiles, err := sm.getLocalDataFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	var conflicts []SyncConflict
+
+	for _, remoteFile := range remoteFiles {
+		if remoteFile.IsDir {
+			continue
+		}
+
+		localFile, exists := localFiles[remoteFile.Path]
+		if exists {
+			// 两边都有文件，比较修改时间
+			if remoteFile.Modified.After(localFile.Modified) {
+				// 云端更新
+				conflicts = append(conflicts, SyncConflict{
+					FileName:   filepath.Base(remoteFile.Path),
+					LocalPath:   localFile.Path,
+					LocalTime:   localFile.Modified,
+					RemotePath:  remoteFile.Path,
+					RemoteTime:  remoteFile.Modified,
+					Resolution:  "", // 待解决
+				})
+			}
+		}
+	}
+
+	return conflicts, nil
 }

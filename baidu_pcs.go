@@ -303,7 +303,7 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 	defer resp.Body.Close()
 
 	var createResult map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&createResult); errerr != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&createResult); err != nil {
 		return fmt.Errorf("failed to decode create response: %w", err)
 	}
 
@@ -337,7 +337,7 @@ func (c *BaiduPCSClient) DownloadFile(remotePath, localPath string) error {
 	defer resp.Body.Close()
 
 	var listResult map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&listResult); errerr != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&listResult); err != nil {
 		return fmt.Errorf("failed to decode list response: %w", err)
 	}
 
@@ -376,7 +376,7 @@ func (c *BaiduPCSClient) DownloadFile(remotePath, localPath string) error {
 	defer resp.Body.Close()
 
 	var metaResult map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&metaResult); errerr != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&metaResult); err != nil {
 		return fmt.Errorf("failed to decode meta response: %w", err)
 	}
 
@@ -439,7 +439,7 @@ func (c *BaiduPCSClient) ListFiles(dir string) ([]FileInfo, error) {
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); errerr != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode list response: %w", err)
 	}
 
@@ -450,7 +450,7 @@ func (c *BaiduPCSClient) ListFiles(dir string) ([]FileInfo, error) {
 
 	files := make([]FileInfo, 0, len(fileList))
 	for _, item := range fileList {
-		if fileverMap, ok := item.(map[string]interface{}); ok {
+		if fileMap, ok := item.(map[string]interface{}); ok {
 			file := FileInfo{
 				IsDir: false,
 			}
@@ -517,7 +517,7 @@ func (c *BaiduPCSClient) DeleteFile(path string) error {
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); errerr != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("failed to decode delete response: %w", err)
 	}
 
