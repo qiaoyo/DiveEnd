@@ -3,3 +3,6 @@ frontend/dist
 frontend/node_modules.worktrees/
 node_modules/
 .worktrees/
+baiduyun_token.json
+config/weak_llm.json
+config/strong_llm.json
