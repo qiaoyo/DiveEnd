@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"diveend/config"
+	"github.com/qiaoyo/DiveEnd/src/config"
 )
 
 // Client handles LLM API communication with fault tolerance

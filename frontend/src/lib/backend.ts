@@ -41,6 +41,24 @@ declare global {
             text: string
           ): Promise<TranslationRecord>;
           GetTranslations(paperId: string): Promise<TranslationRecord[]>;
+
+          // Screening API
+          CreateScreeningSession(title: string): Promise<any>;
+          UploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<any>;
+          ExtractPaperContent(sessionId: string): Promise<any>;
+          AnalyzePapers(sessionId: string): Promise<any>;
+          ApplyScreeningChoice(sessionId: string, selectedOptions: string[]): Promise<any>;
+          CompleteScreening(sessionId: string, targetFolderId: string): Promise<any>;
+          ListScreeningSessions(): Promise<any[]>;
+          GetScreeningSession(sessionId: string): Promise<any>;
+          CancelScreening(sessionId: string): Promise<void>;
+
+          // Sync API
+          GetSyncStatus(): Promise<any>;
+          TriggerSync(): Promise<any>;
+          GetSyncProgress(): Promise<any>;
+          GetSyncConflicts(): Promise<any[]>;
+          ResolveSyncConflict(conflictId: string, resolution: 'local' | 'remote'): Promise<void>;
         };
       };
     };
@@ -517,4 +535,147 @@ export async function getTranslations(paperId: string): Promise<TranslationRecor
     return app.GetTranslations(paperId);
   }
   return mockTranslations.get(paperId) ?? [];
+}
+
+// ============ Screening API ============
+
+export async function createScreeningSession(title: string): Promise<any> {
+  const app = runtimeApp();
+  if (app?.CreateScreeningSession) {
+    return app.CreateScreeningSession(title);
+  }
+  return { id: `mock-session-${Date.now()}`, title, status: 'upload' };
+}
+
+export async function uploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<any> {
+  const app = runtimeApp();
+  if (app?.UploadScreeningFiles) {
+    return app.UploadScreeningFiles(sessionId, filePaths);
+  }
+  return { session: { id: sessionId, status: 'extract' }, papers: [] };
+}
+
+export async function extractPaperContent(sessionId: string): Promise<any> {
+  const app = runtimeApp();
+  if (app?.ExtractPaperContent) {
+    return app.ExtractPaperContent(sessionId);
+  }
+
+  // Mock extraction with progress
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve({ status: 'completed', total: 5, completed: 5 });
+    }, 2000);
+  });
+}
+
+export async function analyzePapers(sessionId: string): Promise<any> {
+  const app = runtimeApp();
+  if (app?.AnalyzePapers) {
+    return app.AnalyzePapers(sessionId);
+  }
+
+  return {
+    id: 'node-1',
+    message: 'What research areas are you most interested in?',
+    dimension: 'Research Area',
+    options: [
+      { key: 'ml', label: 'Machine Learning', paperIds: [], count: 15 },
+      { key: 'nlp', label: 'Natural Language Processing', paperIds: [], count: 12 },
+      { key: 'cv', label: 'Computer Vision', paperIds: [], count: 8 },
+      { key: 'rl', label: 'Reinforcement Learning', paperIds: [], count: 5 },
+    ],
+    allowMultiSelect: true,
+  };
+}
+
+export async function applyScreeningChoice(sessionId: string, selectedOptions: string[]): Promise<any> {
+  const app = runtimeApp();
+  if (app?.ApplyScreeningChoice) {
+    return app.ApplyScreeningChoice(sessionId, selectedOptions);
+  }
+
+  return {
+    id: 'node-2',
+    message: 'What methodology types do you prefer?',
+    dimension: 'Methodology',
+    options: [
+      { key: 'empirical', label: 'Empirical Study', paperIds: [], count: 10 },
+      { key: 'theoretical', label: 'Theoretical Analysis', paperIds: [], count: 8 },
+      { key: 'review', label: 'Survey/Review', paperIds: [], count: 5 },
+    ],
+    allowMultiSelect: true,
+  };
+}
+
+export async function completeScreening(sessionId: string, targetFolderId: string): Promise<any> {
+  const app = runtimeApp();
+  if (app?.CompleteScreening) {
+    return app.CompleteScreening(sessionId, targetFolderId);
+  }
+  return { importedCount: 3 };
+}
+
+export async function listScreeningSessions(): Promise<any[]> {
+  const app = runtimeApp();
+  if (app?.ListScreeningSessions) {
+    return app.ListScreeningSessions();
+  }
+  return [];
+}
+
+export async function getScreeningSession(sessionId: string): Promise<any> {
+  const app = runtimeApp();
+  if (app?.GetScreeningSession) {
+    return app.GetScreeningSession(sessionId);
+  }
+  return { id: sessionId, title: 'Test Session', papers: [] };
+}
+
+export async function cancelScreening(sessionId: string): Promise<void> {
+  const app = runtimeApp();
+  if (app?.CancelScreening) {
+    return app.CancelScreening(sessionId);
+  }
+}
+
+// ============ Sync API ============
+
+export async function getSyncStatus(): Promise<any> {
+  const app = runtimeApp();
+  if (app?.GetSyncStatus) {
+    return app.GetSyncStatus();
+  }
+  return { enabled: false, provider: '', lastSync: null };
+}
+
+export async function triggerSync(): Promise<any> {
+  const app = runtimeApp();
+  if (app?.TriggerSync) {
+    return app.TriggerSync();
+  }
+  return { status: 'completed', filesSynced: 0 };
+}
+
+export async function getSyncProgress(): Promise<any> {
+  const app = runtimeApp();
+  if (app?.GetSyncProgress) {
+    return app.GetSyncProgress();
+  }
+  return { total: 0, completed: 0, currentFile: '' };
+}
+
+export async function getSyncConflicts(): Promise<any[]> {
+  const app = runtimeApp();
+  if (app?.GetSyncConflicts) {
+    return app.GetSyncConflicts();
+  }
+  return [];
+}
+
+export async function resolveSyncConflict(conflictId: string, resolution: 'local' | 'remote'): Promise<void> {
+  const app = runtimeApp();
+  if (app?.ResolveSyncConflict) {
+    return app.ResolveSyncConflict(conflictId, resolution);
+  }
 }

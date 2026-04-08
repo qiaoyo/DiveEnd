@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import * as backend from '../lib/backend';
 
 interface Paper {
   id: string;
@@ -40,62 +41,103 @@ export const Screening: React.FC = () => {
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [screeningHistory, setScreeningHistory] = useState<Array<{ dimension: string; choice: string }>>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [screeningSessionId, setScreeningSessionId] = useState<string | null>(null);
+  const [extractionProgress, setExtractionProgress] = useState<number>(0);
+
+  // 初始化事件监听
+  useEffect(() => {
+    // 监听提取进度事件
+    const handleExtractProgress = (event: any) => {
+      const { progress, current, total } = event.detail;
+      setExtractionProgress(progress);
+      console.log(`提取进度: ${current}/${total} (${Math.round(progress * 100)}%)`);
+    };
+
+    window.addEventListener('extract-progress', handleExtractProgress);
+
+    return () => {
+      window.removeEventListener('extract-progress', handleExtractProgress);
+    };
+  }, []);
+
+  // 创建筛选会话
+  const createScreeningSession = useCallback(async () => {
+    try {
+      const session = await backend.createScreeningSession('New Screening Session');
+      setScreeningSessionId(session.id);
+      return session.id;
+    } catch (error) {
+      console.error('创建筛选会话失败:', error);
+      return null;
+    }
+  }, []);
 
   // File upload handler
   const handleFileUpload = useCallback(async (files: FileList) => {
     setIsProcessing(true);
-    const newPapers: Paper[] = [];
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        newPapers.push({
-          id: `paper-${Date.now()}-${i}`,
-          title: file.name.replace('.pdf', ''),
-          authors: '',
-          abstract: '',
-          year: new Date().getFullYear(),
-          pdfPath: URL.createObjectURL(file),
-          status: 'pending',
-        });
-      }
+    // 创建筛选会话
+    const sessionId = await createScreeningSession();
+    if (!sessionId) {
+      setIsProcessing(false);
+      return;
     }
 
-    setPapers(prev => [...prev, ...newPapers]);
+    // 上传文件
+    const filePaths = Array.from(files).map(file => file.webkitRelativePath || file.name);
+    const result = await backend.uploadScreeningFiles(sessionId, filePaths);
+    setPapers(result.papers);
     setIsProcessing(false);
 
-    if (newPapers.length > 0) {
+    if (result.papers.length > 0) {
       setCurrentStage('extract');
-      // TODO: Trigger extraction process
+      // 触发提取过程
+      triggerExtraction(sessionId);
     }
-  }, []);
+  }, [createScreeningSession]);
 
-  // Mock extraction completion
-  const handleExtractionComplete = useCallback(() => {
-    setPapers(prev => prev.map(p =>
-      p.status === 'extracting' ? { ...p, status: 'extracted' } : p
-    ));
-    setCurrentStage('screen');
-    // TODO: Initialize screening with first decision node
-    initializeScreening();
+  // 触发文件内容提取
+  const triggerExtraction = useCallback(async (sessionId: string) => {
+    try {
+      // 更新 papers 状态为 extracting
+      setPapers(prev => prev.map((p: Paper) => ({ ...p, status: 'extracting' })));
+
+      // 调用提取API
+      const result = await backend.extractPaperContent(sessionId);
+
+      // 更新 papers 状态为 extracted
+      setCurrentStage('screen');
+
+      // 初始化筛选过程
+      initializeScreening(sessionId);
+    } catch (error) {
+      console.error('提取文件内容失败:', error);
+    }
   }, []);
 
   // Initialize screening process
-  const initializeScreening = useCallback(() => {
-    // Mock decision node - in real implementation, this comes from LLM
-    const mockNode: DecisionNode = {
-      id: 'node-1',
-      message: 'What research areas are you most interested in?',
-      dimension: 'Research Area',
-      options: [
-        { key: 'ml', label: 'Machine Learning', paperIds: [], count: 15 },
-        { key: 'nlp', label: 'Natural Language Processing', paperIds: [], count: 12 },
-        { key: 'cv', label: 'Computer Vision', paperIds: [], count: 8 },
-        { key: 'rl', label: 'Reinforcement Learning', paperIds: [], count: 5 },
-      ],
-      allowMultiSelect: true,
-    };
-    setCurrentNode(mockNode);
+  const initializeScreening = useCallback(async (sessionId: string) => {
+    try {
+      // 获取第一个决策节点
+      const decisionTree = await backend.analyzePapers(sessionId);
+      setCurrentNode(decisionTree);
+    } catch (error) {
+      console.error('初始化筛选过程失败:', error);
+      //  fallback 到 mock 节点
+      const mockNode: DecisionNode = {
+        id: 'node-1',
+        message: 'What research areas are you most interested in?',
+        dimension: 'Research Area',
+        options: [
+          { key: 'ml', label: 'Machine Learning', paperIds: [], count: 15 },
+          { key: 'nlp', label: 'Natural Language Processing', paperIds: [], count: 12 },
+          { key: 'cv', label: 'Computer Vision', paperIds: [], count: 8 },
+          { key: 'rl', label: 'Reinforcement Learning', paperIds: [], count: 5 },
+        ],
+        allowMultiSelect: true,
+      };
+      setCurrentNode(mockNode);
+    }
   }, []);
 
   // Handle option selection
@@ -109,8 +151,8 @@ export const Screening: React.FC = () => {
   }, []);
 
   // Handle continue to next node
-  const handleContinue = useCallback(() => {
-    if (!currentNode || selectedOptions.length === 0) return;
+  const handleContinue = useCallback(async () => {
+    if (!currentNode || selectedOptions.length === 0 || !screeningSessionId) return;
 
     // Record history
     setScreeningHistory(prev => [
@@ -121,27 +163,43 @@ export const Screening: React.FC = () => {
       },
     ]);
 
-    // Check if we should continue or finish
-    if (screeningHistory.length >= 2) {
-      // Finish screening
-      setCurrentStage('results');
-    } else {
-      // Generate next node (mock)
-      const nextNode: DecisionNode = {
-        id: `node-${screeningHistory.length + 2}`,
-        message: 'What methodology types do you prefer?',
-        dimension: 'Methodology',
-        options: [
-          { key: 'empirical', label: 'Empirical Study', paperIds: [], count: 10 },
-          { key: 'theoretical', label: 'Theoretical Analysis', paperIds: [], count: 8 },
-          { key: 'review', label: 'Survey/Review', paperIds: [], count: 5 },
-        ],
-        allowMultiSelect: true,
-      };
-      setCurrentNode(nextNode);
-      setSelectedOptions([]);
+    try {
+      // 提交当前节点的选择并获取下一个节点
+      const nextNode = await backend.applyScreeningChoice(screeningSessionId, selectedOptions);
+
+      // 检查是否是完成节点
+      if (nextNode.message.includes('筛选完成')) {
+        // 完成筛选
+        const results = await backend.completeScreening(screeningSessionId, '');
+        setSelectedPapers(new Set(results.map((p: any) => p.id)));
+        setCurrentStage('results');
+      } else {
+        // 显示下一个节点
+        setCurrentNode(nextNode);
+        setSelectedOptions([]);
+      }
+    } catch (error) {
+      console.error('提交筛选选择失败:', error);
+      // fallback 到 mock 逻辑
+      if (screeningHistory.length >= 2) {
+        setCurrentStage('results');
+      } else {
+        const nextNode: DecisionNode = {
+          id: `node-${screeningHistory.length + 2}`,
+          message: 'What methodology types do you prefer?',
+          dimension: 'Methodology',
+          options: [
+            { key: 'empirical', label: 'Empirical Study', paperIds: [], count: 10 },
+            { key: 'theoretical', label: 'Theoretical Analysis', paperIds: [], count: 8 },
+            { key: 'review', label: 'Survey/Review', paperIds: [], count: 5 },
+          ],
+          allowMultiSelect: true,
+        };
+        setCurrentNode(nextNode);
+        setSelectedOptions([]);
+      }
     }
-  }, [currentNode, selectedOptions, screeningHistory]);
+  }, [currentNode, selectedOptions, screeningSessionId, screeningHistory]);
 
   // Render upload stage
   const renderUploadStage = () => (
@@ -185,14 +243,19 @@ export const Screening: React.FC = () => {
 
       <div className="max-w-md mx-auto">
         <div className="bg-gray-200 rounded-full h-2 mb-4">
-          <div className="bg-blue-500 h-2 rounded-full animate-pulse" style={{ width: '60%' }} />
+          <div
+            className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+            style={{ width: `${Math.round(extractionProgress * 100)}%` }}
+          />
         </div>
-        <p className="text-sm text-gray-500">Processing paper 3 of 5...</p>
+        <p className="text-sm text-gray-500">
+          Processing {Math.round(extractionProgress * papers.length)} of {papers.length} papers...
+        </p>
       </div>
 
       {/* Mock completion button for testing */}
       <button
-        onClick={handleExtractionComplete}
+        onClick={() => setCurrentStage('screen')}
         className="mt-8 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
       >
         (Test) Complete Extraction
