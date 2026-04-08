@@ -35,6 +35,7 @@ type BaiduCloudConfig struct {
 
 type AppConfig struct {
 	LLM                   LLMConfig        `json:"llm"`
+	WeakLLM               LLMConfig        `json:"weakLLM"`
 	Search                SearchAPIConfig  `json:"search"`
 	BaiduCloud            BaiduCloudConfig `json:"baiduCloud"`
 	Theme                 string           `json:"theme"`
@@ -52,6 +53,15 @@ type AppConfig struct {
 type SaveConfigResult struct {
 	Config          AppConfig `json:"config"`
 	RestartRequired bool      `json:"restartRequired"`
+}
+
+type ConfigSecretPrefill struct {
+	StrongLLMAPIKey    string `json:"strongLLMApiKey,omitempty"`
+	HasStrongLLMAPIKey bool   `json:"hasStrongLLMApiKey"`
+	WeakLLMAPIKey      string `json:"weakLLMApiKey,omitempty"`
+	HasWeakLLMAPIKey   bool   `json:"hasWeakLLMApiKey"`
+	BaiduToken         string `json:"baiduToken,omitempty"`
+	HasBaiduToken      bool   `json:"hasBaiduToken"`
 }
 
 type InitialState struct {
@@ -156,6 +166,27 @@ type SearchPaper struct {
 	URL      string   `json:"url"`
 	Category string   `json:"category"`
 	Tags     []string `json:"tags"`
+	Source   string   `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
+}
+
+type SearchSourceStatus struct {
+	Name    string `json:"name"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+	Count   int    `json:"count"`
+}
+
+type EnhancedSearchResult struct {
+	Papers      []SearchPaper        `json:"papers"`
+	Total       int                  `json:"total"`
+	HasMore     bool                 `json:"hasMore"`
+	Sources     []SearchSourceStatus `json:"sources"`
+	Query       string               `json:"query"`
+	Limit       int                  `json:"limit"`
+	Offset      int                  `json:"offset"`
+	YearStart   int                  `json:"yearStart,omitempty"`
+	YearEnd     int                  `json:"yearEnd,omitempty"`
+	SortBy      string               `json:"sortBy,omitempty"`
 }
 
 type DeepStartSessionSummary struct {

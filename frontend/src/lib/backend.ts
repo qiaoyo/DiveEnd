@@ -1,8 +1,10 @@
 import type {
   AppConfig,
+  ConfigSecretPrefill,
   DeepStartAnalysis,
   DeepStartSessionDetail,
   DeepStartSessionSummary,
+  EnhancedSearchResult,
   Folder,
   InitialState,
   Paper,
@@ -12,14 +14,25 @@ import type {
 } from '../types';
 import { defaultConfig, defaultInitialState } from '../types';
 
+declare const __DIVEEND_ROOT__: string;
+
 declare global {
   interface Window {
     go?: {
       main?: {
         App?: {
           GetInitialState(): Promise<InitialState>;
+          GetSecretPrefill(): Promise<ConfigSecretPrefill>;
           SaveConfig(config: AppConfig): Promise<SaveConfigResult>;
           SearchPapers(query: string, limit: number): Promise<SearchPaper[]>;
+          EnhancedSearchPapers(
+            query: string,
+            limit: number,
+            offset: number,
+            yearStart: number,
+            yearEnd: number,
+            sortBy: string
+          ): Promise<EnhancedSearchResult>;
           ListDeepStartSessions(): Promise<DeepStartSessionSummary[]>;
           GetDeepStartSession(sessionId: string): Promise<DeepStartSessionDetail>;
           StartDeepStartSession(prompt: string, targetFolderId: string): Promise<DeepStartSessionDetail>;
@@ -67,6 +80,110 @@ declare global {
 
 const runtimeApp = () => window.go?.main?.App;
 
+const emptySecretPrefill: ConfigSecretPrefill = {
+  strongLLMApiKey: '',
+  hasStrongLLMApiKey: false,
+  weakLLMApiKey: '',
+  hasWeakLLMApiKey: false,
+  baiduToken: '',
+  hasBaiduToken: false,
+};
+
+type MockLLMSeed = {
+  provider?: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+};
+
+type MockBaiduSeed = {
+  access_token?: string;
+};
+
+function normalizeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeAnalysis(analysis: DeepStartAnalysis | null | undefined): DeepStartAnalysis | null {
+  if (!analysis) {
+    return null;
+  }
+
+  return {
+    ...analysis,
+    directions: normalizeArray(analysis.directions),
+    paperNotes: normalizeArray(analysis.paperNotes),
+    followUpQuestions: normalizeArray(analysis.followUpQuestions),
+    suggestedQueries: normalizeArray(analysis.suggestedQueries),
+    recommendedPaperIds: normalizeArray(analysis.recommendedPaperIds),
+  };
+}
+
+function normalizeSessionDetail(
+  detail: DeepStartSessionDetail | null | undefined,
+): DeepStartSessionDetail | null {
+  if (!detail) {
+    return null;
+  }
+
+  return {
+    ...detail,
+    messages: normalizeArray(detail.messages),
+    currentResults: normalizeArray(detail.currentResults),
+    currentAnalysis: normalizeAnalysis(detail.currentAnalysis),
+    selectedPaperIds: normalizeArray(detail.selectedPaperIds),
+  };
+}
+
+function normalizeConfig(config: Partial<AppConfig> | null | undefined): AppConfig {
+  return {
+    ...defaultConfig,
+    ...config,
+    llm: {
+      ...defaultConfig.llm,
+      ...config?.llm,
+    },
+    weakLLM: {
+      ...defaultConfig.weakLLM,
+      ...config?.weakLLM,
+    },
+    search: {
+      ...defaultConfig.search,
+      ...config?.search,
+    },
+    baiduCloud: {
+      ...defaultConfig.baiduCloud,
+      ...config?.baiduCloud,
+    },
+  };
+}
+
+function normalizeSecretPrefill(
+  prefill: Partial<ConfigSecretPrefill> | null | undefined,
+): ConfigSecretPrefill {
+  return {
+    strongLLMApiKey: prefill?.strongLLMApiKey?.trim() ?? '',
+    hasStrongLLMApiKey: Boolean(prefill?.hasStrongLLMApiKey || prefill?.strongLLMApiKey?.trim()),
+    weakLLMApiKey: prefill?.weakLLMApiKey?.trim() ?? '',
+    hasWeakLLMApiKey: Boolean(prefill?.hasWeakLLMApiKey || prefill?.weakLLMApiKey?.trim()),
+    baiduToken: prefill?.baiduToken?.trim() ?? '',
+    hasBaiduToken: Boolean(prefill?.hasBaiduToken || prefill?.baiduToken?.trim()),
+  };
+}
+
+function normalizeInitialState(state: Partial<InitialState> | null | undefined): InitialState {
+  return {
+    ...defaultInitialState,
+    ...state,
+    config: normalizeConfig(state?.config),
+    folders: normalizeArray(state?.folders),
+    papers: normalizeArray(state?.papers),
+    activeFolderId: state?.activeFolderId ?? '',
+    deepStartSessions: normalizeArray(state?.deepStartSessions),
+    activeDeepStartSession: normalizeSessionDetail(state?.activeDeepStartSession),
+  };
+}
+
 const mockFolders: Folder[] = [
   {
     id: 'mock-inbox',
@@ -88,6 +205,12 @@ function redactConfig(config: AppConfig): AppConfig {
       ...config.llm,
       apiKey: '',
       hasApiKey: config.llm.apiKey.trim().length > 0 || config.llm.hasApiKey,
+      clearApiKey: false,
+    },
+    weakLLM: {
+      ...config.weakLLM,
+      apiKey: '',
+      hasApiKey: config.weakLLM.apiKey.trim().length > 0 || config.weakLLM.hasApiKey,
       clearApiKey: false,
     },
     search: {
@@ -118,6 +241,7 @@ const sampleSearchResults: SearchPaper[] = [
     url: 'https://arxiv.org/abs/2403.10001',
     category: 'code agent',
     tags: ['agent', 'software engineering'],
+    source: 'mock',
   },
   {
     id: '2402.20002',
@@ -130,6 +254,7 @@ const sampleSearchResults: SearchPaper[] = [
     url: 'https://arxiv.org/abs/2402.20002',
     category: 'paper reading',
     tags: ['survey', 'reading assistant'],
+    source: 'mock',
   },
 ];
 
@@ -147,12 +272,172 @@ function mockInitialState(): InitialState {
   };
 }
 
+function normalizeMockConfigWithSeeds(
+  config: AppConfig,
+  strongSeed: MockLLMSeed | null,
+  weakSeed: MockLLMSeed | null,
+  baiduSeed: MockBaiduSeed | null,
+): AppConfig {
+  const nextConfig: AppConfig = {
+    ...config,
+    llm: {
+      ...config.llm,
+    },
+    weakLLM: {
+      ...config.weakLLM,
+    },
+    search: {
+      ...config.search,
+    },
+    baiduCloud: {
+      ...config.baiduCloud,
+    },
+  };
+
+  if (strongSeed) {
+    const baseUrl = strongSeed.base_url?.trim() ?? '';
+    const model = strongSeed.model?.trim() ?? '';
+    const apiKey = strongSeed.api_key?.trim() ?? '';
+    const provider = strongSeed.provider?.trim().toLowerCase() ?? '';
+
+    if (provider === 'anthropic') {
+      nextConfig.llm.providerType = 'anthropic';
+      nextConfig.llm.providerId = 'anthropic';
+      nextConfig.llm.providerName = 'Anthropic';
+      nextConfig.llm.wireApi = 'anthropic_messages';
+      nextConfig.llm.requiresOpenAIAuth = false;
+    } else {
+      nextConfig.llm.providerType = 'openai_compatible';
+      nextConfig.llm.wireApi = 'responses';
+      nextConfig.llm.requiresOpenAIAuth = true;
+
+      if (baseUrl.includes('duckcoding.ai')) {
+        nextConfig.llm.providerId = 'duckcoding';
+        nextConfig.llm.providerName = 'DuckCoding';
+      } else if (baseUrl.includes('ark.cn-beijing.volces.com')) {
+        nextConfig.llm.providerId = 'volcengine-coding';
+        nextConfig.llm.providerName = 'Volcengine Coding';
+      }
+    }
+
+    if (baseUrl) {
+      nextConfig.llm.baseUrl = baseUrl;
+    }
+    if (model) {
+      nextConfig.llm.model = model;
+    }
+    if (apiKey) {
+      nextConfig.llm.apiKey = apiKey;
+      nextConfig.llm.hasApiKey = true;
+    }
+  }
+
+  if (weakSeed) {
+    const baseUrl = weakSeed.base_url?.trim() ?? '';
+    const model = weakSeed.model?.trim() ?? '';
+    const apiKey = weakSeed.api_key?.trim() ?? '';
+    const provider = weakSeed.provider?.trim().toLowerCase() ?? '';
+
+    if (provider === 'anthropic') {
+      nextConfig.weakLLM.providerType = 'anthropic';
+      nextConfig.weakLLM.providerId = 'weak-anthropic';
+      nextConfig.weakLLM.providerName = 'Weak Anthropic';
+      nextConfig.weakLLM.wireApi = 'anthropic_messages';
+      nextConfig.weakLLM.requiresOpenAIAuth = false;
+    } else {
+      nextConfig.weakLLM.providerType = 'openai_compatible';
+      nextConfig.weakLLM.wireApi = 'responses';
+      nextConfig.weakLLM.requiresOpenAIAuth = true;
+
+      if (baseUrl.includes('duckcoding.ai')) {
+        nextConfig.weakLLM.providerId = 'weak-duckcoding';
+        nextConfig.weakLLM.providerName = 'Weak DuckCoding';
+      } else if (baseUrl.includes('ark.cn-beijing.volces.com')) {
+        nextConfig.weakLLM.providerId = 'weak-volcengine-coding';
+        nextConfig.weakLLM.providerName = 'Weak Volcengine Coding';
+      }
+    }
+
+    if (baseUrl) {
+      nextConfig.weakLLM.baseUrl = baseUrl;
+    }
+    if (model) {
+      nextConfig.weakLLM.model = model;
+    }
+    if (apiKey) {
+      nextConfig.weakLLM.apiKey = apiKey;
+      nextConfig.weakLLM.hasApiKey = true;
+    }
+  }
+
+  const baiduToken = baiduSeed?.access_token?.trim() ?? '';
+  if (baiduToken) {
+    nextConfig.baiduCloud.enabled = true;
+    nextConfig.baiduCloud.token = baiduToken;
+    nextConfig.baiduCloud.hasToken = true;
+  }
+
+  return normalizeConfig(nextConfig);
+}
+
+async function fetchMockJSON<T>(relativePath: string): Promise<T | null> {
+  if (!import.meta.env.DEV || !__DIVEEND_ROOT__) {
+    return null;
+  }
+
+  const root = __DIVEEND_ROOT__.replace(/\\/g, '/').replace(/\/$/, '');
+  const url = `/@fs${encodeURI(`${root}/${relativePath}`)}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function loadMockSecretPrefill(): Promise<ConfigSecretPrefill> {
+  const [strongSeed, weakSeed, baiduSeed] = await Promise.all([
+    fetchMockJSON<MockLLMSeed>('config/strong_llm.json'),
+    fetchMockJSON<MockLLMSeed>('config/weak_llm.json'),
+    fetchMockJSON<MockBaiduSeed>('baiduyun_token.json'),
+  ]);
+
+  return normalizeSecretPrefill({
+    strongLLMApiKey: strongSeed?.api_key ?? '',
+    hasStrongLLMApiKey: Boolean(strongSeed?.api_key?.trim()),
+    weakLLMApiKey: weakSeed?.api_key ?? '',
+    hasWeakLLMApiKey: Boolean(weakSeed?.api_key?.trim()),
+    baiduToken: baiduSeed?.access_token ?? '',
+    hasBaiduToken: Boolean(baiduSeed?.access_token?.trim()),
+  });
+}
+
 export async function getInitialState(): Promise<InitialState> {
   const app = runtimeApp();
   if (app?.GetInitialState) {
-    return app.GetInitialState();
+    return normalizeInitialState(await app.GetInitialState());
   }
+
+  const [strongSeed, weakSeed, baiduSeed] = await Promise.all([
+    fetchMockJSON<MockLLMSeed>('config/strong_llm.json'),
+    fetchMockJSON<MockLLMSeed>('config/weak_llm.json'),
+    fetchMockJSON<MockBaiduSeed>('baiduyun_token.json'),
+  ]);
+  mockConfig = normalizeMockConfigWithSeeds(mockConfig, strongSeed, weakSeed, baiduSeed);
   return mockInitialState();
+}
+
+export async function getSecretPrefill(): Promise<ConfigSecretPrefill> {
+  const app = runtimeApp();
+  if (app?.GetSecretPrefill) {
+    return normalizeSecretPrefill(await app.GetSecretPrefill());
+  }
+
+  return loadMockSecretPrefill();
 }
 
 export async function saveConfig(config: AppConfig): Promise<SaveConfigResult> {
@@ -167,7 +452,7 @@ export async function saveConfig(config: AppConfig): Promise<SaveConfigResult> {
 export async function searchPapers(query: string, limit: number): Promise<SearchPaper[]> {
   const app = runtimeApp();
   if (app?.SearchPapers) {
-    return app.SearchPapers(query, limit);
+    return normalizeArray(await app.SearchPapers(query, limit));
   }
 
   const normalized = query.trim().toLowerCase();
@@ -178,6 +463,46 @@ export async function searchPapers(query: string, limit: number): Promise<Search
     })
     .slice(0, limit);
 }
+
+// 新增：增强搜索API
+export async function searchPapersEnhanced(
+  query: string,
+  limit: number = 100,
+  offset: number = 0,
+  yearStart?: number,
+  yearEnd?: number,
+  sortBy?: 'relevance' | 'year_desc' | 'year_asc'
+): Promise<EnhancedSearchResult> {
+  const app = runtimeApp();
+  if (app?.EnhancedSearchPapers) {
+    const result = await app.EnhancedSearchPapers(query, limit, offset, yearStart || 0, yearEnd || 0, sortBy || 'relevance');
+    return {
+      query: result.query,
+      limit: result.limit,
+      offset: result.offset,
+      total: result.total,
+      hasMore: result.hasMore,
+      papers: normalizeArray(result.papers),
+      sources: result.sources,
+      yearStart: result.yearStart,
+      yearEnd: result.yearEnd,
+      sortBy: result.sortBy,
+    };
+  }
+
+  // 降级到普通搜索
+  const papers = await searchPapers(query, limit);
+  return {
+    query,
+    limit,
+    offset,
+    total: papers.length,
+    hasMore: false,
+    papers,
+    sources: [{ name: 'mock', success: true, count: papers.length }],
+  };
+}
+
 
 function buildMockDeepStartAnalysis(query: string, results: SearchPaper[]): DeepStartAnalysis {
   const recommendedPaperIds = results.slice(0, 2).map((paper) => paper.id);
@@ -245,7 +570,7 @@ function upsertMockDeepStartSession(detail: DeepStartSessionDetail) {
 export async function listDeepStartSessions(): Promise<DeepStartSessionSummary[]> {
   const app = runtimeApp();
   if (app?.ListDeepStartSessions) {
-    return app.ListDeepStartSessions();
+    return normalizeArray(await app.ListDeepStartSessions());
   }
   return [...mockDeepStartSessions];
 }
@@ -253,7 +578,12 @@ export async function listDeepStartSessions(): Promise<DeepStartSessionSummary[]
 export async function getDeepStartSession(sessionId: string): Promise<DeepStartSessionDetail> {
   const app = runtimeApp();
   if (app?.GetDeepStartSession) {
-    return app.GetDeepStartSession(sessionId);
+    const detail = await app.GetDeepStartSession(sessionId);
+    const normalized = normalizeSessionDetail(detail);
+    if (!normalized) {
+      throw new Error('会话不存在');
+    }
+    return normalized;
   }
 
   const detail = mockDeepStartDetails.get(sessionId);
@@ -269,7 +599,12 @@ export async function startDeepStartSession(
 ): Promise<DeepStartSessionDetail> {
   const app = runtimeApp();
   if (app?.StartDeepStartSession) {
-    return app.StartDeepStartSession(prompt, targetFolderId);
+    const detail = await app.StartDeepStartSession(prompt, targetFolderId);
+    const normalized = normalizeSessionDetail(detail);
+    if (!normalized) {
+      throw new Error('创建探索会话失败');
+    }
+    return normalized;
   }
 
   const currentResults = await searchPapers(prompt, 20);
@@ -315,7 +650,12 @@ export async function replyDeepStartSession(
 ): Promise<DeepStartSessionDetail> {
   const app = runtimeApp();
   if (app?.ReplyDeepStartSession) {
-    return app.ReplyDeepStartSession(sessionId, message);
+    const detail = await app.ReplyDeepStartSession(sessionId, message);
+    const normalized = normalizeSessionDetail(detail);
+    if (!normalized) {
+      throw new Error('会话不存在');
+    }
+    return normalized;
   }
 
   const existing = mockDeepStartDetails.get(sessionId);
@@ -356,7 +696,12 @@ export async function rerunDeepStartSearch(
 ): Promise<DeepStartSessionDetail> {
   const app = runtimeApp();
   if (app?.RerunDeepStartSearch) {
-    return app.RerunDeepStartSearch(sessionId, query);
+    const detail = await app.RerunDeepStartSearch(sessionId, query);
+    const normalized = normalizeSessionDetail(detail);
+    if (!normalized) {
+      throw new Error('会话不存在');
+    }
+    return normalized;
   }
 
   const existing = mockDeepStartDetails.get(sessionId);
@@ -407,7 +752,12 @@ export async function updateDeepStartSelections(
 ): Promise<DeepStartSessionDetail> {
   const app = runtimeApp();
   if (app?.UpdateDeepStartSelections) {
-    return app.UpdateDeepStartSelections(sessionId, selectedPaperIds, targetFolderId);
+    const detail = await app.UpdateDeepStartSelections(sessionId, selectedPaperIds, targetFolderId);
+    const normalized = normalizeSessionDetail(detail);
+    if (!normalized) {
+      throw new Error('会话不存在');
+    }
+    return normalized;
   }
 
   const existing = mockDeepStartDetails.get(sessionId);
@@ -432,7 +782,7 @@ export async function updateDeepStartSelections(
 export async function getFolders(): Promise<Folder[]> {
   const app = runtimeApp();
   if (app?.GetFolders) {
-    return app.GetFolders();
+    return normalizeArray(await app.GetFolders());
   }
   return [...mockFolders];
 }
@@ -460,7 +810,7 @@ export async function createFolder(name: string): Promise<Folder> {
 export async function getPapers(folderId: string): Promise<Paper[]> {
   const app = runtimeApp();
   if (app?.GetPapers) {
-    return app.GetPapers(folderId);
+    return normalizeArray(await app.GetPapers(folderId));
   }
   return mockPapers.filter((paper) => paper.folderId === folderId);
 }
@@ -468,7 +818,7 @@ export async function getPapers(folderId: string): Promise<Paper[]> {
 export async function importPapers(folderId: string, papers: SearchPaper[]): Promise<Paper[]> {
   const app = runtimeApp();
   if (app?.ImportPapers) {
-    return app.ImportPapers(folderId, papers);
+    return normalizeArray(await app.ImportPapers(folderId, papers));
   }
 
   const imported = papers.map<Paper>((paper) => ({
@@ -532,7 +882,7 @@ export async function translatePaperSection(
 export async function getTranslations(paperId: string): Promise<TranslationRecord[]> {
   const app = runtimeApp();
   if (app?.GetTranslations) {
-    return app.GetTranslations(paperId);
+    return normalizeArray(await app.GetTranslations(paperId));
   }
   return mockTranslations.get(paperId) ?? [];
 }

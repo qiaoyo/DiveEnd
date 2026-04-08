@@ -113,6 +113,21 @@ func (a *App) SaveConfig(config AppConfig) (*SaveConfigResult, error) {
 	}, nil
 }
 
+func (a *App) GetSecretPrefill() (*ConfigSecretPrefill, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+
+	return &ConfigSecretPrefill{
+		StrongLLMAPIKey:    a.config.LLM.APIKey,
+		HasStrongLLMAPIKey: strings.TrimSpace(a.config.LLM.APIKey) != "",
+		WeakLLMAPIKey:      a.config.WeakLLM.APIKey,
+		HasWeakLLMAPIKey:   strings.TrimSpace(a.config.WeakLLM.APIKey) != "",
+		BaiduToken:         a.config.BaiduCloud.Token,
+		HasBaiduToken:      strings.TrimSpace(a.config.BaiduCloud.Token) != "",
+	}, nil
+}
+
 func (a *App) SearchPapers(query string, limit int) ([]SearchPaper, error) {
 	if err := a.ensureReady(); err != nil {
 		return nil, err
@@ -122,6 +137,34 @@ func (a *App) SearchPapers(query string, limit int) ([]SearchPaper, error) {
 	}
 
 	return a.search.Search(query, limit)
+}
+
+// EnhancedSearchPapers 增强版搜索API，支持多源、分页、过滤
+func (a *App) EnhancedSearchPapers(query string, limit int, offset int, yearStart int, yearEnd int, sortBy string) (*EnhancedSearchResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	if a.search == nil {
+		return nil, fmt.Errorf("search not initialized")
+	}
+
+	// 参数验证和默认值
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query cannot be empty")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// 调用增强搜索
+	return a.search.EnhancedSearch(query, limit, offset, yearStart, yearEnd, sortBy)
 }
 
 func (a *App) GetFolders() ([]Folder, error) {
@@ -276,4 +319,3 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.db = db
 	return nil
 }
-

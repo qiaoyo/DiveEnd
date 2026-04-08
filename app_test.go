@@ -42,6 +42,24 @@ func (f *fakeSearch) Search(query string, limit int) ([]SearchPaper, error) {
 	return nil, fmt.Errorf("query not found: %s", query)
 }
 
+func (f *fakeSearch) EnhancedSearch(query string, limit int, offset int, yearStart int, yearEnd int, sortBy string) (*EnhancedSearchResult, error) {
+	f.calls = append(f.calls, query)
+	if results, ok := f.results[query]; ok {
+		return &EnhancedSearchResult{
+			Query:   query,
+			Limit:   limit,
+			Offset:  offset,
+			Total:   len(results),
+			HasMore: offset+limit < len(results),
+			Papers:  results,
+			Sources: []SearchSourceStatus{
+				{Name: "test", Success: true, Count: len(results)},
+			},
+		}, nil
+	}
+	return nil, fmt.Errorf("query not found: %s", query)
+}
+
 func TestAppSaveConfigPersistsAndSignalsRestart(t *testing.T) {
 	useTestConfigPath(t)
 
@@ -54,6 +72,12 @@ func TestAppSaveConfigPersistsAndSignalsRestart(t *testing.T) {
 	initialConfig.LLM.BaseURL = "https://api.duckcoding.ai/v1"
 	initialConfig.LLM.APIKey = "initial-key"
 	initialConfig.LLM.Model = "gpt-5.3-codex"
+	initialConfig.WeakLLM = defaultOpenAICompatibleLLMConfig()
+	initialConfig.WeakLLM.ProviderID = "duckcoding-lite"
+	initialConfig.WeakLLM.ProviderName = "DuckCoding Lite"
+	initialConfig.WeakLLM.BaseURL = "https://api.duckcoding.ai/v1"
+	initialConfig.WeakLLM.APIKey = "weak-initial-key"
+	initialConfig.WeakLLM.Model = "gpt-4o-mini"
 	if err := app.applyConfig(initialConfig, true); err != nil {
 		t.Fatalf("applyConfig() error = %v", err)
 	}
@@ -63,6 +87,7 @@ func TestAppSaveConfigPersistsAndSignalsRestart(t *testing.T) {
 	nextConfig.Theme = "dark"
 	nextConfig.DataPath = t.TempDir()
 	nextConfig.LLM.APIKey = ""
+	nextConfig.WeakLLM.APIKey = ""
 	nextConfig.LLM.ReasoningEffort = "xhigh"
 
 	result, err := app.SaveConfig(nextConfig)
@@ -91,6 +116,9 @@ func TestAppSaveConfigPersistsAndSignalsRestart(t *testing.T) {
 	}
 	if loaded.LLM.APIKey != "initial-key" {
 		t.Fatalf("expected empty save payload to preserve existing api key, got %q", loaded.LLM.APIKey)
+	}
+	if loaded.WeakLLM.APIKey != "weak-initial-key" {
+		t.Fatalf("expected empty weak llm save payload to preserve existing api key, got %q", loaded.WeakLLM.APIKey)
 	}
 	if loaded.LLM.ReasoningEffort != "xhigh" {
 		t.Fatalf("expected reasoning effort to persist, got %q", loaded.LLM.ReasoningEffort)

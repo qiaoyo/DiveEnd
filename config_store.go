@@ -7,6 +7,17 @@ import (
 	"strings"
 )
 
+type llmSeedConfig struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	APIKey   string `json:"api_key"`
+	BaseURL  string `json:"base_url"`
+}
+
+type baiduTokenSeed struct {
+	AccessToken string `json:"access_token"`
+}
+
 var configPathOverride string
 var userConfigDirFunc = os.UserConfigDir
 var userHomeDirFunc = os.UserHomeDir
@@ -36,6 +47,14 @@ func defaultOpenAICompatibleLLMConfig() LLMConfig {
 	}
 }
 
+func defaultWeakLLMConfig() LLMConfig {
+	config := defaultOpenAICompatibleLLMConfig()
+	config.ProviderID = "weak-llm"
+	config.ProviderName = "Weak LLM"
+	config.Model = "gpt-4o-mini"
+	return config
+}
+
 func defaultAppConfig() AppConfig {
 	homeDir, err := userHomeDirFunc()
 	if err != nil || strings.TrimSpace(homeDir) == "" {
@@ -44,6 +63,7 @@ func defaultAppConfig() AppConfig {
 
 	return AppConfig{
 		LLM:             defaultAnthropicLLMConfig(),
+		WeakLLM:         defaultWeakLLMConfig(),
 		Search:          SearchAPIConfig{},
 		Theme:           "light",
 		LeftPanelWidth:  280,
@@ -60,6 +80,11 @@ func normalizeAppConfig(config AppConfig) AppConfig {
 	defaults := defaultAppConfig()
 	config = migrateLegacyConfig(config)
 	config.LLM = normalizeLLMConfig(config.LLM)
+	if strings.TrimSpace(config.WeakLLM.ProviderType) == "" && strings.TrimSpace(config.WeakLLM.ProviderID) == "" && strings.TrimSpace(config.WeakLLM.Model) == "" && strings.TrimSpace(config.WeakLLM.BaseURL) == "" {
+		config.WeakLLM = defaults.WeakLLM
+	} else {
+		config.WeakLLM = normalizeLLMConfig(config.WeakLLM)
+	}
 	config.Search = normalizeSearchAPIConfig(config.Search)
 	config.BaiduCloud = normalizeBaiduCloudConfig(config.BaiduCloud)
 	if config.Theme != "dark" && config.Theme != "light" {
@@ -183,6 +208,12 @@ func mergeAppConfigSecrets(existing AppConfig, incoming AppConfig) AppConfig {
 		merged.LLM.APIKey = existing.LLM.APIKey
 	}
 
+	if incoming.WeakLLM.ClearAPIKey {
+		merged.WeakLLM.APIKey = ""
+	} else if strings.TrimSpace(incoming.WeakLLM.APIKey) == "" {
+		merged.WeakLLM.APIKey = existing.WeakLLM.APIKey
+	}
+
 	if incoming.Search.ClearSemanticScholarAPIKey {
 		merged.Search.SemanticScholarAPIKey = ""
 	} else if strings.TrimSpace(incoming.Search.SemanticScholarAPIKey) == "" {
@@ -201,6 +232,7 @@ func mergeAppConfigSecrets(existing AppConfig, incoming AppConfig) AppConfig {
 func sanitizeAppConfig(config AppConfig) AppConfig {
 	safe := normalizeAppConfig(config)
 	safe.LLM.APIKey = ""
+	safe.WeakLLM.APIKey = ""
 	safe.Search.SemanticScholarAPIKey = ""
 	safe.BaiduCloud.Token = ""
 	return safe
@@ -209,7 +241,7 @@ func sanitizeAppConfig(config AppConfig) AppConfig {
 func LoadAppConfig() (AppConfig, error) {
 	configPath := getConfigPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return defaultAppConfig(), nil
+		return loadBootstrapConfig(), nil
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -222,7 +254,7 @@ func LoadAppConfig() (AppConfig, error) {
 		return AppConfig{}, err
 	}
 
-	return normalizeAppConfig(config), nil
+	return mergeSeedSecrets(normalizeAppConfig(config)), nil
 }
 
 func SaveAppConfig(config AppConfig) error {
@@ -250,4 +282,158 @@ func getConfigPath() string {
 	}
 
 	return filepath.Join(configDir, "DiveEnd", "config.json")
+}
+
+func loadBootstrapConfig() AppConfig {
+	config := defaultAppConfig()
+
+	if seed, ok := readStrongLLMSeed(); ok {
+		config.LLM = llmConfigFromSeed(seed)
+	}
+
+	if seed, ok := readWeakLLMSeed(); ok {
+		config.WeakLLM = llmConfigFromSeed(seed)
+	}
+
+	if token, ok := readBaiduTokenSeed(); ok {
+		config.BaiduCloud.Enabled = true
+		config.BaiduCloud.Token = token
+	}
+
+	return normalizeAppConfig(config)
+}
+
+func mergeSeedSecrets(config AppConfig) AppConfig {
+	if seed, ok := readStrongLLMSeed(); ok {
+		config.LLM = mergeLLMSeedConfig(config.LLM, seed)
+	}
+
+	if seed, ok := readWeakLLMSeed(); ok {
+		config.WeakLLM = mergeLLMSeedConfig(config.WeakLLM, seed)
+	}
+
+	if token, ok := readBaiduTokenSeed(); ok {
+		if strings.TrimSpace(config.BaiduCloud.Token) == "" {
+			config.BaiduCloud.Token = token
+		}
+		if !config.BaiduCloud.Enabled {
+			config.BaiduCloud.Enabled = true
+		}
+	}
+
+	return normalizeAppConfig(config)
+}
+
+func readStrongLLMSeed() (llmSeedConfig, bool) {
+	return readLLMSeed(filepath.Join("config", "strong_llm.json"))
+}
+
+func readWeakLLMSeed() (llmSeedConfig, bool) {
+	return readLLMSeed(filepath.Join("config", "weak_llm.json"))
+}
+
+func readLLMSeed(path string) (llmSeedConfig, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return llmSeedConfig{}, false
+	}
+
+	var seed llmSeedConfig
+	if err := json.Unmarshal(data, &seed); err != nil {
+		return llmSeedConfig{}, false
+	}
+
+	if strings.TrimSpace(seed.BaseURL) == "" && strings.TrimSpace(seed.APIKey) == "" && strings.TrimSpace(seed.Model) == "" {
+		return llmSeedConfig{}, false
+	}
+
+	return seed, true
+}
+
+func readBaiduTokenSeed() (string, bool) {
+	data, err := os.ReadFile("baiduyun_token.json")
+	if err != nil {
+		return "", false
+	}
+
+	var seed baiduTokenSeed
+	if err := json.Unmarshal(data, &seed); err != nil {
+		return "", false
+	}
+
+	token := strings.TrimSpace(seed.AccessToken)
+	return token, token != ""
+}
+
+func llmConfigFromSeed(seed llmSeedConfig) LLMConfig {
+	provider := strings.TrimSpace(strings.ToLower(seed.Provider))
+	baseURL := strings.TrimSpace(seed.BaseURL)
+	model := strings.TrimSpace(seed.Model)
+	apiKey := strings.TrimSpace(seed.APIKey)
+
+	if provider == "anthropic" {
+		config := defaultAnthropicLLMConfig()
+		if baseURL != "" {
+			config.BaseURL = baseURL
+		}
+		if model != "" {
+			config.Model = model
+		}
+		config.APIKey = apiKey
+		return normalizeLLMConfig(config)
+	}
+
+	config := defaultOpenAICompatibleLLMConfig()
+	if strings.Contains(baseURL, "duckcoding.ai") {
+		config.ProviderID = "duckcoding"
+		config.ProviderName = "DuckCoding"
+	} else if strings.Contains(baseURL, "ark.cn-beijing.volces.com") {
+		config.ProviderID = "volcengine-coding"
+		config.ProviderName = "Volcengine Coding"
+	}
+	if baseURL != "" {
+		config.BaseURL = baseURL
+	}
+	if model != "" {
+		config.Model = model
+	}
+	config.APIKey = apiKey
+	return normalizeLLMConfig(config)
+}
+
+func mergeLLMSeedConfig(config LLMConfig, seed llmSeedConfig) LLMConfig {
+	seedConfig := llmConfigFromSeed(seed)
+
+	if strings.TrimSpace(config.ProviderType) == "" {
+		config.ProviderType = seedConfig.ProviderType
+	}
+	if strings.TrimSpace(config.ProviderID) == "" {
+		config.ProviderID = seedConfig.ProviderID
+	}
+	if strings.TrimSpace(config.ProviderName) == "" {
+		config.ProviderName = seedConfig.ProviderName
+	}
+	if strings.TrimSpace(config.BaseURL) == "" {
+		config.BaseURL = seedConfig.BaseURL
+	}
+	if strings.TrimSpace(config.WireAPI) == "" {
+		config.WireAPI = seedConfig.WireAPI
+	}
+	if strings.TrimSpace(config.Model) == "" {
+		config.Model = seedConfig.Model
+	}
+	if strings.TrimSpace(config.APIKey) == "" {
+		config.APIKey = seedConfig.APIKey
+	}
+	if strings.TrimSpace(config.ReasoningEffort) == "" {
+		config.ReasoningEffort = seedConfig.ReasoningEffort
+	}
+	if !config.RequiresOpenAIAuth {
+		config.RequiresOpenAIAuth = seedConfig.RequiresOpenAIAuth
+	}
+	if !config.DisableResponseStorage {
+		config.DisableResponseStorage = seedConfig.DisableResponseStorage
+	}
+
+	return normalizeLLMConfig(config)
 }

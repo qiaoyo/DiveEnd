@@ -10,6 +10,10 @@ func useTestConfigPath(t *testing.T) string {
 	t.Helper()
 
 	tempDir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
 	oldConfigPathOverride := configPathOverride
 	oldUserConfigDirFunc := userConfigDirFunc
 	oldUserHomeDirFunc := userHomeDirFunc
@@ -17,11 +21,15 @@ func useTestConfigPath(t *testing.T) string {
 	configPathOverride = filepath.Join(tempDir, "config.json")
 	userConfigDirFunc = func() (string, error) { return tempDir, nil }
 	userHomeDirFunc = func() (string, error) { return tempDir, nil }
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
 
 	t.Cleanup(func() {
 		configPathOverride = oldConfigPathOverride
 		userConfigDirFunc = oldUserConfigDirFunc
 		userHomeDirFunc = oldUserHomeDirFunc
+		_ = os.Chdir(oldWD)
 	})
 
 	return tempDir
@@ -54,6 +62,12 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	config.LLM.APIKey = "sk-test"
 	config.LLM.Model = "gpt-5.3-codex"
 	config.LLM.ReasoningEffort = "xhigh"
+	config.WeakLLM = defaultOpenAICompatibleLLMConfig()
+	config.WeakLLM.ProviderID = "duckcoding-lite"
+	config.WeakLLM.ProviderName = "DuckCoding Lite"
+	config.WeakLLM.BaseURL = "https://api.duckcoding.ai/v1"
+	config.WeakLLM.APIKey = "sk-weak"
+	config.WeakLLM.Model = "gpt-4o-mini"
 	config.Theme = "dark"
 	config.DataPath = filepath.Join(tempDir, "LibraryData")
 	config.Search.SemanticScholarAPIKey = "semantic-key"
@@ -80,6 +94,12 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.LLM.ReasoningEffort != "xhigh" {
 		t.Fatalf("expected reasoning effort to round-trip, got %q", loaded.LLM.ReasoningEffort)
+	}
+	if loaded.WeakLLM.APIKey != "sk-weak" {
+		t.Fatalf("expected weak llm key to round-trip")
+	}
+	if loaded.WeakLLM.Model != "gpt-4o-mini" {
+		t.Fatalf("expected weak llm model to round-trip, got %q", loaded.WeakLLM.Model)
 	}
 	if loaded.Search.SemanticScholarAPIKey != "semantic-key" {
 		t.Fatalf("expected Semantic Scholar key to round-trip")
@@ -138,6 +158,7 @@ func TestLoadAppConfigMigratesLegacyProviderFields(t *testing.T) {
 func TestSanitizeAppConfigRemovesSecretValues(t *testing.T) {
 	config := defaultAppConfig()
 	config.LLM.APIKey = "secret"
+	config.WeakLLM.APIKey = "weak-secret"
 	config.Search.SemanticScholarAPIKey = "semantic-secret"
 	config.BaiduCloud.Token = "token-secret"
 
@@ -147,6 +168,12 @@ func TestSanitizeAppConfigRemovesSecretValues(t *testing.T) {
 	}
 	if !sanitized.LLM.HasAPIKey {
 		t.Fatal("expected llm api key presence flag to remain true")
+	}
+	if sanitized.WeakLLM.APIKey != "" {
+		t.Fatal("expected weak llm api key to be redacted")
+	}
+	if !sanitized.WeakLLM.HasAPIKey {
+		t.Fatal("expected weak llm api key presence flag to remain true")
 	}
 	if sanitized.Search.SemanticScholarAPIKey != "" {
 		t.Fatal("expected search api key to be redacted")
@@ -171,5 +198,37 @@ func TestLoadAppConfigInvalidJSON(t *testing.T) {
 
 	if _, err := LoadAppConfig(); err == nil {
 		t.Fatal("expected invalid JSON to return an error")
+	}
+}
+
+func TestLoadAppConfigBootstrapsStrongWeakAndBaiduSeeds(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := os.MkdirAll("config", 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "strong_llm.json"), []byte(`{"provider":"anthropic","model":"claude-3-7-sonnet","api_key":"strong-key","base_url":"https://api.anthropic.com/v1"}`), 0600); err != nil {
+		t.Fatalf("WriteFile strong seed error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "weak_llm.json"), []byte(`{"provider":"openai_compatible","model":"gpt-4o-mini","api_key":"weak-key","base_url":"https://api.openai.com/v1"}`), 0600); err != nil {
+		t.Fatalf("WriteFile weak seed error = %v", err)
+	}
+	if err := os.WriteFile("baiduyun_token.json", []byte(`{"access_token":"baidu-seed-token"}`), 0600); err != nil {
+		t.Fatalf("WriteFile baidu seed error = %v", err)
+	}
+
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+
+	if config.LLM.APIKey != "strong-key" {
+		t.Fatalf("expected strong llm key to bootstrap, got %q", config.LLM.APIKey)
+	}
+	if config.WeakLLM.APIKey != "weak-key" {
+		t.Fatalf("expected weak llm key to bootstrap, got %q", config.WeakLLM.APIKey)
+	}
+	if config.BaiduCloud.Token != "baidu-seed-token" {
+		t.Fatalf("expected baidu token to bootstrap, got %q", config.BaiduCloud.Token)
 	}
 }

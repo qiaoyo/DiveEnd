@@ -6,11 +6,17 @@ export function CreateFolder(arg1:string):Promise<main.Folder>;
 
 export function DeletePaper(arg1:string):Promise<void>;
 
+export function EnhancedSearchPapers(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number,arg6:string):Promise<main.EnhancedSearchResult>;
+
+export function GetDeepStartSession(arg1:string):Promise<main.DeepStartSessionDetail>;
+
 export function GetFolders():Promise<Array<main.Folder>>;
 
 export function GetInitialState():Promise<main.InitialState>;
 
 export function GetPapers(arg1:string):Promise<Array<main.Paper>>;
+
+export function GetSecretPrefill():Promise<main.ConfigSecretPrefill>;
 
 export function GetTranslations(arg1:string):Promise<Array<main.TranslationRecord>>;
 
@@ -18,8 +24,18 @@ export function Greet(arg1:string):Promise<string>;
 
 export function ImportPapers(arg1:string,arg2:Array<main.SearchPaper>):Promise<Array<main.Paper>>;
 
+export function ListDeepStartSessions():Promise<Array<main.DeepStartSessionSummary>>;
+
+export function ReplyDeepStartSession(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
+
+export function RerunDeepStartSearch(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
+
 export function SaveConfig(arg1:main.AppConfig):Promise<main.SaveConfigResult>;
 
 export function SearchPapers(arg1:string,arg2:number):Promise<Array<main.SearchPaper>>;
 
+export function StartDeepStartSession(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
+
 export function TranslatePaperSection(arg1:string,arg2:string,arg3:string):Promise<main.TranslationRecord>;
+
+export function UpdateDeepStartSelections(arg1:string,arg2:Array<string>,arg3:string):Promise<main.DeepStartSessionDetail>;

@@ -10,6 +10,14 @@ export function DeletePaper(arg1) {
   return window['go']['main']['App']['DeletePaper'](arg1);
 }
 
+export function EnhancedSearchPapers(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['EnhancedSearchPapers'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function GetDeepStartSession(arg1) {
+  return window['go']['main']['App']['GetDeepStartSession'](arg1);
+}
+
 export function GetFolders() {
   return window['go']['main']['App']['GetFolders']();
 }
@@ -20,6 +28,10 @@ export function GetInitialState() {
 
 export function GetPapers(arg1) {
   return window['go']['main']['App']['GetPapers'](arg1);
+}
+
+export function GetSecretPrefill() {
+  return window['go']['main']['App']['GetSecretPrefill']();
 }
 
 export function GetTranslations(arg1) {
@@ -34,6 +46,18 @@ export function ImportPapers(arg1, arg2) {
   return window['go']['main']['App']['ImportPapers'](arg1, arg2);
 }
 
+export function ListDeepStartSessions() {
+  return window['go']['main']['App']['ListDeepStartSessions']();
+}
+
+export function ReplyDeepStartSession(arg1, arg2) {
+  return window['go']['main']['App']['ReplyDeepStartSession'](arg1, arg2);
+}
+
+export function RerunDeepStartSearch(arg1, arg2) {
+  return window['go']['main']['App']['RerunDeepStartSearch'](arg1, arg2);
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
@@ -42,6 +66,14 @@ export function SearchPapers(arg1, arg2) {
   return window['go']['main']['App']['SearchPapers'](arg1, arg2);
 }
 
+export function StartDeepStartSession(arg1, arg2) {
+  return window['go']['main']['App']['StartDeepStartSession'](arg1, arg2);
+}
+
 export function TranslatePaperSection(arg1, arg2, arg3) {
   return window['go']['main']['App']['TranslatePaperSection'](arg1, arg2, arg3);
+}
+
+export function UpdateDeepStartSelections(arg1, arg2, arg3) {
+  return window['go']['main']['App']['UpdateDeepStartSelections'](arg1, arg2, arg3);
 }

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Cloud, RefreshCw, Settings2, ShieldAlert } from 'lucide-react';
 
 interface SyncStatus {
   enabled: boolean;
@@ -26,7 +27,6 @@ export const Sync: React.FC = () => {
     pendingFiles: 0,
     conflicts: 0,
   });
-
   const [syncHistory, setSyncHistory] = useState<SyncHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -34,18 +34,16 @@ export const Sync: React.FC = () => {
     autoSync: true,
     syncOnStartup: true,
     syncInterval: 30,
-    conflictResolution: 'manual', // 'manual' | 'local' | 'remote' | 'timestamp'
+    conflictResolution: 'manual',
   });
 
-  // Mock loading sync status
   useEffect(() => {
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setSyncStatus({
         enabled: true,
         provider: 'baidu_cloud',
-        lastSync: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+        lastSync: new Date(Date.now() - 3600000).toISOString(),
         syncInProgress: false,
         pendingFiles: 3,
         conflicts: 1,
@@ -74,26 +72,10 @@ export const Sync: React.FC = () => {
         },
       ]);
       setIsLoading(false);
-    }, 1000);
+    }, 600);
+
+    return () => window.clearTimeout(timer);
   }, []);
-
-  const handleSyncNow = async () => {
-    setSyncStatus(prev => ({ ...prev, syncInProgress: true }));
-    // TODO: Call backend sync API
-    setTimeout(() => {
-      setSyncStatus(prev => ({
-        ...prev,
-        syncInProgress: false,
-        lastSync: new Date().toISOString(),
-        pendingFiles: 0,
-      }));
-    }, 3000);
-  };
-
-  const handleResolveConflict = (itemId: string) => {
-    // TODO: Open conflict resolution dialog
-    console.log('Resolve conflict:', itemId);
-  };
 
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -103,227 +85,224 @@ export const Sync: React.FC = () => {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffMins < 1) return '刚刚';
+    if (diffMins < 60) return `${diffMins} 分钟前`;
+    if (diffHours < 24) return `${diffHours} 小时前`;
+    if (diffDays < 7) return `${diffDays} 天前`;
     return date.toLocaleDateString();
   };
 
+  const handleSyncNow = async () => {
+    setSyncStatus((prev) => ({ ...prev, syncInProgress: true }));
+    window.setTimeout(() => {
+      setSyncStatus((prev) => ({
+        ...prev,
+        syncInProgress: false,
+        lastSync: new Date().toISOString(),
+        pendingFiles: 0,
+      }));
+    }, 2000);
+  };
+
+  const statusCards = [
+    { label: '同步提供方', value: syncStatus.provider.replace('_', ' '), accent: '' },
+    { label: '最近同步', value: syncStatus.lastSync ? formatTimestamp(syncStatus.lastSync) : '从未同步', accent: '' },
+    { label: '待处理文件', value: String(syncStatus.pendingFiles), accent: '' },
+    {
+      label: '冲突数量',
+      value: String(syncStatus.conflicts),
+      accent: syncStatus.conflicts > 0 ? 'text-rose-600 dark:text-rose-300' : '',
+    },
+  ];
+
   if (isLoading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading sync status...</p>
+      <div className="flex h-full min-h-0 items-center justify-center bg-[#f9f6f0] p-8 dark:bg-[#141414]">
+        <div className="rounded-[2rem] border border-stone-200 bg-white/80 px-8 py-10 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
+          <RefreshCw className="mx-auto mb-4 h-10 w-10 animate-spin text-emerald-600" />
+          <p className="text-sm text-stone-500 dark:text-stone-400">正在加载同步状态...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full p-6 overflow-auto">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-2">Cloud Sync</h1>
-        <p className="text-gray-600 mb-6">
-          Synchronize your papers and data with Baidu Cloud.
-        </p>
-
-        {/* Status Card */}
-        <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className={`w-3 h-3 rounded-full ${syncStatus.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
-              <h2 className="text-lg font-semibold">
-                {syncStatus.enabled ? 'Sync Enabled' : 'Sync Disabled'}
-              </h2>
-            </div>
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
-            >
-              Settings
-            </button>
+    <div className="flex h-full min-h-0 flex-col bg-[#f9f6f0] dark:bg-[#141414]">
+      <div className="border-b border-stone-200 p-6 dark:border-stone-800">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <Cloud className="h-5 w-5 text-emerald-600" />
+              Sync - 云同步
+            </h2>
+            <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+              当前页面先聚焦状态可视化与凭据落位，真实同步链路仍在整理中。
+            </p>
           </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <div className="text-sm text-gray-600">Provider</div>
-              <div className="font-medium capitalize">{syncStatus.provider.replace('_', ' ')}</div>
-            </div>
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <div className="text-sm text-gray-600">Last Sync</div>
-              <div className="font-medium">
-                {syncStatus.lastSync ? formatTimestamp(syncStatus.lastSync) : 'Never'}
-              </div>
-            </div>
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <div className="text-sm text-gray-600">Pending Files</div>
-              <div className="font-medium">{syncStatus.pendingFiles}</div>
-            </div>
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <div className="text-sm text-gray-600">Conflicts</div>
-              <div className={`font-medium ${syncStatus.conflicts > 0 ? 'text-red-600' : ''}`}>
-                {syncStatus.conflicts}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={handleSyncNow}
-              disabled={syncStatus.syncInProgress || !syncStatus.enabled}
-              className="flex-1 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-            >
-              {syncStatus.syncInProgress ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Syncing...
-                </>
-              ) : (
-                'Sync Now'
-              )}
-            </button>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-            >
-              Configure
-            </button>
-          </div>
+          <button
+            onClick={() => setShowSettings(true)}
+            className="inline-flex items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
+          >
+            <Settings2 className="h-4 w-4" />
+            同步设置
+          </button>
         </div>
+      </div>
 
-        {/* Sync History */}
-        <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">Recent Activity</h2>
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        <div className="mx-auto max-w-5xl space-y-6">
+          <div className="rounded-[2rem] border border-stone-200 bg-white/80 p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-3">
+                  <span className={`h-3 w-3 rounded-full ${syncStatus.enabled ? 'bg-emerald-500' : 'bg-stone-400'}`} />
+                  <p className="text-lg font-semibold">{syncStatus.enabled ? '同步已启用' : '同步未启用'}</p>
+                </div>
+                <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">
+                  目前仅保存百度网盘凭据与策略；真正的增量同步与冲突处理仍处于过渡开发阶段。
+                </p>
+              </div>
+              <button
+                onClick={() => void handleSyncNow()}
+                disabled={syncStatus.syncInProgress || !syncStatus.enabled}
+                className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncStatus.syncInProgress ? 'animate-spin' : ''}`} />
+                {syncStatus.syncInProgress ? '同步中...' : '立即同步'}
+              </button>
+            </div>
 
-          {syncHistory.length === 0 ? (
-            <p className="text-gray-500 text-center py-4">No recent activity</p>
-          ) : (
-            <div className="space-y-2">
-              {syncHistory.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">
-                      {item.type === 'upload' && '⬆️'}
-                      {item.type === 'download' && '⬇️'}
-                      {item.type === 'conflict' && '⚠️'}
-                    </span>
-                    <div>
-                      <div className="font-medium">{item.fileName}</div>
-                      <div className="text-sm text-gray-500 capitalize">
-                        {item.type} • {formatTimestamp(item.timestamp)}
+            <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {statusCards.map((item) => (
+                <div key={item.label} className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
+                  <div className="text-xs uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">{item.label}</div>
+                  <div className={`mt-2 text-base font-semibold capitalize ${item.accent}`}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-stone-200 bg-white/80 p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5 text-amber-500" />
+              <h3 className="text-lg font-semibold">当前已知限制</h3>
+            </div>
+            <ul className="mt-4 space-y-2 text-sm leading-7 text-stone-600 dark:text-stone-300">
+              <li>真实同步任务、冲突解决弹窗和后端状态回传仍未闭环。</li>
+              <li>此页当前更适合作为“状态仪表盘”和“后续接入占位”，不应误解为已完成的同步产品。</li>
+              <li>百度网盘 token 已在设置栏统一管理，这里不再重复暴露敏感字段。</li>
+            </ul>
+          </div>
+
+          <div className="rounded-[2rem] border border-stone-200 bg-white/80 p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
+            <h3 className="text-lg font-semibold">最近活动</h3>
+            {syncHistory.length === 0 ? (
+              <div className="mt-4 rounded-2xl border border-dashed border-stone-300 bg-stone-50/80 p-6 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-400">
+                暂无同步活动记录。
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {syncHistory.map((item) => (
+                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">
+                          {item.type === 'upload' && '⬆️'}
+                          {item.type === 'download' && '⬇️'}
+                          {item.type === 'conflict' && '⚠️'}
+                        </span>
+                        <p className="truncate font-medium">{item.fileName}</p>
                       </div>
+                      <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+                        {item.type} · {formatTimestamp(item.timestamp)}
+                      </p>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
                     <span
-                      className={`px-2 py-1 rounded text-sm capitalize ${
+                      className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
                         item.status === 'success'
-                          ? 'bg-green-100 text-green-800'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
                           : item.status === 'failed'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-yellow-100 text-yellow-800'
+                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
                       }`}
                     >
                       {item.status}
                     </span>
-                    {item.type === 'conflict' && item.status === 'pending' && (
-                      <button
-                        onClick={() => handleResolveConflict(item.id)}
-                        className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
-                      >
-                        Resolve
-                      </button>
-                    )}
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+      </div>
 
-        {/* Settings Modal */}
-        {showSettings && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold mb-4">Sync Settings</h2>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="font-medium">Enable Auto-Sync</label>
-                  <input
-                    type="checkbox"
-                    checked={syncSettings.autoSync}
-                    onChange={(e) => setSyncSettings(prev => ({ ...prev, autoSync: e.target.checked }))}
-                    className="w-5 h-5"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <label className="font-medium">Sync on Startup</label>
-                  <input
-                    type="checkbox"
-                    checked={syncSettings.syncOnStartup}
-                    onChange={(e) => setSyncSettings(prev => ({ ...prev, syncOnStartup: e.target.checked }))}
-                    className="w-5 h-5"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-medium mb-1">Sync Interval (minutes)</label>
-                  <input
-                    type="number"
-                    value={syncSettings.syncInterval}
-                    onChange={(e) => setSyncSettings(prev => ({ ...prev, syncInterval: parseInt(e.target.value) }))}
-                    min="5"
-                    max="1440"
-                    className="w-full px-3 py-2 border rounded"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-medium mb-1">Conflict Resolution</label>
-                  <select
-                    value={syncSettings.conflictResolution}
-                    onChange={(e) => setSyncSettings(prev => ({ ...prev, conflictResolution: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded"
-                  >
-                    <option value="manual">Manual (Ask me)</option>
-                    <option value="local">Always use local version</option>
-                    <option value="remote">Always use remote version</option>
-                    <option value="timestamp">Use newest by timestamp</option>
-                  </select>
-                </div>
+      {showSettings && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-lg rounded-[2rem] border border-stone-200 bg-white p-6 shadow-xl dark:border-stone-800 dark:bg-stone-900">
+            <h3 className="text-lg font-semibold">同步策略</h3>
+            <div className="mt-5 space-y-4">
+              <div className="flex items-center justify-between rounded-2xl border border-stone-200 px-4 py-3 dark:border-stone-800">
+                <span className="font-medium">自动同步</span>
+                <input
+                  type="checkbox"
+                  checked={syncSettings.autoSync}
+                  onChange={(event) => setSyncSettings((prev) => ({ ...prev, autoSync: event.target.checked }))}
+                  className="h-5 w-5"
+                />
               </div>
-
-              <div className="flex justify-end gap-2 mt-6">
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    // TODO: Save settings to backend
-                    setShowSettings(false);
-                  }}
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                >
-                  Save Settings
-                </button>
+              <div className="flex items-center justify-between rounded-2xl border border-stone-200 px-4 py-3 dark:border-stone-800">
+                <span className="font-medium">启动时同步</span>
+                <input
+                  type="checkbox"
+                  checked={syncSettings.syncOnStartup}
+                  onChange={(event) => setSyncSettings((prev) => ({ ...prev, syncOnStartup: event.target.checked }))}
+                  className="h-5 w-5"
+                />
               </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">同步间隔（分钟）</label>
+                <input
+                  type="number"
+                  min="5"
+                  max="1440"
+                  value={syncSettings.syncInterval}
+                  onChange={(event) =>
+                    setSyncSettings((prev) => ({ ...prev, syncInterval: Number(event.target.value) || 30 }))
+                  }
+                  className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-950"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">冲突处理策略</label>
+                <select
+                  value={syncSettings.conflictResolution}
+                  onChange={(event) => setSyncSettings((prev) => ({ ...prev, conflictResolution: event.target.value }))}
+                  className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-950"
+                >
+                  <option value="manual">手动确认</option>
+                  <option value="local">优先本地版本</option>
+                  <option value="remote">优先远端版本</option>
+                  <option value="timestamp">按更新时间判断</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="rounded-2xl border border-stone-200 px-4 py-2 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+              >
+                关闭
+              </button>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="rounded-2xl bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+              >
+                保存占位设置
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

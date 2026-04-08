@@ -29,6 +29,7 @@ export interface BaiduCloudConfig {
 
 export interface AppConfig {
   llm: LLMConfig;
+  weakLLM: LLMConfig;
   search: SearchAPIConfig;
   baiduCloud: BaiduCloudConfig;
   theme: 'light' | 'dark';
@@ -69,6 +70,27 @@ export interface SearchPaper {
   url: string;
   category: string;
   tags: string[];
+  source: string; // 'semantic_scholar' | 'arxiv' | 'arxiv_sanity'
+}
+
+export interface SearchSourceStatus {
+  name: string;
+  success: boolean;
+  error?: string;
+  count: number;
+}
+
+export interface EnhancedSearchResult {
+  papers: SearchPaper[];
+  total: number;
+  hasMore: boolean;
+  sources: SearchSourceStatus[];
+  query: string;
+  limit: number;
+  offset: number;
+  yearStart?: number;
+  yearEnd?: number;
+  sortBy?: string;
 }
 
 export interface SearchResult {
@@ -173,6 +195,15 @@ export interface SaveConfigResult {
   restartRequired: boolean;
 }
 
+export interface ConfigSecretPrefill {
+  strongLLMApiKey: string;
+  hasStrongLLMApiKey: boolean;
+  weakLLMApiKey: string;
+  hasWeakLLMApiKey: boolean;
+  baiduToken: string;
+  hasBaiduToken: boolean;
+}
+
 export type Panel = 'deepstart' | 'deepread' | 'screening' | 'sync';
 
 export interface AppState {
@@ -208,6 +239,20 @@ export const defaultConfig: AppConfig = {
     apiKey: '',
     hasApiKey: false,
     model: 'claude-3-5-sonnet-20241022',
+    reasoningEffort: '',
+    disableResponseStorage: true,
+    clearApiKey: false,
+  },
+  weakLLM: {
+    providerId: 'weak-llm',
+    providerName: 'Weak LLM',
+    providerType: 'openai_compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    wireApi: 'responses',
+    requiresOpenAIAuth: true,
+    apiKey: '',
+    hasApiKey: false,
+    model: 'gpt-4o-mini',
     reasoningEffort: '',
     disableResponseStorage: true,
     clearApiKey: false,

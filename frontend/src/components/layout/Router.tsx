@@ -5,12 +5,14 @@ export function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/deepstart" replace />} />
+        <Route path="/" element={<AppLayout />} />
+        <Route path="/history" element={<AppLayout />} />
         <Route path="/deepstart" element={<AppLayout />} />
+        <Route path="/session/:sessionId" element={<AppLayout />} />
         <Route path="/deepread" element={<AppLayout />} />
         <Route path="/screening" element={<AppLayout />} />
         <Route path="/sync" element={<AppLayout />} />
-        <Route path="*" element={<Navigate to="/deepstart" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

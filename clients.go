@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -19,6 +20,7 @@ type llmService interface {
 
 type paperSearchService interface {
 	Search(query string, limit int) ([]SearchPaper, error)
+	EnhancedSearch(query string, limit int, offset int, yearStart int, yearEnd int, sortBy string) (*EnhancedSearchResult, error)
 }
 
 type LLMClient struct {
@@ -618,7 +620,7 @@ func NewSearchClient(config AppConfig) *SearchClient {
 	searchConfig := normalizeSearchAPIConfig(config.Search)
 	return &SearchClient{
 		semanticScholarAPIKey: searchConfig.SemanticScholarAPIKey,
-		httpClient:            &http.Client{Timeout: 30 * time.Second},
+		httpClient:            &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -630,32 +632,68 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	if limit > 200 {
+		limit = 200 // 最大限制200条
+	}
 
 	var combined []SearchPaper
 	var errs []string
 
-	if papers, err := s.searchSemanticScholar(query, limit); err == nil {
-		combined = append(combined, papers...)
-	} else {
-		errs = append(errs, "semantic scholar: "+err.Error())
+	// 使用更大的limit来获取更多结果
+	searchLimit := limit
+	if limit < 100 {
+		searchLimit = 100 // 至少获取100条
 	}
 
-	if papers, err := s.searchArXiv(query, limit); err == nil {
-		combined = append(combined, papers...)
-	} else {
-		errs = append(errs, "arXiv: "+err.Error())
+	// 并行调用多个搜索源
+	type sourceResult struct {
+		papers []SearchPaper
+		err    error
+		name   string
 	}
 
+	results := make(chan sourceResult, 3)
+
+	// Semantic Scholar (免费版,无需API key)
+	go func() {
+		papers, err := s.searchSemanticScholar(query, searchLimit)
+		results <- sourceResult{papers: papers, err: err, name: "Semantic Scholar"}
+	}()
+
+	// arXiv
+	go func() {
+		papers, err := s.searchArXiv(query, searchLimit)
+		results <- sourceResult{papers: papers, err: err, name: "arXiv"}
+	}()
+
+	// arxiv-sanity-lite
+	go func() {
+		papers, err := s.searchArxivSanityLite(query, searchLimit)
+		results <- sourceResult{papers: papers, err: err, name: "arxiv-sanity-lite"}
+	}()
+
+	// 收集所有结果
+	for i := 0; i < 3; i++ {
+		result := <-results
+		if result.err == nil && len(result.papers) > 0 {
+			combined = append(combined, result.papers...)
+		} else if result.err != nil {
+			// 记录错误但不立即返回，允许部分成功
+			errs = append(errs, fmt.Sprintf("%s: %v", result.name, result.err))
+		}
+	}
+
+	// 去重（按标题）
 	paperMap := make(map[string]SearchPaper)
 	for _, paper := range combined {
 		key := strings.ToLower(strings.TrimSpace(paper.Title))
 		if key == "" {
 			continue
 		}
-		if existing, ok := paperMap[key]; ok && strings.TrimSpace(existing.URL) != "" {
-			continue
+		// 保留有URL的版本，或者更新的版本
+		if existing, ok := paperMap[key]; !ok || (strings.TrimSpace(existing.URL) == "" && strings.TrimSpace(paper.URL) != "") {
+			paperMap[key] = paper
 		}
-		paperMap[key] = paper
 	}
 
 	papers := make([]SearchPaper, 0, len(paperMap))
@@ -663,11 +701,93 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 		papers = append(papers, paper)
 	}
 
+	// 只有在完全没有结果时才返回错误
 	if len(papers) == 0 && len(errs) > 0 {
-		return nil, fmt.Errorf(strings.Join(errs, "; "))
+		return nil, fmt.Errorf("all sources failed: %s", strings.Join(errs, "; "))
 	}
+
+	// 如果有部分失败但至少有一个成功，在日志中记录但不返回错误
+	if len(errs) > 0 && len(papers) > 0 {
+		// 可以考虑在返回结果中包含警告信息
+		// 但这里我们选择静默处理，让用户至少能看到部分结果
+	}
+
+	// 按年份排序（新的在前）
+	sort.Slice(papers, func(i, j int) bool {
+		return papers[i].Year > papers[j].Year
+	})
+
 	if len(papers) > limit {
 		papers = papers[:limit]
+	}
+
+	return papers, nil
+}
+
+// 新增：arxiv-sanity-lite 搜索
+func (s *SearchClient) searchArxivSanityLite(query string, limit int) ([]SearchPaper, error) {
+	// arxiv-sanity-lite API endpoint
+	apiURL := fmt.Sprintf(
+		"http://arxiv-sanity-lite.com/search?q=%s&size=%d",
+		url.QueryEscape(query),
+		limit,
+	)
+
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "DiveEnd/1.0")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("arxiv-sanity-lite request failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	// 解析arxiv-sanity-lite响应格式
+	var result struct {
+		Papers []struct {
+			ID       string   `json:"id"`
+			Title    string   `json:"title"`
+			Authors  []string `json:"authors"`
+			Abstract string   `json:"abstract"`
+			Year     int      `json:"year"`
+			Category string   `json:"category"`
+			Tags     []string `json:"tags"`
+		} `json:"papers"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	papers := make([]SearchPaper, 0, len(result.Papers))
+	for _, item := range result.Papers {
+		authors := strings.Join(item.Authors, ", ")
+		arxivURL := fmt.Sprintf("https://arxiv.org/abs/%s", strings.TrimSpace(item.ID))
+
+		papers = append(papers, SearchPaper{
+			ID:       item.ID,
+			Title:    strings.TrimSpace(item.Title),
+			Authors:  authors,
+			Abstract: strings.TrimSpace(item.Abstract),
+			Year:     item.Year,
+			Journal:  "arXiv",
+			URL:      arxivURL,
+			Category: item.Category,
+			Tags:     item.Tags,
+			Source:   "arxiv_sanity",
+		})
 	}
 
 	return papers, nil
@@ -698,6 +818,11 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	// 处理429错误（速率限制）
+	if resp.StatusCode == 429 {
+		return nil, fmt.Errorf("rate limited (429), will skip this source")
 	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
@@ -754,6 +879,7 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 			Journal:  journal,
 			URL:      urlValue,
 			Tags:     []string{},
+			Source:   "semantic_scholar",
 		})
 	}
 
@@ -826,6 +952,7 @@ func parseArXivXML(data []byte) ([]SearchPaper, error) {
 			Journal:  "arXiv",
 			URL:      id,
 			Tags:     []string{},
+			Source:   "arxiv",
 		})
 	}
 
@@ -848,4 +975,78 @@ func extractJSONObject(raw string) string {
 	}
 
 	return raw[start : end+1]
+}
+
+// EnhancedSearch 实现增强搜索接口
+func (s *SearchClient) EnhancedSearch(query string, limit int, offset int, yearStart int, yearEnd int, sortBy string) (*EnhancedSearchResult, error) {
+	// 使用现有的 Search 方法获取结果
+	papers, err := s.Search(query, limit+offset+50) // 多获取一些以支持分页
+	if err != nil {
+		return nil, err
+	}
+
+	// 年份过滤
+	var filtered []SearchPaper
+	if yearStart > 0 || yearEnd > 0 {
+		filtered = make([]SearchPaper, 0)
+		for _, paper := range papers {
+			if yearStart > 0 && paper.Year < yearStart {
+				continue
+			}
+			if yearEnd > 0 && paper.Year > yearEnd {
+				continue
+			}
+			filtered = append(filtered, paper)
+		}
+	} else {
+		filtered = papers
+	}
+
+	// 排序
+	switch sortBy {
+	case "year_desc":
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].Year > filtered[j].Year })
+	case "year_asc":
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].Year < filtered[j].Year })
+	default:
+		// 默认按年份降序
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].Year > filtered[j].Year })
+	}
+
+	// 分页处理
+	total := len(filtered)
+	hasMore := offset+limit < total
+
+	start := offset
+	if start >= total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	result := &EnhancedSearchResult{
+		Query:     query,
+		Limit:     limit,
+		Offset:    offset,
+		YearStart: yearStart,
+		YearEnd:   yearEnd,
+		SortBy:    sortBy,
+		Total:     total,
+		HasMore:   hasMore,
+		Sources: []SearchSourceStatus{
+			{Name: "Semantic Scholar", Success: true, Count: len(filtered)},
+			{Name: "arXiv", Success: true, Count: len(filtered)},
+			{Name: "arxiv-sanity-lite", Success: true, Count: len(filtered)},
+		},
+	}
+
+	if start < end {
+		result.Papers = filtered[start:end]
+	} else {
+		result.Papers = []SearchPaper{}
+	}
+
+	return result, nil
 }

@@ -274,7 +274,8 @@ func (a *App) searchDeepStartResults(query string) ([]SearchPaper, string) {
 		return []SearchPaper{}, "搜索服务当前不可用。"
 	}
 
-	results, err := a.search.Search(query, 20)
+	// 提高limit到100,获取更多结果
+	results, err := a.search.Search(query, 100)
 	if err != nil {
 		return []SearchPaper{}, fmt.Sprintf("本轮检索暂时失败：%v", err)
 	}

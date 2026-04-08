@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { AppLayout } from './components/layout/AppLayout';
+import { AppRouter } from './components/layout/Router';
 import { getInitialState } from './lib/backend';
 import { useAppStore } from './stores/appStore';
 
@@ -39,7 +39,7 @@ function App() {
     }
   }, [theme]);
 
-  return <AppLayout />;
+  return <AppRouter />;
 }
 
 export default App;

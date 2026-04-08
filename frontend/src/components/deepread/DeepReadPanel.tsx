@@ -73,7 +73,7 @@ export function DeepReadPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#f9f6f0] dark:bg-[#141414]">
       <div className="border-b border-stone-200 p-6 dark:border-stone-800">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <BookOpen className="h-5 w-5 text-emerald-600" />
@@ -97,8 +97,8 @@ export function DeepReadPanel() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto border-r border-stone-200 p-6 dark:border-stone-800">
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden">
+        <div className="min-h-0 overflow-y-auto p-6">
           <div className="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
             <p className="text-xs uppercase tracking-[0.2em] text-stone-500 dark:text-stone-400">
               当前论文
@@ -162,7 +162,7 @@ export function DeepReadPanel() {
           </div>
         </div>
 
-        <aside className="w-[380px] max-w-[42%] overflow-y-auto p-6">
+        <aside className="border-t border-stone-200 p-6 dark:border-stone-800">
           <div className="flex items-center gap-2">
             <Languages className="h-5 w-5 text-emerald-600" />
             <h3 className="text-lg font-semibold">翻译历史</h3>

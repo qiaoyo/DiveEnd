@@ -10,6 +10,29 @@
 
 ---
 
+## Current Status Snapshot (Updated 2026-04-08)
+
+> 目的：把“已经做完/正在做/还没做”的状态固化下来，方便下次继续推进。
+
+### Completed (done)
+
+- [x] Config: `AppConfig` 支持强/弱两套 LLM（新增 `weakLLM`），并支持 secrets 合并与脱敏
+- [x] Config seeds: 首次启动可从 `config/strong_llm.json`、`config/weak_llm.json`、`baiduyun_token.json` 预填充
+- [x] Frontend settings: 配置栏优先展示“软件”设置，密钥（强/弱/百度）默认隐藏显示，可手动点亮
+- [x] Theme: 基础深浅色对全局背景/文字生效（`html.dark` 与 `body`）
+- [x] Layout: 三栏容器/DeepStart/DeepRead 补齐 `min-h-0` 与滚动策略，减少缩放遮挡
+- [x] CI smoke: `go test -vet=off ./...` 与 `frontend` 的 `npm run build` 可通过
+
+### In Progress / Not Done Yet
+
+- [ ] Wails dev 空白页问题：仍需结合 Webview 控制台日志与 Wails runtime 注入排查
+- [ ] Screening Pipeline 后端（Phase 5）按计划落地：DB tables、PDF service client、Wails API 绑定、决策树数据结构
+- [ ] PDF Service 全链路闭环：Marker 提取、结构化、翻译流水线 + 错误恢复/重试
+- [ ] Cloud Sync 闭环：百度网盘真实同步、冲突解决、状态回传
+- [ ] UI polish：更系统的响应式策略（窄屏/高 DPI）、分栏最小宽度、溢出处理统一化
+
+---
+
 ## Phase Overview
 
 | Phase | Name | Focus | Key Deliverables |
