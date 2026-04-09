@@ -1,8 +1,17 @@
 build/bin
 frontend/dist
+frontend/node_modules/
 frontend/node_modules.worktrees/
 node_modules/
 .worktrees/
 baiduyun_token.json
 config/weak_llm.json
 config/strong_llm.json
+DiveEnd
+data/diveend.db
+frontend/package.json.md5
+*.bak
+*.tmp
+__pycache__/
+*.pyc
+.pytest_cache/
