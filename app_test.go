@@ -9,6 +9,7 @@ type fakeLLM struct {
 	translated string
 	summary    string
 	analysis   DeepStartAIResponse
+	screening  *ScreeningDecisionNode
 }
 
 func (f fakeLLM) TranslateSection(section, originalText string) (string, string, error) {
@@ -27,6 +28,25 @@ func (f fakeLLM) AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIRespo
 		}
 	}
 	return &response, nil
+}
+
+func (f fakeLLM) AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisionNode, error) {
+	if f.screening != nil {
+		cloned := *f.screening
+		return &cloned, nil
+	}
+	return &ScreeningDecisionNode{
+		ID:        "screen-node-test",
+		NodeType:  "branch",
+		Message:   "按主题继续筛选",
+		Dimension: "主题",
+		Options: []ScreeningDecisionOption{
+			{Key: "core", Label: "核心方向", PaperIDs: []string{request.Papers[0].ID}, Count: 1},
+		},
+		AllowMultiSelect:  true,
+		AllowSkip:         false,
+		RemainingPaperIDs: []string{request.Papers[0].ID},
+	}, nil
 }
 
 type fakeSearch struct {

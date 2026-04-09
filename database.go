@@ -27,6 +27,10 @@ func NewDB(dataPath string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := conn.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		conn.Close()
+		return nil, err
+	}
 
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {

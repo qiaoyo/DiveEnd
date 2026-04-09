@@ -3,22 +3,30 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 // App struct - Main Wails application
 type App struct {
-	ctx    context.Context
-	config AppConfig
-	db     *DB
-	llm    llmService
-	search paperSearchService
+	ctx             context.Context
+	config          AppConfig
+	db              *DB
+	llm             llmService
+	search          paperSearchService
+	pdfService      *PDFServiceClient
+	syncManager     *SyncManager
+	stateMu         sync.RWMutex
+	extractProgress map[string]*ExtractProgress
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{
+		extractProgress: map[string]*ExtractProgress{},
+	}
 }
 
 // startup is called when the app starts
@@ -302,8 +310,12 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.config = normalizeAppConfig(config)
 	a.llm = NewLLMClient(a.config)
 	a.search = NewSearchClient(a.config)
+	a.pdfService = NewPDFServiceClient(defaultPDFServiceURL())
 
 	if !reloadDB {
+		if a.db != nil {
+			a.syncManager = NewSyncManager(a.db, a.config)
+		}
 		return nil
 	}
 
@@ -317,5 +329,13 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 		return err
 	}
 	a.db = db
+	a.syncManager = NewSyncManager(a.db, a.config)
 	return nil
+}
+
+func defaultPDFServiceURL() string {
+	if raw := strings.TrimSpace(os.Getenv("DIVEEND_PDF_SERVICE_URL")); raw != "" {
+		return raw
+	}
+	return "http://127.0.0.1:50051"
 }

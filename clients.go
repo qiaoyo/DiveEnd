@@ -16,6 +16,7 @@ import (
 type llmService interface {
 	TranslateSection(section, originalText string) (translated string, summary string, err error)
 	AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error)
+	AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisionNode, error)
 }
 
 type paperSearchService interface {
@@ -73,6 +74,12 @@ type DeepStartAIRequest struct {
 type DeepStartAIResponse struct {
 	Title    string
 	Analysis DeepStartAnalysis
+}
+
+type ScreeningAIRequest struct {
+	SessionTitle string
+	Papers       []ScreeningPaper
+	PathHistory  []PathHistoryItem
 }
 
 func (c *LLMClient) TranslateSection(section, originalText string) (translated string, summary string, err error) {
@@ -218,6 +225,96 @@ Context:
 		Title:    normalizeDeepStartTitle(parsed.Title, request.RootPrompt, request.CurrentQuery),
 		Analysis: analysis,
 	}, nil
+}
+
+func (c *LLMClient) AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisionNode, error) {
+	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
+		return nil, fmt.Errorf("missing API key for %s", c.providerLabel())
+	}
+	if strings.TrimSpace(c.model) == "" {
+		return nil, fmt.Errorf("missing model for %s", c.providerLabel())
+	}
+
+	payload := map[string]any{
+		"sessionTitle": request.SessionTitle,
+		"pathHistory":  request.PathHistory,
+		"papers":       request.Papers,
+	}
+	contextJSON, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := fmt.Sprintf(`
+You are helping with a paper screening workflow for an academic reading tool.
+
+You will receive:
+- the session title
+- the previous screening choices
+- a candidate paper set with IDs, titles, abstracts, authors and extracted structure
+
+Your task:
+- Propose the next screening branch that best narrows the paper set.
+- Prefer meaningful academic dimensions such as topic, method, task, benchmark, data domain, or paper type.
+- Return 2-6 options.
+- Every option must reference only paper IDs from the provided papers.
+- Options should partition the current paper set as cleanly as possible.
+- Use concise Chinese copy for the message and option labels.
+
+Return valid JSON only with this exact shape:
+{
+  "message": "下一轮给用户看的问题",
+  "dimension": "筛选维度名称",
+  "allowMultiSelect": true,
+  "allowSkip": false,
+  "options": [
+    {
+      "key": "short-key",
+      "label": "选项名称",
+      "paperIds": ["paper-id-1"],
+      "count": 1
+    }
+  ]
+}
+
+Context:
+%s
+`, string(contextJSON))
+
+	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed struct {
+		Message          string                    `json:"message"`
+		Dimension        string                    `json:"dimension"`
+		AllowMultiSelect bool                      `json:"allowMultiSelect"`
+		AllowSkip        bool                      `json:"allowSkip"`
+		Options          []ScreeningDecisionOption `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(response)), &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse screening analysis response: %w", err)
+	}
+
+	node := &ScreeningDecisionNode{
+		ID:               fmt.Sprintf("screen-node-%d", time.Now().UnixNano()),
+		NodeType:         "branch",
+		Message:          strings.TrimSpace(parsed.Message),
+		Dimension:        strings.TrimSpace(parsed.Dimension),
+		Options:          parsed.Options,
+		AllowMultiSelect: parsed.AllowMultiSelect,
+		AllowSkip:        parsed.AllowSkip,
+	}
+
+	if node.Message == "" {
+		node.Message = "请继续缩小筛选范围。"
+	}
+	if node.Dimension == "" {
+		node.Dimension = "研究维度"
+	}
+
+	return node, nil
 }
 
 func (c *LLMClient) requiresAPIKey() bool {
@@ -800,90 +897,122 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 		limit,
 	)
 
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	if s.semanticScholarAPIKey != "" {
-		req.Header.Set("x-api-key", s.semanticScholarAPIKey)
-	}
-	req.Header.Set("Accept", "application/json")
+	// 重试机制：1分钟内最多重试10次，每次间隔递增
+	maxRetries := 10
+	maxDuration := time.Minute
+	startTime := time.Now()
 
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for retry := 0; retry < maxRetries; retry++ {
+		// 检查是否超过总时间限制
+		if time.Since(startTime) > maxDuration {
+			break
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// 处理429错误（速率限制）
-	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("rate limited (429), will skip this source")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
-	}
-
-	var result struct {
-		Data []struct {
-			PaperID string `json:"paperId"`
-			Title   string `json:"title"`
-			Authors []struct {
-				Name string `json:"name"`
-			} `json:"authors"`
-			Abstract string `json:"abstract"`
-			Year     int    `json:"year"`
-			Venue    string `json:"venue"`
-			Journal  *struct {
-				Name string `json:"name"`
-			} `json:"journal"`
-			OpenAccessPDF *struct {
-				URL string `json:"url"`
-			} `json:"openAccessPdf"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-
-	papers := make([]SearchPaper, 0, len(result.Data))
-	for _, item := range result.Data {
-		authors := make([]string, 0, len(item.Authors))
-		for _, author := range item.Authors {
-			if strings.TrimSpace(author.Name) != "" {
-				authors = append(authors, author.Name)
+		// 重试时增加延迟
+		if retry > 0 {
+			delay := time.Duration(retry) * 3 * time.Second
+			if delay > 30*time.Second {
+				delay = 30 * time.Second
 			}
+			time.Sleep(delay)
 		}
 
-		journal := strings.TrimSpace(item.Venue)
-		if journal == "" && item.Journal != nil {
-			journal = strings.TrimSpace(item.Journal.Name)
+		req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if s.semanticScholarAPIKey != "" {
+			req.Header.Set("x-api-key", s.semanticScholarAPIKey)
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = err
+			continue
 		}
 
-		urlValue := ""
-		if item.OpenAccessPDF != nil {
-			urlValue = strings.TrimSpace(item.OpenAccessPDF.URL)
+		// 处理429错误（速率限制）- 继续重试
+		if resp.StatusCode == 429 {
+			lastErr = fmt.Errorf("rate limited (429), retry %d/%d", retry+1, maxRetries)
+			continue
 		}
 
-		papers = append(papers, SearchPaper{
-			ID:       item.PaperID,
-			Title:    item.Title,
-			Authors:  strings.Join(authors, ", "),
-			Abstract: item.Abstract,
-			Year:     item.Year,
-			Journal:  journal,
-			URL:      urlValue,
-			Tags:     []string{},
-			Source:   "semantic_scholar",
-		})
+		if resp.StatusCode >= 400 {
+			lastErr = fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
+			continue
+		}
+
+		// 成功，解析结果
+		var result struct {
+			Data []struct {
+				PaperID string `json:"paperId"`
+				Title   string `json:"title"`
+				Authors []struct {
+					Name string `json:"name"`
+				} `json:"authors"`
+				Abstract string `json:"abstract"`
+				Year     int    `json:"year"`
+				Venue    string `json:"venue"`
+				Journal  *struct {
+					Name string `json:"name"`
+				} `json:"journal"`
+				OpenAccessPDF *struct {
+					URL string `json:"url"`
+				} `json:"openAccessPdf"`
+			} `json:"data"`
+		}
+
+		if err := json.Unmarshal(body, &result); err != nil {
+			lastErr = err
+			continue
+		}
+
+		papers := make([]SearchPaper, 0, len(result.Data))
+		for _, item := range result.Data {
+			authors := make([]string, 0, len(item.Authors))
+			for _, author := range item.Authors {
+				if strings.TrimSpace(author.Name) != "" {
+					authors = append(authors, author.Name)
+				}
+			}
+
+			journal := strings.TrimSpace(item.Venue)
+			if journal == "" && item.Journal != nil {
+				journal = strings.TrimSpace(item.Journal.Name)
+			}
+
+			urlValue := ""
+			if item.OpenAccessPDF != nil {
+				urlValue = strings.TrimSpace(item.OpenAccessPDF.URL)
+			}
+
+			papers = append(papers, SearchPaper{
+				ID:       item.PaperID,
+				Title:    item.Title,
+				Authors:  strings.Join(authors, ", "),
+				Abstract: item.Abstract,
+				Year:     item.Year,
+				Journal:  journal,
+				URL:      urlValue,
+				Tags:     []string{},
+				Source:   "semantic_scholar",
+			})
+		}
+
+		return papers, nil
 	}
 
-	return papers, nil
+	return nil, fmt.Errorf("semantic scholar failed after %d retries in %v: %v", maxRetries, time.Since(startTime), lastErr)
 }
 
 func (s *SearchClient) searchArXiv(query string, limit int) ([]SearchPaper, error) {

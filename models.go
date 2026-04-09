@@ -74,64 +74,73 @@ type InitialState struct {
 }
 
 type ScreeningPaper struct {
-	ID           string    `json:"id"`
-	SessionID     string    `json:"sessionId"`
-	FileName      string    `json:"fileName"`
-	FilePath      string    `json:"filePath"`
-	FileSize      int64     `json:"fileSize"`
-	Status        string    `json:"status"` // "pending", "extracting", "extracted", "screening", "selected", "rejected"
-	Title         string    `json:"title,omitempty"`
-	Authors       string    `json:"authors,omitempty"`
-	Abstract      string    `json:"abstract,omitempty"`
-	FullText      string    `json:"fullText,omitempty"`
-	SectionsJSON  string    `json:"sectionsJson,omitempty"`
-	Selection     string    `json:"selection,omitempty"`
-	Reason        string    `json:"reason,omitempty"`
+	ID             string    `json:"id"`
+	SessionID      string    `json:"sessionId"`
+	FileName       string    `json:"fileName"`
+	FilePath       string    `json:"filePath"`
+	FileSize       int64     `json:"fileSize"`
+	Status         string    `json:"status"` // "pending", "extracting", "extracted", "screening", "selected", "rejected"
+	Title          string    `json:"title,omitempty"`
+	Authors        string    `json:"authors,omitempty"`
+	Abstract       string    `json:"abstract,omitempty"`
+	FullText       string    `json:"fullText,omitempty"`
+	SectionsJSON   string    `json:"sectionsJson,omitempty"`
+	Selection      string    `json:"selection,omitempty"`
+	Reason         string    `json:"reason,omitempty"`
 	TargetFolderID string    `json:"targetFolderId,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type ScreeningSession struct {
-	ID               string    `json:"id"`
-	Title             string    `json:"title"`
-	Status            string    `json:"status"` // "upload", "extract", "screen", "complete"
-	TotalPapers       int       `json:"totalPapers"`
-	CurrentNodeJSON   string   `json:"currentNodeJson,omitempty"`
-	SelectedOptionsJSON string   `json:"selectedOptionsJson,omitempty"`
-	PathHistoryJSON   string    `json:"pathHistoryJson,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                  string    `json:"id"`
+	Title               string    `json:"title"`
+	Status              string    `json:"status"` // "upload", "extract", "screen", "complete"
+	TotalPapers         int       `json:"totalPapers"`
+	CurrentNodeJSON     string    `json:"currentNodeJson,omitempty"`
+	SelectedOptionsJSON string    `json:"selectedOptionsJson,omitempty"`
+	PathHistoryJSON     string    `json:"pathHistoryJson,omitempty"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
+}
+
+type ScreeningDecisionOption struct {
+	Key      string   `json:"key"`
+	Label    string   `json:"label"`
+	PaperIDs []string `json:"paperIds"`
+	Count    int      `json:"count"`
 }
 
 type ScreeningDecisionNode struct {
-	ID               string    `json:"id"`
-	Message          string    `json:"message"`
-	Dimension        string    `json:"dimension"`
-	OptionsJSON      string    `json:"optionsJson"`
-	AllowMultiSelect  bool      `json:"allowMultiSelect"`
-	AllowSkip       bool      `json:"allowSkip"`
-	RemainingPaperIDsJSON string `json:"remainingPaperIdsJson,omitempty"`
+	ID                string                    `json:"id"`
+	NodeType          string                    `json:"nodeType"` // "branch" | "complete"
+	Message           string                    `json:"message"`
+	Dimension         string                    `json:"dimension"`
+	Options           []ScreeningDecisionOption `json:"options"`
+	AllowMultiSelect  bool                      `json:"allowMultiSelect"`
+	AllowSkip         bool                      `json:"allowSkip"`
+	RemainingPaperIDs []string                  `json:"remainingPaperIds"`
 }
 
 type ExtractProgress struct {
-	SessionID   string    `json:"sessionId"`
-	Total       int       `json:"total"`
-	Completed   int       `json:"completed"`
-	Current     string    `json:"current"`
-	Status      string    `json:"status"` // "processing", "completed", "error"
+	SessionID    string `json:"sessionId"`
+	Total        int    `json:"total"`
+	Completed    int    `json:"completed"`
+	CurrentFile  string `json:"currentFile"`
+	Status       string `json:"status"` // "processing", "completed", "error"
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 type ScreeningSessionDetail struct {
-	Session       ScreeningSession        `json:"session"`
-	Papers        []ScreeningPaper       `json:"papers"`
-	CurrentNode   *ScreeningDecisionNode `json:"currentNode,omitempty"`
-	PathHistory    []PathHistoryItem       `json:"pathHistory"`
+	Session     ScreeningSession       `json:"session"`
+	Papers      []ScreeningPaper       `json:"papers"`
+	CurrentNode *ScreeningDecisionNode `json:"currentNode,omitempty"`
+	PathHistory []PathHistoryItem      `json:"pathHistory"`
 }
 
 type PathHistoryItem struct {
-	Dimension string   `json:"dimension"`
-	Choice   string   `json:"choice"`
+	Dimension string `json:"dimension"`
+	Choice    string `json:"choice"`
 }
 
 type Folder struct {
@@ -177,16 +186,16 @@ type SearchSourceStatus struct {
 }
 
 type EnhancedSearchResult struct {
-	Papers      []SearchPaper        `json:"papers"`
-	Total       int                  `json:"total"`
-	HasMore     bool                 `json:"hasMore"`
-	Sources     []SearchSourceStatus `json:"sources"`
-	Query       string               `json:"query"`
-	Limit       int                  `json:"limit"`
-	Offset      int                  `json:"offset"`
-	YearStart   int                  `json:"yearStart,omitempty"`
-	YearEnd     int                  `json:"yearEnd,omitempty"`
-	SortBy      string               `json:"sortBy,omitempty"`
+	Papers    []SearchPaper        `json:"papers"`
+	Total     int                  `json:"total"`
+	HasMore   bool                 `json:"hasMore"`
+	Sources   []SearchSourceStatus `json:"sources"`
+	Query     string               `json:"query"`
+	Limit     int                  `json:"limit"`
+	Offset    int                  `json:"offset"`
+	YearStart int                  `json:"yearStart,omitempty"`
+	YearEnd   int                  `json:"yearEnd,omitempty"`
+	SortBy    string               `json:"sortBy,omitempty"`
 }
 
 type DeepStartSessionSummary struct {
@@ -256,9 +265,9 @@ type TranslationRecord struct {
 type BaiduToken struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	ClientID    string `json:"client_id"`
+	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
-	ExpiresIn   int    `json:"expires_in"`
+	ExpiresIn    int    `json:"expires_in"`
 }
 
 // SyncRecord 同步记录
@@ -277,44 +286,44 @@ type SyncRecord struct {
 
 // SyncConflict 同步冲突
 type SyncConflict struct {
-	ID          string    `json:"id"`
-	FileName    string    `json:"fileName"`
-	LocalPath   string    `json:"localPath"`
-	LocalTime   time.Time `json:"localTime"`
-	RemotePath  string    `json:"remotePath"`
-	RemoteTime  time.Time `json:"remoteTime"`
-	Resolution  string    `json:"resolution"` // "local", "remote", "skipped"
-	ResolvedAt  time.Time `json:"resolvedAt,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID         string    `json:"id"`
+	FileName   string    `json:"fileName"`
+	LocalPath  string    `json:"localPath"`
+	LocalTime  time.Time `json:"localTime"`
+	RemotePath string    `json:"remotePath"`
+	RemoteTime time.Time `json:"remoteTime"`
+	Resolution string    `json:"resolution"` // "local", "remote", "skipped"
+	ResolvedAt time.Time `json:"resolvedAt,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // SyncStatus 同步状态
 type SyncStatus struct {
-	Enabled         bool       `json:"enabled"`
-	Provider        string     `json:"provider"`
-	LastSync        *time.Time  `json:"lastSync,omitempty"`
-	SyncInProgress  bool       `json:"syncInProgress"`
-	PendingFiles    int        `json:"pendingFiles"`
-	Conflicts       int        `json:"conflicts"`
-	TotalSynced     int        `json:"totalSynced"`
-	TotalFailed     int        `json:"totalFailed"`
+	Enabled        bool       `json:"enabled"`
+	Provider       string     `json:"provider"`
+	LastSync       *time.Time `json:"lastSync,omitempty"`
+	SyncInProgress bool       `json:"syncInProgress"`
+	PendingFiles   int        `json:"pendingFiles"`
+	Conflicts      int        `json:"conflicts"`
+	TotalSynced    int        `json:"totalSynced"`
+	TotalFailed    int        `json:"totalFailed"`
 }
 
 // SyncSettings 同步设置
 type SyncSettings struct {
 	AutoSync           bool   `json:"autoSync"`
 	SyncOnStartup      bool   `json:"syncOnStartup"`
-	SyncInterval       int    `json:"syncInterval"` // minutes
+	SyncInterval       int    `json:"syncInterval"`       // minutes
 	ConflictResolution string `json:"conflictResolution"` // "timestamp" (always use newest)
 }
 
 // SyncProgress 同步进度
 type SyncProgress struct {
-	Total        int            `json:"total"`
-	Completed    int            `json:"completed"`
-	CurrentFile  string         `json:"currentFile"`
-	Status       string         `json:"status"` // "preparing", "uploading", "downloading", "resolving", "complete", "error"
-	Message      string         `json:"message,omitempty"`
+	Total       int    `json:"total"`
+	Completed   int    `json:"completed"`
+	CurrentFile string `json:"currentFile"`
+	Status      string `json:"status"` // "preparing", "uploading", "downloading", "resolving", "complete", "error"
+	Message     string `json:"message,omitempty"`
 }
 
 // FileInfo 文件信息
