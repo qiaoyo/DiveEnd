@@ -181,6 +181,120 @@ export interface TranslationRecord {
   updatedAt: string;
 }
 
+export interface ScreeningPaper {
+  id: string;
+  sessionId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  status: 'pending' | 'extracting' | 'extracted' | 'screening' | 'selected' | 'rejected';
+  title?: string;
+  authors?: string;
+  abstract?: string;
+  fullText?: string;
+  sectionsJson?: string;
+  selection?: string;
+  reason?: string;
+  targetFolderId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScreeningSession {
+  id: string;
+  title: string;
+  status: 'upload' | 'extract' | 'screen' | 'complete';
+  totalPapers: number;
+  currentNodeJson?: string;
+  selectedOptionsJson?: string;
+  pathHistoryJson?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScreeningDecisionOption {
+  key: string;
+  label: string;
+  paperIds: string[];
+  count: number;
+}
+
+export interface ScreeningDecisionNode {
+  id: string;
+  nodeType: 'branch' | 'complete';
+  message: string;
+  dimension: string;
+  options: ScreeningDecisionOption[];
+  allowMultiSelect: boolean;
+  allowSkip: boolean;
+  remainingPaperIds: string[];
+}
+
+export interface PathHistoryItem {
+  dimension: string;
+  choice: string;
+}
+
+export interface ScreeningSessionDetail {
+  session: ScreeningSession;
+  papers: ScreeningPaper[];
+  currentNode: ScreeningDecisionNode | null;
+  pathHistory: PathHistoryItem[];
+}
+
+export interface ExtractProgress {
+  sessionId: string;
+  total: number;
+  completed: number;
+  currentFile: string;
+  status: 'processing' | 'completed' | 'error';
+  errorMessage?: string;
+}
+
+export interface SyncStatus {
+  enabled: boolean;
+  provider: string;
+  lastSync?: string | null;
+  syncInProgress: boolean;
+  pendingFiles: number;
+  conflicts: number;
+  totalSynced: number;
+  totalFailed: number;
+}
+
+export interface SyncProgress {
+  total: number;
+  completed: number;
+  currentFile: string;
+  status: string;
+  message?: string;
+}
+
+export interface SyncConflict {
+  id: string;
+  fileName: string;
+  localPath: string;
+  localTime: string;
+  remotePath: string;
+  remoteTime: string;
+  resolution?: string;
+  resolvedAt?: string;
+  createdAt: string;
+}
+
+export interface SyncRecord {
+  id: string;
+  type: 'upload' | 'download' | 'conflict';
+  fileName: string;
+  fileSize: number;
+  remotePath: string;
+  localPath: string;
+  status: 'pending' | 'success' | 'failed';
+  errorMessage?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
 export interface InitialState {
   config: AppConfig;
   folders: Folder[];

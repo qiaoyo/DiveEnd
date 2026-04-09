@@ -1,175 +1,211 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { ExtractProgress, Paper, ScreeningDecisionNode, ScreeningSessionDetail } from '../types';
 import * as backend from '../lib/backend';
-
-interface Paper {
-  id: string;
-  title: string;
-  authors: string;
-  abstract: string;
-  year: number;
-  pdfPath?: string;
-  status: 'pending' | 'extracting' | 'extracted' | 'screening' | 'selected' | 'rejected';
-}
-
-interface DecisionNode {
-  id: string;
-  message: string;
-  dimension: string;
-  options: Array<{
-    key: string;
-    label: string;
-    paperIds: string[];
-    count: number;
-  }>;
-  allowMultiSelect: boolean;
-}
+import { useAppStore } from '../stores/appStore';
 
 type ScreeningStage = 'upload' | 'extract' | 'screen' | 'results';
 
 export const Screening: React.FC = () => {
   const [currentStage, setCurrentStage] = useState<ScreeningStage>('upload');
-  const [papers, setPapers] = useState<Paper[]>([]);
-  const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
+  const [sessionId, setSessionId] = useState('');
+  const [detail, setDetail] = useState<ScreeningSessionDetail | null>(null);
+  const [currentNode, setCurrentNode] = useState<ScreeningDecisionNode | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
-  const [screeningHistory, setScreeningHistory] = useState<Array<{ dimension: string; choice: string }>>([]);
-  const [currentNode, setCurrentNode] = useState<DecisionNode | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [screeningSessionId, setScreeningSessionId] = useState<string | null>(null);
-  const [extractionProgress, setExtractionProgress] = useState<number>(0);
+  const [extractionProgress, setExtractionProgress] = useState<ExtractProgress | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dropActive, setDropActive] = useState(false);
+  const [importedPapers, setImportedPapers] = useState<Paper[]>([]);
+  const { setPapers, setActiveFolderId } = useAppStore();
 
   useEffect(() => {
-    const handleExtractProgress = (event: Event) => {
-      const custom = event as CustomEvent<{ progress: number }>;
-      setExtractionProgress(custom.detail?.progress ?? 0);
-    };
+    return backend.onExtractProgress((progress) => {
+      if (progress.sessionId && progress.sessionId === sessionId) {
+        setExtractionProgress(progress);
+      }
+    });
+  }, [sessionId]);
 
-    window.addEventListener('extract-progress', handleExtractProgress as EventListener);
-    return () => window.removeEventListener('extract-progress', handleExtractProgress as EventListener);
-  }, []);
+  const canResolvePaths = backend.canResolveFilePaths();
+  const papers = detail?.papers ?? [];
+  const history = detail?.pathHistory ?? [];
 
-  const createScreeningSession = useCallback(async () => {
-    try {
-      const session = await backend.createScreeningSession('New Screening Session');
-      setScreeningSessionId(session.id);
-      return session.id;
-    } catch (error) {
-      console.error('创建筛选会话失败:', error);
-      return null;
+  const resultPapers = useMemo(() => {
+    if (!currentNode?.remainingPaperIds?.length) {
+      return [];
     }
-  }, []);
+    const remaining = new Set(currentNode.remainingPaperIds);
+    return papers.filter((paper) => remaining.has(paper.id));
+  }, [currentNode, papers]);
 
-  const initializeScreening = useCallback(async (sessionId: string) => {
-    try {
-      const decisionTree = await backend.analyzePapers(sessionId);
-      setCurrentNode(decisionTree);
-    } catch (error) {
-      console.error('初始化筛选过程失败:', error);
-      setCurrentNode({
-        id: 'node-1',
-        message: '先告诉我你想保留哪一类论文。',
-        dimension: '研究主题',
-        options: [
-          { key: 'ml', label: 'Machine Learning', paperIds: [], count: 15 },
-          { key: 'nlp', label: 'Natural Language Processing', paperIds: [], count: 12 },
-          { key: 'cv', label: 'Computer Vision', paperIds: [], count: 8 },
-          { key: 'rl', label: 'Reinforcement Learning', paperIds: [], count: 5 },
-        ],
-        allowMultiSelect: true,
-      });
-    }
-  }, []);
-
-  const triggerExtraction = useCallback(
-    async (sessionId: string) => {
-      try {
-        setPapers((prev) => prev.map((paper) => ({ ...paper, status: 'extracting' })));
-        await backend.extractPaperContent(sessionId);
-        setCurrentStage('screen');
-        void initializeScreening(sessionId);
-      } catch (error) {
-        console.error('提取文件内容失败:', error);
-      }
-    },
-    [initializeScreening],
-  );
-
-  const handleFileUpload = useCallback(
-    async (files: FileList) => {
-      setIsProcessing(true);
-      const sessionId = await createScreeningSession();
-      if (!sessionId) {
-        setIsProcessing(false);
-        return;
-      }
-
-      const filePaths = Array.from(files).map((file) => file.webkitRelativePath || file.name);
-      const result = await backend.uploadScreeningFiles(sessionId, filePaths);
-      setPapers(result.papers);
-      setIsProcessing(false);
-
-      if (result.papers.length > 0) {
-        setCurrentStage('extract');
-        void triggerExtraction(sessionId);
-      }
-    },
-    [createScreeningSession, triggerExtraction],
-  );
-
-  const handleOptionToggle = useCallback((optionKey: string) => {
-    setSelectedOptions((prev) => (prev.includes(optionKey) ? prev.filter((key) => key !== optionKey) : [...prev, optionKey]));
-  }, []);
-
-  const handleContinue = useCallback(async () => {
-    if (!currentNode || selectedOptions.length === 0 || !screeningSessionId) return;
-
-    setScreeningHistory((prev) => [
-      ...prev,
-      {
-        dimension: currentNode.dimension,
-        choice: selectedOptions.join(', '),
-      },
-    ]);
-
-    try {
-      const nextNode = await backend.applyScreeningChoice(screeningSessionId, selectedOptions);
-      if (nextNode.message.includes('筛选完成')) {
-        const results = await backend.completeScreening(screeningSessionId, '');
-        setSelectedPapers(new Set(results.map((paper: { id: string }) => paper.id)));
-        setCurrentStage('results');
-      } else {
-        setCurrentNode(nextNode);
-        setSelectedOptions([]);
-      }
-    } catch (error) {
-      console.error('提交筛选选择失败:', error);
-      if (screeningHistory.length >= 2) {
-        setCurrentStage('results');
-      } else {
-        setCurrentNode({
-          id: `node-${screeningHistory.length + 2}`,
-          message: '继续缩窄，你更偏好哪类方法论？',
-          dimension: '方法类型',
-          options: [
-            { key: 'empirical', label: 'Empirical Study', paperIds: [], count: 10 },
-            { key: 'theoretical', label: 'Theoretical Analysis', paperIds: [], count: 8 },
-            { key: 'review', label: 'Survey / Review', paperIds: [], count: 5 },
-          ],
-          allowMultiSelect: true,
-        });
-        setSelectedOptions([]);
-      }
-    }
-  }, [currentNode, screeningHistory, screeningSessionId, selectedOptions]);
+  const extractionPercent = extractionProgress && extractionProgress.total > 0
+    ? Math.round((extractionProgress.completed / extractionProgress.total) * 100)
+    : 0;
 
   const resetFlow = () => {
     setCurrentStage('upload');
-    setPapers([]);
-    setSelectedPapers(new Set());
-    setSelectedOptions([]);
-    setScreeningHistory([]);
+    setSessionId('');
+    setDetail(null);
     setCurrentNode(null);
-    setExtractionProgress(0);
-    setScreeningSessionId(null);
+    setSelectedOptions([]);
+    setExtractionProgress(null);
+    setError(null);
+    setImportedPapers([]);
+    setIsBusy(false);
+  };
+
+  const resolveInputPaths = async (files: File[]): Promise<string[]> => {
+    if (files.length === 0) {
+      return [];
+    }
+
+    if (canResolvePaths) {
+      return backend.resolveFilePaths(files);
+    }
+
+    return files.map((file) => file.webkitRelativePath || file.name);
+  };
+
+  const proceedToAnalysis = async (nextSessionId: string) => {
+    const sessionDetail = await backend.getScreeningSession(nextSessionId);
+    setDetail(sessionDetail);
+
+    const node = await backend.analyzePapers(nextSessionId);
+    setCurrentNode(node);
+    setSelectedOptions([]);
+    setCurrentStage(node.nodeType === 'complete' ? 'results' : 'screen');
+  };
+
+  const runExtraction = async (nextSessionId: string) => {
+    setCurrentStage('extract');
+    setError(null);
+    setIsBusy(true);
+
+    try {
+      const progress = await backend.extractPaperContent(nextSessionId);
+      setExtractionProgress(progress);
+
+      if (progress.status !== 'completed') {
+        throw new Error(progress.errorMessage || 'PDF 抽取未能完成，请检查 PDF 服务和模型配置。');
+      }
+
+      await proceedToAnalysis(nextSessionId);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'PDF 抽取失败';
+      setError(message);
+      setCurrentStage('extract');
+      const latest = await backend.getScreeningSession(nextSessionId).catch(() => null);
+      if (latest) {
+        setDetail(latest);
+      }
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const startScreeningWithPaths = async (filePaths: string[]) => {
+    if (filePaths.length === 0) {
+      setError(canResolvePaths ? '没有拿到可用的 PDF 路径。' : '浏览器预览模式下只能用演示样本或本地 mock 路径。');
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    setImportedPapers([]);
+
+    try {
+      const session = await backend.createScreeningSession(`Screening ${new Date().toLocaleString()}`);
+      setSessionId(session.id);
+
+      const nextDetail = await backend.uploadScreeningFiles(session.id, filePaths);
+      setDetail(nextDetail);
+      setExtractionProgress({
+        sessionId: session.id,
+        total: nextDetail.papers.length,
+        completed: 0,
+        currentFile: '',
+        status: 'processing',
+        errorMessage: '',
+      });
+
+      await runExtraction(session.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '初始化 Screening 失败');
+      setIsBusy(false);
+    }
+  };
+
+  const handleInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    const paths = await resolveInputPaths(files);
+    await startScreeningWithPaths(paths);
+    event.target.value = '';
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropActive(false);
+    const paths = await resolveInputPaths(Array.from(event.dataTransfer.files ?? []));
+    await startScreeningWithPaths(paths);
+  };
+
+  const toggleOption = (optionKey: string) => {
+    setSelectedOptions((previous) => (
+      previous.includes(optionKey)
+        ? previous.filter((key) => key !== optionKey)
+        : [...previous, optionKey]
+    ));
+  };
+
+  const handleContinue = async () => {
+    if (!sessionId || !currentNode || selectedOptions.length === 0) {
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      const nextNode = await backend.applyScreeningChoice(sessionId, selectedOptions);
+      setCurrentNode(nextNode);
+      setSelectedOptions([]);
+
+      const nextDetail = await backend.getScreeningSession(sessionId);
+      setDetail(nextDetail);
+      setCurrentStage(nextNode.nodeType === 'complete' ? 'results' : 'screen');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '提交筛选选择失败');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!sessionId) {
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      const imported = await backend.completeScreening(sessionId, '');
+      setImportedPapers(imported);
+
+      if (imported[0]?.folderId) {
+        setActiveFolderId(imported[0].folderId);
+        setPapers(await backend.getPapers(imported[0].folderId));
+      }
+
+      const nextDetail = await backend.getScreeningSession(sessionId);
+      setDetail(nextDetail);
+      setCurrentStage('results');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '导入论文库失败');
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   const stageChip = (stage: ScreeningStage, label: string) => (
@@ -189,42 +225,52 @@ export const Screening: React.FC = () => {
       <div className="text-5xl">📄</div>
       <h3 className="mt-4 text-2xl font-semibold">上传待筛选论文</h3>
       <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-stone-500 dark:text-stone-400">
-        当前流程仍处于开发过渡期：上传后会尝试触发提取与决策树筛选；如果后端链路没接通，页面会自动退回到演示节点，方便先验证交互和布局。
+        {canResolvePaths
+          ? '当前运行在 Wails 环境，会把你选择或拖入的 PDF 解析成真实本地路径，再交给 Go 和 PDF 服务处理。'
+          : '当前是浏览器预览模式。你仍然可以体验页面交互，但真实路径解析与本地 PDF 提取需要在 Wails 桌面应用里运行。'}
       </p>
-      <div className="mt-8 flex flex-wrap justify-center gap-3">
-        <label className="cursor-pointer rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-emerald-700">
-          <input
-            type="file"
-            multiple
-            accept=".pdf"
-            className="hidden"
-            onChange={(event) => event.target.files && void handleFileUpload(event.target.files)}
-          />
-          {isProcessing ? '准备中...' : '选择 PDF 文件'}
-        </label>
-        <button
-          onClick={() => {
-            setPapers([
-              { id: '1', title: 'Sample Survey', authors: 'Demo Author', abstract: '', year: 2024, status: 'extracted' },
-              { id: '2', title: 'Benchmark Paper', authors: 'Demo Author', abstract: '', year: 2025, status: 'extracted' },
-            ]);
-            setCurrentStage('screen');
-            setCurrentNode({
-              id: 'demo-node',
-              message: '你希望优先保留哪一类样本？',
-              dimension: '演示分组',
-              options: [
-                { key: 'survey', label: 'Survey / Review', paperIds: [], count: 3 },
-                { key: 'benchmark', label: 'Benchmark', paperIds: [], count: 5 },
-                { key: 'recent', label: 'Recent Progress', paperIds: [], count: 4 },
-              ],
-              allowMultiSelect: true,
-            });
-          }}
-          className="rounded-2xl border border-stone-200 px-6 py-3 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
-        >
-          使用演示样本
-        </button>
+
+      <div
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDropActive(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDropActive(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          setDropActive(false);
+        }}
+        onDrop={(event) => void handleDrop(event)}
+        className={`mx-auto mt-8 max-w-3xl rounded-[2rem] border border-dashed px-6 py-12 transition ${
+          dropActive
+            ? 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/20'
+            : 'border-stone-300 bg-stone-50/70 dark:border-stone-700 dark:bg-stone-950/40'
+        }`}
+      >
+        <p className="text-sm text-stone-500 dark:text-stone-400">拖拽 PDF 到这里，或者直接用文件选择器。</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <label className="cursor-pointer rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-emerald-700">
+            <input
+              type="file"
+              multiple
+              accept=".pdf"
+              className="hidden"
+              onChange={(event) => void handleInputChange(event)}
+            />
+            {isBusy ? '处理中...' : '选择 PDF 文件'}
+          </label>
+          {!canResolvePaths && (
+            <button
+              onClick={() => void startScreeningWithPaths(['/mock/survey.pdf', '/mock/benchmark.pdf'])}
+              className="rounded-2xl border border-stone-200 px-6 py-3 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+            >
+              使用演示样本
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -233,26 +279,47 @@ export const Screening: React.FC = () => {
     <div className="rounded-[2rem] border border-stone-200 bg-white/80 px-6 py-10 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
       <div className="text-5xl">⚙️</div>
       <h3 className="mt-4 text-2xl font-semibold">提取论文内容</h3>
-      <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">正在抽取 PDF 文本并准备决策树输入...</p>
+      <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">
+        通过 Python PDF 服务抽取 markdown，并调用配置好的强模型生成结构化信息。
+      </p>
       <div className="mx-auto mt-8 max-w-xl">
         <div className="h-2 rounded-full bg-stone-200 dark:bg-stone-800">
-          <div className="h-2 rounded-full bg-emerald-600 transition-all" style={{ width: `${Math.round(extractionProgress * 100)}%` }} />
+          <div className="h-2 rounded-full bg-emerald-600 transition-all" style={{ width: `${extractionPercent}%` }} />
         </div>
         <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">
-          已处理 {Math.round(extractionProgress * papers.length)} / {papers.length} 篇论文
+          已处理 {extractionProgress?.completed ?? 0} / {extractionProgress?.total ?? papers.length} 篇论文
+          {extractionProgress?.currentFile ? ` · 当前：${extractionProgress.currentFile}` : ''}
         </p>
       </div>
-      <button
-        onClick={() => setCurrentStage('screen')}
-        className="mt-8 rounded-2xl border border-stone-200 px-4 py-2 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
-      >
-        提取链路未完成时，先进入演示筛选
-      </button>
+      {error && (
+        <div className="mx-auto mt-6 max-w-2xl rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-left text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-200">
+          {error}
+        </div>
+      )}
+      <div className="mt-8 flex flex-wrap justify-center gap-3">
+        <button
+          onClick={() => sessionId && void runExtraction(sessionId)}
+          disabled={!sessionId || isBusy}
+          className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isBusy ? '重试中...' : '重新提取'}
+        </button>
+        {papers.some((paper) => paper.status === 'extracted') && (
+          <button
+            onClick={() => sessionId && void proceedToAnalysis(sessionId)}
+            className="rounded-2xl border border-stone-200 px-4 py-2.5 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+          >
+            基于已完成论文继续筛选
+          </button>
+        )}
+      </div>
     </div>
   );
 
   const renderScreenStage = () => {
-    if (!currentNode) return null;
+    if (!currentNode) {
+      return null;
+    }
 
     return (
       <div className="rounded-[2rem] border border-stone-200 bg-white/80 p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
@@ -272,11 +339,11 @@ export const Screening: React.FC = () => {
           </button>
         </div>
 
-        {screeningHistory.length > 0 && (
+        {history.length > 0 && (
           <div className="mt-5 rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
             <p className="text-xs uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">历史选择</p>
             <div className="mt-3 space-y-2 text-sm text-stone-600 dark:text-stone-300">
-              {screeningHistory.map((step, index) => (
+              {history.map((step, index) => (
                 <div key={`${step.dimension}-${index}`}>
                   <span className="font-medium">{step.dimension}：</span>
                   {step.choice}
@@ -292,7 +359,7 @@ export const Screening: React.FC = () => {
             return (
               <button
                 key={option.key}
-                onClick={() => handleOptionToggle(option.key)}
+                onClick={() => toggleOption(option.key)}
                 className={`rounded-2xl border p-4 text-left transition ${
                   isSelected
                     ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20'
@@ -317,10 +384,10 @@ export const Screening: React.FC = () => {
           </div>
           <button
             onClick={() => void handleContinue()}
-            disabled={selectedOptions.length === 0}
+            disabled={selectedOptions.length === 0 || isBusy}
             className="rounded-2xl bg-emerald-600 px-4 py-2.5 font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            继续下一步
+            {isBusy ? '处理中...' : '继续下一步'}
           </button>
         </div>
       </div>
@@ -328,28 +395,63 @@ export const Screening: React.FC = () => {
   };
 
   const renderResultsStage = () => (
-    <div className="rounded-[2rem] border border-stone-200 bg-white/80 px-6 py-10 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-      <div className="text-5xl">🎉</div>
-      <h3 className="mt-4 text-2xl font-semibold">筛选完成</h3>
-      <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-stone-500 dark:text-stone-400">
-        这一步目前仍以交互流验证为主。真正的 PDF 抽取、决策树推进与导入论文库链路还需要继续补后端绑定。
-      </p>
+    <div className="rounded-[2rem] border border-stone-200 bg-white/80 px-6 py-10 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
+      <div className="text-center">
+        <div className="text-5xl">🎯</div>
+        <h3 className="mt-4 text-2xl font-semibold">筛选完成</h3>
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-stone-500 dark:text-stone-400">
+          当前剩余的论文已经缩小到适合直接导入文库的规模。确认后会写入 SQLite 文库并保留原始 PDF 路径。
+        </p>
+      </div>
+
       <div className="mx-auto mt-8 grid max-w-md grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
-          <div className="text-2xl font-bold text-emerald-600">{papers.length}</div>
+          <div className="text-2xl font-bold text-emerald-600">{detail?.session.totalPapers ?? papers.length}</div>
           <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">总论文数</div>
         </div>
         <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
-          <div className="text-2xl font-bold text-emerald-600">{selectedPapers.size}</div>
+          <div className="text-2xl font-bold text-emerald-600">{resultPapers.length}</div>
           <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">保留数量</div>
         </div>
       </div>
-      <button
-        onClick={resetFlow}
-        className="mt-8 rounded-2xl bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-      >
-        开始新的筛选
-      </button>
+
+      {resultPapers.length > 0 && (
+        <div className="mt-8 space-y-3">
+          {resultPapers.map((paper) => (
+            <div key={paper.id} className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
+              <div className="font-medium">{paper.title || paper.fileName}</div>
+              <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">{paper.authors || paper.fileName}</div>
+              {paper.abstract && (
+                <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-300">{paper.abstract}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {importedPapers.length > 0 && (
+        <div className="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-200">
+          已成功导入 {importedPapers.length} 篇论文到文库。
+        </div>
+      )}
+
+      <div className="mt-8 flex flex-wrap justify-center gap-3">
+        {importedPapers.length === 0 && (
+          <button
+            onClick={() => void handleImport()}
+            disabled={isBusy || resultPapers.length === 0}
+            className="rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isBusy ? '导入中...' : '导入到文库'}
+          </button>
+        )}
+        <button
+          onClick={resetFlow}
+          className="rounded-2xl border border-stone-200 px-6 py-3 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+        >
+          开始新的筛选
+        </button>
+      </div>
     </div>
   );
 
@@ -358,7 +460,7 @@ export const Screening: React.FC = () => {
       <div className="border-b border-stone-200 p-6 dark:border-stone-800">
         <h2 className="text-lg font-semibold">Screening - 批量筛选</h2>
         <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-          这块仍是半成品：界面已重整为可用布局，但真实上传、提取与筛选后端尚未完全接通。
+          现在这条链路会真实调用 Go 后端、SQLite 和 PDF 服务，而不是继续停留在演示节点。
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           {stageChip('upload', '上传')}
@@ -370,6 +472,11 @@ export const Screening: React.FC = () => {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-5xl space-y-6">
+          {error && currentStage !== 'extract' && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-200">
+              {error}
+            </div>
+          )}
           {currentStage === 'upload' && renderUploadStage()}
           {currentStage === 'extract' && renderExtractStage()}
           {currentStage === 'screen' && renderScreenStage()}

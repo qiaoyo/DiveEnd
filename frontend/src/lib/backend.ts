@@ -5,14 +5,23 @@ import type {
   DeepStartSessionDetail,
   DeepStartSessionSummary,
   EnhancedSearchResult,
+  ExtractProgress,
   Folder,
   InitialState,
   Paper,
   SaveConfigResult,
+  ScreeningDecisionNode,
+  ScreeningSession,
+  ScreeningSessionDetail,
   SearchPaper,
+  SyncConflict,
+  SyncProgress,
+  SyncRecord,
+  SyncStatus,
   TranslationRecord,
 } from '../types';
 import { defaultConfig, defaultInitialState } from '../types';
+import { CanResolveFilePaths, EventsOff, EventsOn, ResolveFilePaths } from '../../wailsjs/runtime/runtime';
 
 declare const __DIVEEND_ROOT__: string;
 
@@ -56,29 +65,38 @@ declare global {
           GetTranslations(paperId: string): Promise<TranslationRecord[]>;
 
           // Screening API
-          CreateScreeningSession(title: string): Promise<any>;
-          UploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<any>;
-          ExtractPaperContent(sessionId: string): Promise<any>;
-          AnalyzePapers(sessionId: string): Promise<any>;
-          ApplyScreeningChoice(sessionId: string, selectedOptions: string[]): Promise<any>;
-          CompleteScreening(sessionId: string, targetFolderId: string): Promise<any>;
-          ListScreeningSessions(): Promise<any[]>;
-          GetScreeningSession(sessionId: string): Promise<any>;
+          CreateScreeningSession(title: string): Promise<ScreeningSession>;
+          UploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<ScreeningSessionDetail>;
+          ExtractPaperContent(sessionId: string): Promise<ExtractProgress>;
+          GetExtractProgress(sessionId: string): Promise<ExtractProgress>;
+          AnalyzePapers(sessionId: string): Promise<ScreeningDecisionNode>;
+          ApplyScreeningChoice(sessionId: string, selectedOptions: string[]): Promise<ScreeningDecisionNode>;
+          CompleteScreening(sessionId: string, targetFolderId: string): Promise<Paper[]>;
+          ListScreeningSessions(): Promise<ScreeningSession[]>;
+          GetScreeningSession(sessionId: string): Promise<ScreeningSessionDetail>;
           CancelScreening(sessionId: string): Promise<void>;
 
           // Sync API
-          GetSyncStatus(): Promise<any>;
-          TriggerSync(): Promise<any>;
-          GetSyncProgress(): Promise<any>;
-          GetSyncConflicts(): Promise<any[]>;
+          GetSyncStatus(): Promise<SyncStatus>;
+          TriggerSync(): Promise<SyncProgress>;
+          GetSyncProgress(): Promise<SyncProgress>;
+          GetSyncConflicts(): Promise<SyncConflict[]>;
+          GetSyncRecords(limit: number): Promise<SyncRecord[]>;
           ResolveSyncConflict(conflictId: string, resolution: 'local' | 'remote'): Promise<void>;
         };
       };
+    };
+    runtime?: {
+      EventsOn(eventName: string, callback: (...args: any[]) => void): () => void;
+      EventsOff(eventName: string, ...args: string[]): void;
+      CanResolveFilePaths(): boolean;
+      ResolveFilePaths(files: File[]): string[];
     };
   }
 }
 
 const runtimeApp = () => window.go?.main?.App;
+const hasWailsRuntime = () => Boolean(window.go?.main?.App && window.runtime);
 
 const emptySecretPrefill: ConfigSecretPrefill = {
   strongLLMApiKey: '',
@@ -181,6 +199,87 @@ function normalizeInitialState(state: Partial<InitialState> | null | undefined):
     activeFolderId: state?.activeFolderId ?? '',
     deepStartSessions: normalizeArray(state?.deepStartSessions),
     activeDeepStartSession: normalizeSessionDetail(state?.activeDeepStartSession),
+  };
+}
+
+function normalizeScreeningDecisionNode(
+  node: Partial<ScreeningDecisionNode> | null | undefined,
+): ScreeningDecisionNode | null {
+  if (!node) {
+    return null;
+  }
+
+  return {
+    id: node.id ?? '',
+    nodeType: node.nodeType === 'complete' ? 'complete' : 'branch',
+    message: node.message ?? '',
+    dimension: node.dimension ?? '',
+    options: normalizeArray(node.options).map((option) => ({
+      key: option.key ?? '',
+      label: option.label ?? '',
+      paperIds: normalizeArray(option.paperIds),
+      count: option.count ?? normalizeArray(option.paperIds).length,
+    })),
+    allowMultiSelect: Boolean(node.allowMultiSelect),
+    allowSkip: Boolean(node.allowSkip),
+    remainingPaperIds: normalizeArray(node.remainingPaperIds),
+  };
+}
+
+function normalizeScreeningSessionDetail(
+  detail: Partial<ScreeningSessionDetail> | null | undefined,
+): ScreeningSessionDetail {
+  return {
+    session: {
+      id: detail?.session?.id ?? '',
+      title: detail?.session?.title ?? '',
+      status: detail?.session?.status ?? 'upload',
+      totalPapers: detail?.session?.totalPapers ?? 0,
+      currentNodeJson: detail?.session?.currentNodeJson ?? '',
+      selectedOptionsJson: detail?.session?.selectedOptionsJson ?? '',
+      pathHistoryJson: detail?.session?.pathHistoryJson ?? '',
+      createdAt: detail?.session?.createdAt ?? new Date().toISOString(),
+      updatedAt: detail?.session?.updatedAt ?? new Date().toISOString(),
+    },
+    papers: normalizeArray(detail?.papers),
+    currentNode: normalizeScreeningDecisionNode(detail?.currentNode),
+    pathHistory: normalizeArray(detail?.pathHistory),
+  };
+}
+
+function normalizeExtractProgress(
+  progress: Partial<ExtractProgress> | null | undefined,
+): ExtractProgress {
+  return {
+    sessionId: progress?.sessionId ?? '',
+    total: progress?.total ?? 0,
+    completed: progress?.completed ?? 0,
+    currentFile: progress?.currentFile ?? '',
+    status: progress?.status === 'completed' || progress?.status === 'error' ? progress.status : 'processing',
+    errorMessage: progress?.errorMessage ?? '',
+  };
+}
+
+function normalizeSyncStatus(status: Partial<SyncStatus> | null | undefined): SyncStatus {
+  return {
+    enabled: Boolean(status?.enabled),
+    provider: status?.provider ?? 'baidu_cloud',
+    lastSync: status?.lastSync ?? null,
+    syncInProgress: Boolean(status?.syncInProgress),
+    pendingFiles: status?.pendingFiles ?? 0,
+    conflicts: status?.conflicts ?? 0,
+    totalSynced: status?.totalSynced ?? 0,
+    totalFailed: status?.totalFailed ?? 0,
+  };
+}
+
+function normalizeSyncProgress(progress: Partial<SyncProgress> | null | undefined): SyncProgress {
+  return {
+    total: progress?.total ?? 0,
+    completed: progress?.completed ?? 0,
+    currentFile: progress?.currentFile ?? '',
+    status: progress?.status ?? 'idle',
+    message: progress?.message ?? '',
   };
 }
 
@@ -889,97 +988,186 @@ export async function getTranslations(paperId: string): Promise<TranslationRecor
 
 // ============ Screening API ============
 
-export async function createScreeningSession(title: string): Promise<any> {
+export function canResolveFilePaths(): boolean {
+  if (!hasWailsRuntime()) {
+    return false;
+  }
+  return CanResolveFilePaths();
+}
+
+export function resolveFilePaths(files: File[]): string[] {
+  if (!hasWailsRuntime()) {
+    return [];
+  }
+
+  return (ResolveFilePaths(files) as unknown as string[]) ?? [];
+}
+
+export function onExtractProgress(callback: (progress: ExtractProgress) => void): () => void {
+  if (!hasWailsRuntime()) {
+    return () => undefined;
+  }
+
+  const unsubscribe = EventsOn('extract-progress', (progress: ExtractProgress) => {
+    callback(normalizeExtractProgress(progress));
+  });
+
+  return () => {
+    unsubscribe?.();
+    EventsOff('extract-progress');
+  };
+}
+
+export async function createScreeningSession(title: string): Promise<ScreeningSession> {
   const app = runtimeApp();
   if (app?.CreateScreeningSession) {
     return app.CreateScreeningSession(title);
   }
-  return { id: `mock-session-${Date.now()}`, title, status: 'upload' };
+  return {
+    id: `mock-session-${Date.now()}`,
+    title,
+    status: 'upload',
+    totalPapers: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 }
 
-export async function uploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<any> {
+export async function uploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<ScreeningSessionDetail> {
   const app = runtimeApp();
   if (app?.UploadScreeningFiles) {
-    return app.UploadScreeningFiles(sessionId, filePaths);
-  }
-  return { session: { id: sessionId, status: 'extract' }, papers: [] };
-}
-
-export async function extractPaperContent(sessionId: string): Promise<any> {
-  const app = runtimeApp();
-  if (app?.ExtractPaperContent) {
-    return app.ExtractPaperContent(sessionId);
+    return normalizeScreeningSessionDetail(await app.UploadScreeningFiles(sessionId, filePaths));
   }
 
-  // Mock extraction with progress
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ status: 'completed', total: 5, completed: 5 });
-    }, 2000);
+  return normalizeScreeningSessionDetail({
+    session: {
+      id: sessionId,
+      title: 'Mock Screening Session',
+      status: 'extract',
+      totalPapers: filePaths.length,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    papers: filePaths.map((filePath, index) => ({
+      id: `mock-paper-${index}`,
+      sessionId,
+      fileName: filePath.split('/').pop() ?? filePath,
+      filePath,
+      fileSize: 0,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })),
+    currentNode: null,
+    pathHistory: [],
   });
 }
 
-export async function analyzePapers(sessionId: string): Promise<any> {
+export async function extractPaperContent(sessionId: string): Promise<ExtractProgress> {
+  const app = runtimeApp();
+  if (app?.ExtractPaperContent) {
+    return normalizeExtractProgress(await app.ExtractPaperContent(sessionId));
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(
+        normalizeExtractProgress({
+          sessionId,
+          status: 'completed',
+          total: 2,
+          completed: 2,
+          currentFile: '',
+        }),
+      );
+    }, 500);
+  });
+}
+
+export async function getExtractProgress(sessionId: string): Promise<ExtractProgress> {
+  const app = runtimeApp();
+  if (app?.GetExtractProgress) {
+    return normalizeExtractProgress(await app.GetExtractProgress(sessionId));
+  }
+  return normalizeExtractProgress({ sessionId, total: 0, completed: 0, currentFile: '', status: 'processing' });
+}
+
+export async function analyzePapers(sessionId: string): Promise<ScreeningDecisionNode> {
   const app = runtimeApp();
   if (app?.AnalyzePapers) {
-    return app.AnalyzePapers(sessionId);
+    return normalizeScreeningDecisionNode(await app.AnalyzePapers(sessionId)) as ScreeningDecisionNode;
   }
 
-  return {
+  return normalizeScreeningDecisionNode({
     id: 'node-1',
-    message: 'What research areas are you most interested in?',
-    dimension: 'Research Area',
+    nodeType: 'branch',
+    message: '你最想先保留哪一类论文？',
+    dimension: '研究方向',
     options: [
-      { key: 'ml', label: 'Machine Learning', paperIds: [], count: 15 },
-      { key: 'nlp', label: 'Natural Language Processing', paperIds: [], count: 12 },
-      { key: 'cv', label: 'Computer Vision', paperIds: [], count: 8 },
-      { key: 'rl', label: 'Reinforcement Learning', paperIds: [], count: 5 },
+      { key: 'survey', label: '综述与综览', paperIds: ['mock-paper-1'], count: 1 },
+      { key: 'benchmark', label: '基准与实验', paperIds: ['mock-paper-2'], count: 1 },
     ],
     allowMultiSelect: true,
-  };
+    allowSkip: false,
+    remainingPaperIds: ['mock-paper-1', 'mock-paper-2'],
+  }) as ScreeningDecisionNode;
 }
 
-export async function applyScreeningChoice(sessionId: string, selectedOptions: string[]): Promise<any> {
+export async function applyScreeningChoice(
+  sessionId: string,
+  selectedOptions: string[],
+): Promise<ScreeningDecisionNode> {
   const app = runtimeApp();
   if (app?.ApplyScreeningChoice) {
-    return app.ApplyScreeningChoice(sessionId, selectedOptions);
+    return normalizeScreeningDecisionNode(await app.ApplyScreeningChoice(sessionId, selectedOptions)) as ScreeningDecisionNode;
   }
 
-  return {
-    id: 'node-2',
-    message: 'What methodology types do you prefer?',
-    dimension: 'Methodology',
-    options: [
-      { key: 'empirical', label: 'Empirical Study', paperIds: [], count: 10 },
-      { key: 'theoretical', label: 'Theoretical Analysis', paperIds: [], count: 8 },
-      { key: 'review', label: 'Survey/Review', paperIds: [], count: 5 },
-    ],
-    allowMultiSelect: true,
-  };
+  return normalizeScreeningDecisionNode({
+    id: 'node-complete',
+    nodeType: 'complete',
+    message: '筛选完成，请确认导入剩余论文。',
+    dimension: '结果确认',
+    options: [],
+    allowMultiSelect: false,
+    allowSkip: false,
+    remainingPaperIds: ['mock-paper-1'],
+  }) as ScreeningDecisionNode;
 }
 
-export async function completeScreening(sessionId: string, targetFolderId: string): Promise<any> {
+export async function completeScreening(sessionId: string, targetFolderId: string): Promise<Paper[]> {
   const app = runtimeApp();
   if (app?.CompleteScreening) {
-    return app.CompleteScreening(sessionId, targetFolderId);
-  }
-  return { importedCount: 3 };
-}
-
-export async function listScreeningSessions(): Promise<any[]> {
-  const app = runtimeApp();
-  if (app?.ListScreeningSessions) {
-    return app.ListScreeningSessions();
+    return normalizeArray(await app.CompleteScreening(sessionId, targetFolderId));
   }
   return [];
 }
 
-export async function getScreeningSession(sessionId: string): Promise<any> {
+export async function listScreeningSessions(): Promise<ScreeningSession[]> {
+  const app = runtimeApp();
+  if (app?.ListScreeningSessions) {
+    return normalizeArray(await app.ListScreeningSessions());
+  }
+  return [];
+}
+
+export async function getScreeningSession(sessionId: string): Promise<ScreeningSessionDetail> {
   const app = runtimeApp();
   if (app?.GetScreeningSession) {
-    return app.GetScreeningSession(sessionId);
+    return normalizeScreeningSessionDetail(await app.GetScreeningSession(sessionId));
   }
-  return { id: sessionId, title: 'Test Session', papers: [] };
+  return normalizeScreeningSessionDetail({
+    session: {
+      id: sessionId,
+      title: 'Mock Screening Session',
+      status: 'upload',
+      totalPapers: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    papers: [],
+    currentNode: null,
+    pathHistory: [],
+  });
 }
 
 export async function cancelScreening(sessionId: string): Promise<void> {
@@ -991,34 +1179,42 @@ export async function cancelScreening(sessionId: string): Promise<void> {
 
 // ============ Sync API ============
 
-export async function getSyncStatus(): Promise<any> {
+export async function getSyncStatus(): Promise<SyncStatus> {
   const app = runtimeApp();
   if (app?.GetSyncStatus) {
-    return app.GetSyncStatus();
+    return normalizeSyncStatus(await app.GetSyncStatus());
   }
-  return { enabled: false, provider: '', lastSync: null };
+  return normalizeSyncStatus({ enabled: false, provider: 'baidu_cloud', lastSync: null });
 }
 
-export async function triggerSync(): Promise<any> {
+export async function triggerSync(): Promise<SyncProgress> {
   const app = runtimeApp();
   if (app?.TriggerSync) {
-    return app.TriggerSync();
+    return normalizeSyncProgress(await app.TriggerSync());
   }
-  return { status: 'completed', filesSynced: 0 };
+  return normalizeSyncProgress({ status: 'completed', total: 0, completed: 0, currentFile: '' });
 }
 
-export async function getSyncProgress(): Promise<any> {
+export async function getSyncProgress(): Promise<SyncProgress> {
   const app = runtimeApp();
   if (app?.GetSyncProgress) {
-    return app.GetSyncProgress();
+    return normalizeSyncProgress(await app.GetSyncProgress());
   }
-  return { total: 0, completed: 0, currentFile: '' };
+  return normalizeSyncProgress({ total: 0, completed: 0, currentFile: '', status: 'idle' });
 }
 
-export async function getSyncConflicts(): Promise<any[]> {
+export async function getSyncConflicts(): Promise<SyncConflict[]> {
   const app = runtimeApp();
   if (app?.GetSyncConflicts) {
-    return app.GetSyncConflicts();
+    return normalizeArray(await app.GetSyncConflicts());
+  }
+  return [];
+}
+
+export async function getSyncRecords(limit = 20): Promise<SyncRecord[]> {
+  const app = runtimeApp();
+  if (app?.GetSyncRecords) {
+    return normalizeArray(await app.GetSyncRecords(limit));
   }
   return [];
 }
