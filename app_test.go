@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,29 @@ func (f *fakeSearch) EnhancedSearch(query string, limit int, offset int, yearSta
 		}, nil
 	}
 	return nil, fmt.Errorf("query not found: %s", query)
+}
+
+type panicDeepStartLLM struct{}
+
+func (panicDeepStartLLM) TranslateSection(section, originalText string) (string, string, error) {
+	return "", "", nil
+}
+
+func (panicDeepStartLLM) AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error) {
+	panic("AnalyzeDeepStart should not be called when search results are empty")
+}
+
+func (panicDeepStartLLM) AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisionNode, error) {
+	return &ScreeningDecisionNode{
+		ID:                "panic-llm-screen",
+		NodeType:          "complete",
+		Message:           "complete",
+		Dimension:         "dimension",
+		Options:           []ScreeningDecisionOption{},
+		AllowMultiSelect:  false,
+		AllowSkip:         false,
+		RemainingPaperIDs: []string{},
+	}, nil
 }
 
 func TestAppSaveConfigPersistsAndSignalsRestart(t *testing.T) {
@@ -347,5 +371,29 @@ func TestAppDeepStartFallsBackWithoutLLM(t *testing.T) {
 	}
 	if session.CurrentAnalysis.Overview == "" {
 		t.Fatal("expected fallback overview to be populated")
+	}
+}
+
+func TestAppDeepStartSkipsLLMWhenSearchFailsWithNoResults(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	app.search = &fakeSearch{results: map[string][]SearchPaper{}}
+	app.llm = panicDeepStartLLM{}
+
+	session, err := app.StartDeepStartSession("embodied intelligence", "")
+	if err != nil {
+		t.Fatalf("StartDeepStartSession() error = %v", err)
+	}
+	if session.CurrentAnalysis == nil {
+		t.Fatal("expected fallback analysis to be present")
+	}
+	if !strings.Contains(session.CurrentAnalysis.Overview, "本轮检索暂时失败") {
+		t.Fatalf("expected search failure warning in overview, got %q", session.CurrentAnalysis.Overview)
 	}
 }

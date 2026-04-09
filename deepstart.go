@@ -274,8 +274,8 @@ func (a *App) searchDeepStartResults(query string) ([]SearchPaper, string) {
 		return []SearchPaper{}, "搜索服务当前不可用。"
 	}
 
-	// 提高limit到100,获取更多结果
-	results, err := a.search.Search(query, 100)
+	// DeepStart 首轮以响应速度优先，避免创建会话阶段长时间等待。
+	results, err := a.search.Search(query, 40)
 	if err != nil {
 		return []SearchPaper{}, fmt.Sprintf("本轮检索暂时失败：%v", err)
 	}
@@ -296,7 +296,8 @@ func (a *App) generateDeepStartAnalysis(summary DeepStartSessionSummary, message
 		analysis DeepStartAnalysis
 	)
 
-	if a.llm != nil {
+	shouldSkipLLM := len(results) == 0 && strings.TrimSpace(searchWarning) != ""
+	if a.llm != nil && !shouldSkipLLM {
 		if response, err := a.llm.AnalyzeDeepStart(request); err == nil {
 			title = response.Title
 			analysis = response.Analysis
@@ -311,7 +312,11 @@ func (a *App) generateDeepStartAnalysis(summary DeepStartSessionSummary, message
 			analysis = buildFallbackDeepStartAnalysis(summary.RootPrompt, summary.CurrentQuery, results, err.Error(), searchWarning)
 		}
 	} else {
-		analysis = buildFallbackDeepStartAnalysis(summary.RootPrompt, summary.CurrentQuery, results, "AI 辅助暂不可用", searchWarning)
+		aiWarning := "AI 辅助暂不可用"
+		if shouldSkipLLM {
+			aiWarning = ""
+		}
+		analysis = buildFallbackDeepStartAnalysis(summary.RootPrompt, summary.CurrentQuery, results, aiWarning, searchWarning)
 	}
 
 	if title == "" {

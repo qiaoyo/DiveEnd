@@ -713,11 +713,19 @@ type SearchClient struct {
 	httpClient            *http.Client
 }
 
+const (
+	searchHTTPTimeout      = 12 * time.Second
+	searchOverallTimeout   = 15 * time.Second
+	semanticRetryMax       = 3
+	semanticRetryWindow    = 12 * time.Second
+	semanticRetryBackoffMS = 500 * time.Millisecond
+)
+
 func NewSearchClient(config AppConfig) *SearchClient {
 	searchConfig := normalizeSearchAPIConfig(config.Search)
 	return &SearchClient{
 		semanticScholarAPIKey: searchConfig.SemanticScholarAPIKey,
-		httpClient:            &http.Client{Timeout: 60 * time.Second},
+		httpClient:            &http.Client{Timeout: searchHTTPTimeout},
 	}
 }
 
@@ -736,10 +744,10 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	var combined []SearchPaper
 	var errs []string
 
-	// 使用更大的limit来获取更多结果
+	// 轻微超采样，避免单源返回偏少导致结果过窄。
 	searchLimit := limit
-	if limit < 100 {
-		searchLimit = 100 // 至少获取100条
+	if limit < 40 {
+		searchLimit = 40
 	}
 
 	// 并行调用多个搜索源
@@ -769,14 +777,25 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 		results <- sourceResult{papers: papers, err: err, name: "arxiv-sanity-lite"}
 	}()
 
-	// 收集所有结果
-	for i := 0; i < 3; i++ {
-		result := <-results
-		if result.err == nil && len(result.papers) > 0 {
-			combined = append(combined, result.papers...)
-		} else if result.err != nil {
-			// 记录错误但不立即返回，允许部分成功
-			errs = append(errs, fmt.Sprintf("%s: %v", result.name, result.err))
+	// 收集结果并设置总时限，避免某个源长时间阻塞 DeepStart 创建流程。
+	deadline := time.NewTimer(searchOverallTimeout)
+	defer deadline.Stop()
+
+	received := 0
+	for received < 3 {
+		select {
+		case result := <-results:
+			received++
+			if result.err == nil && len(result.papers) > 0 {
+				combined = append(combined, result.papers...)
+				continue
+			}
+			if result.err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", result.name, result.err))
+			}
+		case <-deadline.C:
+			errs = append(errs, fmt.Sprintf("search timed out after %s", searchOverallTimeout))
+			received = 3
 		}
 	}
 
@@ -897,24 +916,19 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 		limit,
 	)
 
-	// 重试机制：1分钟内最多重试10次，每次间隔递增
-	maxRetries := 10
-	maxDuration := time.Minute
+	// 轻量重试：控制在秒级窗口，避免 DeepStart 首次创建被长时间阻塞。
+	maxRetries := semanticRetryMax
+	maxDuration := semanticRetryWindow
 	startTime := time.Now()
 
 	var lastErr error
 	for retry := 0; retry < maxRetries; retry++ {
-		// 检查是否超过总时间限制
 		if time.Since(startTime) > maxDuration {
 			break
 		}
 
-		// 重试时增加延迟
 		if retry > 0 {
-			delay := time.Duration(retry) * 3 * time.Second
-			if delay > 30*time.Second {
-				delay = 30 * time.Second
-			}
+			delay := time.Duration(retry) * semanticRetryBackoffMS
 			time.Sleep(delay)
 		}
 
@@ -933,18 +947,16 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 			lastErr = err
 			continue
 		}
-		defer resp.Body.Close()
-
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			lastErr = err
 			continue
 		}
 
-		// 处理429错误（速率限制）- 继续重试
+		// 429 基本属于短期配额限制，继续重试收益极低，直接快速失败。
 		if resp.StatusCode == 429 {
-			lastErr = fmt.Errorf("rate limited (429), retry %d/%d", retry+1, maxRetries)
-			continue
+			return nil, fmt.Errorf("rate limited (429)")
 		}
 
 		if resp.StatusCode >= 400 {
