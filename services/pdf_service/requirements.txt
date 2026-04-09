@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+httpx
+openai
+anthropic
+pydantic-settings
+requests
+marker-pdf
+pytest
