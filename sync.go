@@ -68,7 +68,7 @@ func (db *DB) SaveSyncRecord(record *SyncRecord) error {
 			INSERT INTO sync_records (
 				id, type, file_name, file_size, remote_path, local_path,
 				status, error_message, created_at, completed_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		record.ID,
 		record.Type,
@@ -224,6 +224,11 @@ func (db *DB) ResolveSyncConflict(conflictID, resolution string) error {
 	return err
 }
 
+func (db *DB) ClearSyncConflicts() error {
+	_, err := db.conn.Exec(`DELETE FROM sync_conflicts`)
+	return err
+}
+
 // SyncManager 同步管理器
 type SyncManager struct {
 	db          *DB
@@ -240,7 +245,7 @@ func NewSyncManager(db *DB, config AppConfig) *SyncManager {
 			AccessToken:  config.BaiduCloud.Token,
 			RefreshToken: config.BaiduCloud.Token,
 			ClientID:     "",
-			ClientSecret:  "",
+			ClientSecret: "",
 		}
 		baiduClient = NewBaiduPCSClient(token)
 	}
@@ -304,12 +309,12 @@ func (sm *SyncManager) SyncOnStartup() error {
 
 			// 保存同步记录
 			record := &SyncRecord{
-				Type:       "download",
-				FileName:   filepath.Base(remoteFile.Path),
-				FileSize:   remoteFile.Size,
-				RemotePath: remoteFile.Path,
-				LocalPath:  filepath.Join(sm.config.DataPath, filepath.Base(remoteFile.Path)),
-				Status:     "success",
+				Type:        "download",
+				FileName:    filepath.Base(remoteFile.Path),
+				FileSize:    remoteFile.Size,
+				RemotePath:  remoteFile.Path,
+				LocalPath:   filepath.Join(sm.config.DataPath, filepath.Base(remoteFile.Path)),
+				Status:      "success",
 				CompletedAt: time.Now(),
 			}
 			sm.db.SaveSyncRecord(record)
@@ -369,12 +374,12 @@ func (sm *SyncManager) SyncToCloud() error {
 
 		// 保存成功的同步记录
 		record := &SyncRecord{
-			Type:       "upload",
-			FileName:   filepath.Base(localPath),
-			FileSize:   localFile.Size,
-			LocalPath:  localPath,
-			RemotePath: fmt.Sprintf("/apps/%s/%s", syncApp, filepath.Base(localPath)),
-			Status:     "success",
+			Type:        "upload",
+			FileName:    filepath.Base(localPath),
+			FileSize:    localFile.Size,
+			LocalPath:   localPath,
+			RemotePath:  fmt.Sprintf("/apps/%s/%s", syncApp, filepath.Base(localPath)),
+			Status:      "success",
 			CompletedAt: time.Now(),
 		}
 		sm.db.SaveSyncRecord(record)
@@ -455,11 +460,11 @@ func (sm *SyncManager) DetectConflicts() ([]SyncConflict, error) {
 				// 云端更新
 				conflicts = append(conflicts, SyncConflict{
 					FileName:   filepath.Base(remoteFile.Path),
-					LocalPath:   localFile.Path,
-					LocalTime:   localFile.Modified,
-					RemotePath:  remoteFile.Path,
-					RemoteTime:  remoteFile.Modified,
-					Resolution:  "", // 待解决
+					LocalPath:  localFile.Path,
+					LocalTime:  localFile.Modified,
+					RemotePath: remoteFile.Path,
+					RemoteTime: remoteFile.Modified,
+					Resolution: "", // 待解决
 				})
 			}
 		}

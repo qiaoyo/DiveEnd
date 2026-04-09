@@ -7,19 +7,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 const (
-	baiduXPAN    = "https://pan.baidu.com/rest/2.0/xpan"
-	baiduPCS     = "https://d.pcs.baidu.com/rest/2.0/pcs/superfile2"
-	baiduAuth    = "https://openapi.baidu.com/oauth/2.0/token"
-	baiduQuota   = "https://pan.baidu.com/api/quota"
-	blockSize    = 4 * 1024 * 1024 // 4MB
+	baiduXPAN  = "https://pan.baidu.com/rest/2.0/xpan"
+	baiduPCS   = "https://d.pcs.baidu.com/rest/2.0/pcs/superfile2"
+	baiduAuth  = "https://openapi.baidu.com/oauth/2.0/token"
+	baiduQuota = "https://pan.baidu.com/api/quota"
+	blockSize  = 4 * 1024 * 1024 // 4MB
 )
 
 // BaiduPCSClient 百度网盘客户端
@@ -157,7 +159,7 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 	if remoteName == "" {
 		remoteName = filepath.Base(localPath)
 	}
-	remotePath := fmt.Sprintf("/apps/diveendend/%s", remoteName)
+	remotePath := fmt.Sprintf("/apps/%s/%s", syncApp, remoteName)
 
 	fileInfo, err := os.Stat(localPath)
 	if err != nil {
@@ -206,22 +208,16 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 	}
 
 	// 1. 预上传
-	precreateData := map[string]interface{}{
-		"path":       remotePath,
-		"size":       fileSize,
-		"isdir":      0,
-		"autoinit":    1,
-		"block_list":  string(blockListJSON),
-		"rtype":       3,
-	}
-
-	precreateDataJSON, err := json.Marshal(precreateData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal precreate data: %w", err)
-	}
+	precreateForm := url.Values{}
+	precreateForm.Set("path", remotePath)
+	precreateForm.Set("size", fmt.Sprintf("%d", fileSize))
+	precreateForm.Set("isdir", "0")
+	precreateForm.Set("autoinit", "1")
+	precreateForm.Set("block_list", string(blockListJSON))
+	precreateForm.Set("rtype", "3")
 
 	reqURL := fmt.Sprintf("%s/file?method=precreate&access_token=%s", baiduXPAN, accessToken)
-	resp, err := c.httpClient.Post(reqURL, "application/json", bytes.NewReader(precreateDataJSON))
+	resp, err := c.httpClient.Post(reqURL, "application/x-www-form-urlencoded", strings.NewReader(precreateForm.Encode()))
 	if err != nil {
 		return fmt.Errorf("failed to precreate: %w", err)
 	}
@@ -245,6 +241,19 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 
 	// 2. 分片上传
 	for i, chunk := range chunks {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		part, err := writer.CreateFormFile("file", fmt.Sprintf("chunk-%d", i))
+		if err != nil {
+			return fmt.Errorf("failed to create upload chunk body: %w", err)
+		}
+		if _, err := part.Write(chunk); err != nil {
+			return fmt.Errorf("failed to write upload chunk: %w", err)
+		}
+		if err := writer.Close(); err != nil {
+			return fmt.Errorf("failed to finalize upload chunk body: %w", err)
+		}
+
 		reqURL := fmt.Sprintf(
 			"%s?method=upload&access_token=%s&type=tmpfile&path=%s&uploadid=%s&partseq=%d",
 			baiduPCS,
@@ -254,11 +263,11 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 			i,
 		)
 
-		req, err := http.NewRequest("POST", reqURL, bytes.NewReader(chunk))
+		req, err := http.NewRequest("POST", reqURL, body)
 		if err != nil {
 			return fmt.Errorf("failed to create upload request: %w", err)
 		}
-		req.Header.Set("Content-Type", "multipart/form-data")
+		req.Header.Set("Content-Type", writer.FormDataContentType())
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
@@ -281,22 +290,16 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 	}
 
 	// 3. 合并创建文件
-	createData := map[string]interface{}{
-		"path":       remotePath,
-		"size":       fileSize,
-		"isdir":      0,
-		"uploadid":   uploadID,
-		"block_list":  string(blockListJSON),
-		"rtype":       3,
-	}
-
-	createDataJSON, err := json.Marshal(createData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal create data: %w", err)
-	}
+	createForm := url.Values{}
+	createForm.Set("path", remotePath)
+	createForm.Set("size", fmt.Sprintf("%d", fileSize))
+	createForm.Set("isdir", "0")
+	createForm.Set("uploadid", uploadID)
+	createForm.Set("block_list", string(blockListJSON))
+	createForm.Set("rtype", "3")
 
 	reqURL = fmt.Sprintf("%s/file?method=create&access_token=%s", baiduXPAN, accessToken)
-	resp, err = c.httpClient.Post(reqURL, "application/json", bytes.NewReader(createDataJSON))
+	resp, err = c.httpClient.Post(reqURL, "application/x-www-form-urlencoded", strings.NewReader(createForm.Encode()))
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
@@ -307,10 +310,11 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 		return fmt.Errorf("failed to decode create response: %w", err)
 	}
 
-	if fsID, ok := createResult["fs_id"].(string); ok {
-		fmt.Printf("[上传成功] path=%s, fs_id=%s\n", createResult["path"], fsID)
+	if fsID := fmt.Sprint(createResult["fs_id"]); fsID != "" && fsID != "<nil>" {
+		fmt.Printf("[上传成功] path=%v, fs_id=%s\n", createResult["path"], fsID)
 	} else {
 		fmt.Printf("[上传失败] errno=%v, msg=%v\n", createResult["errno"], createResult["show_msg"])
+		return fmt.Errorf("create file failed: %v", createResult)
 	}
 
 	return nil
@@ -329,7 +333,7 @@ func (c *BaiduPCSClient) DownloadFile(remotePath, localPath string) error {
 
 	// 1. 列目录获取 fs_id
 	dirPath := filepath.Dir(remotePath)
-	listURL := fmt.Sprintf("%s/file?method=list&access_token=%s&dir=%s&limit=1000", baiduXPAN, accessToken, dirPath)
+	listURL := fmt.Sprintf("%s/file?method=list&access_token=%s&dir=%s&limit=1000", baiduXPAN, accessToken, url.QueryEscape(dirPath))
 	resp, err := c.httpClient.Get(listURL)
 	if err != nil {
 		return fmt.Errorf("failed to list files: %w", err)
@@ -350,9 +354,7 @@ func (c *BaiduPCSClient) DownloadFile(remotePath, localPath string) error {
 	for _, item := range fileList {
 		if fileMap, ok := item.(map[string]interface{}); ok {
 			if path, ok := fileMap["path"].(string); ok && path == remotePath {
-				if id, ok := fileMap["fs_id"].(string); ok {
-					fsID = id
-				}
+				fsID = strings.TrimSpace(fmt.Sprint(fileMap["fs_id"]))
 				break
 			}
 		}
@@ -368,7 +370,7 @@ func (c *BaiduPCSClient) DownloadFile(remotePath, localPath string) error {
 		return fmt.Errorf("failed to marshal fsids: %w", err)
 	}
 
-	metaURL := fmt.Sprintf("%s/multimedia?method=filemetas&access_token=%s&fsids=%s&dlink=1", baiduXPAN, accessToken, fsidsJSON)
+	metaURL := fmt.Sprintf("%s/multimedia?method=filemetas&access_token=%s&fsids=%s&dlink=1", baiduXPAN, accessToken, url.QueryEscape(string(fsidsJSON)))
 	resp, err = c.httpClient.Get(metaURL)
 	if err != nil {
 		return fmt.Errorf("failed to get file meta: %w", err)
@@ -431,7 +433,7 @@ func (c *BaiduPCSClient) ListFiles(dir string) ([]FileInfo, error) {
 		return nil, err
 	}
 
-	reqURL := fmt.Sprintf("%s/file?method=list&access_token=%s&dir=%s&limit=1000", baiduXPAN, accessToken, dir)
+	reqURL := fmt.Sprintf("%s/file?method=list&access_token=%s&dir=%s&limit=1000", baiduXPAN, accessToken, url.QueryEscape(dir))
 	resp, err := c.httpClient.Get(reqURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
@@ -466,6 +468,9 @@ func (c *BaiduPCSClient) ListFiles(dir string) ([]FileInfo, error) {
 			}
 			if md5, ok := fileMap["md5"].(string); ok {
 				file.MD5 = md5
+			}
+			if modified, ok := fileMap["server_mtime"].(float64); ok && modified > 0 {
+				file.Modified = time.Unix(int64(modified), 0)
 			}
 
 			files = append(files, file)
