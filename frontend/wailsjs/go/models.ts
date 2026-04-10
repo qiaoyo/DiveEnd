@@ -21,6 +21,12 @@ export namespace main {
 	    }
 	}
 	export class SearchAPIConfig {
+	    enableSemanticScholar: boolean;
+	    enableArxiv: boolean;
+	    semanticScholarKeyPath: string;
+	    perSourceResultLimit: number;
+	    retryDurationSeconds: number;
+	    retryIntervalSeconds: number;
 	    semanticScholarApiKey?: string;
 	    hasSemanticScholarApiKey: boolean;
 	    clearSemanticScholarApiKey?: boolean;
@@ -31,6 +37,12 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enableSemanticScholar = source["enableSemanticScholar"];
+	        this.enableArxiv = source["enableArxiv"];
+	        this.semanticScholarKeyPath = source["semanticScholarKeyPath"];
+	        this.perSourceResultLimit = source["perSourceResultLimit"];
+	        this.retryDurationSeconds = source["retryDurationSeconds"];
+	        this.retryIntervalSeconds = source["retryIntervalSeconds"];
 	        this.semanticScholarApiKey = source["semanticScholarApiKey"];
 	        this.hasSemanticScholarApiKey = source["hasSemanticScholarApiKey"];
 	        this.clearSemanticScholarApiKey = source["clearSemanticScholarApiKey"];
@@ -447,6 +459,28 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ExtractProgress {
+	    sessionId: string;
+	    total: number;
+	    completed: number;
+	    currentFile: string;
+	    status: string;
+	    errorMessage?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtractProgress(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessionId = source["sessionId"];
+	        this.total = source["total"];
+	        this.completed = source["completed"];
+	        this.currentFile = source["currentFile"];
+	        this.status = source["status"];
+	        this.errorMessage = source["errorMessage"];
+	    }
+	}
 	export class Folder {
 	    id: string;
 	    name: string;
@@ -580,6 +614,20 @@ export namespace main {
 	}
 	
 	
+	export class PathHistoryItem {
+	    dimension: string;
+	    choice: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PathHistoryItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dimension = source["dimension"];
+	        this.choice = source["choice"];
+	    }
+	}
 	export class SaveConfigResult {
 	    config: AppConfig;
 	    restartRequired: boolean;
@@ -612,9 +660,383 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ScreeningDecisionOption {
+	    key: string;
+	    label: string;
+	    paperIds: string[];
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScreeningDecisionOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.paperIds = source["paperIds"];
+	        this.count = source["count"];
+	    }
+	}
+	export class ScreeningDecisionNode {
+	    id: string;
+	    nodeType: string;
+	    message: string;
+	    dimension: string;
+	    options: ScreeningDecisionOption[];
+	    allowMultiSelect: boolean;
+	    allowSkip: boolean;
+	    remainingPaperIds: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ScreeningDecisionNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.nodeType = source["nodeType"];
+	        this.message = source["message"];
+	        this.dimension = source["dimension"];
+	        this.options = this.convertValues(source["options"], ScreeningDecisionOption);
+	        this.allowMultiSelect = source["allowMultiSelect"];
+	        this.allowSkip = source["allowSkip"];
+	        this.remainingPaperIds = source["remainingPaperIds"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class ScreeningPaper {
+	    id: string;
+	    sessionId: string;
+	    fileName: string;
+	    filePath: string;
+	    fileSize: number;
+	    status: string;
+	    title?: string;
+	    authors?: string;
+	    abstract?: string;
+	    fullText?: string;
+	    sectionsJson?: string;
+	    selection?: string;
+	    reason?: string;
+	    targetFolderId?: string;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScreeningPaper(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.fileName = source["fileName"];
+	        this.filePath = source["filePath"];
+	        this.fileSize = source["fileSize"];
+	        this.status = source["status"];
+	        this.title = source["title"];
+	        this.authors = source["authors"];
+	        this.abstract = source["abstract"];
+	        this.fullText = source["fullText"];
+	        this.sectionsJson = source["sectionsJson"];
+	        this.selection = source["selection"];
+	        this.reason = source["reason"];
+	        this.targetFolderId = source["targetFolderId"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ScreeningSession {
+	    id: string;
+	    title: string;
+	    status: string;
+	    totalPapers: number;
+	    currentNodeJson?: string;
+	    selectedOptionsJson?: string;
+	    pathHistoryJson?: string;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScreeningSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.status = source["status"];
+	        this.totalPapers = source["totalPapers"];
+	        this.currentNodeJson = source["currentNodeJson"];
+	        this.selectedOptionsJson = source["selectedOptionsJson"];
+	        this.pathHistoryJson = source["pathHistoryJson"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ScreeningSessionDetail {
+	    session: ScreeningSession;
+	    papers: ScreeningPaper[];
+	    currentNode?: ScreeningDecisionNode;
+	    pathHistory: PathHistoryItem[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ScreeningSessionDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.session = this.convertValues(source["session"], ScreeningSession);
+	        this.papers = this.convertValues(source["papers"], ScreeningPaper);
+	        this.currentNode = this.convertValues(source["currentNode"], ScreeningDecisionNode);
+	        this.pathHistory = this.convertValues(source["pathHistory"], PathHistoryItem);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	
 	
+	export class SyncConflict {
+	    id: string;
+	    fileName: string;
+	    localPath: string;
+	    // Go type: time
+	    localTime: any;
+	    remotePath: string;
+	    // Go type: time
+	    remoteTime: any;
+	    resolution: string;
+	    // Go type: time
+	    resolvedAt?: any;
+	    // Go type: time
+	    createdAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncConflict(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.fileName = source["fileName"];
+	        this.localPath = source["localPath"];
+	        this.localTime = this.convertValues(source["localTime"], null);
+	        this.remotePath = source["remotePath"];
+	        this.remoteTime = this.convertValues(source["remoteTime"], null);
+	        this.resolution = source["resolution"];
+	        this.resolvedAt = this.convertValues(source["resolvedAt"], null);
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SyncProgress {
+	    total: number;
+	    completed: number;
+	    currentFile: string;
+	    status: string;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncProgress(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total = source["total"];
+	        this.completed = source["completed"];
+	        this.currentFile = source["currentFile"];
+	        this.status = source["status"];
+	        this.message = source["message"];
+	    }
+	}
+	export class SyncRecord {
+	    id: string;
+	    type: string;
+	    fileName: string;
+	    fileSize: number;
+	    remotePath: string;
+	    localPath: string;
+	    status: string;
+	    errorMessage?: string;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    completedAt?: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.fileName = source["fileName"];
+	        this.fileSize = source["fileSize"];
+	        this.remotePath = source["remotePath"];
+	        this.localPath = source["localPath"];
+	        this.status = source["status"];
+	        this.errorMessage = source["errorMessage"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.completedAt = this.convertValues(source["completedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SyncStatus {
+	    enabled: boolean;
+	    provider: string;
+	    // Go type: time
+	    lastSync?: any;
+	    syncInProgress: boolean;
+	    pendingFiles: number;
+	    conflicts: number;
+	    totalSynced: number;
+	    totalFailed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.provider = source["provider"];
+	        this.lastSync = this.convertValues(source["lastSync"], null);
+	        this.syncInProgress = source["syncInProgress"];
+	        this.pendingFiles = source["pendingFiles"];
+	        this.conflicts = source["conflicts"];
+	        this.totalSynced = source["totalSynced"];
+	        this.totalFailed = source["totalFailed"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class TranslationRecord {
 	    id: string;
 	    paperId: string;

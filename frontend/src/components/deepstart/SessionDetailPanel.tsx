@@ -26,11 +26,11 @@ type BusyAction = 'replying' | 'rerunning' | 'selecting' | 'importing' | null;
 function tierStyle(tier: string) {
   switch (tier) {
     case 'core':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300';
+      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200';
     case 'important':
-      return 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300';
+      return 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200';
     default:
-      return 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300';
+      return 'bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-200';
   }
 }
 
@@ -306,53 +306,41 @@ export function SessionDetailPanel() {
         key={paper.id}
         type="button"
         onClick={() => void toggleSelect(paper.id)}
-        className={`rounded-3xl border p-5 text-left transition ${
+        className={`rounded-2xl border p-4 text-left transition ${
           isSelected
-            ? 'border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-950/20'
+            ? 'border-indigo-400 bg-indigo-50/90 dark:border-indigo-500/60 dark:bg-indigo-500/15'
             : isRecommended
-              ? 'border-amber-300 bg-white shadow-sm hover:border-amber-400 dark:border-amber-800 dark:bg-stone-900/70'
-              : 'border-stone-200 bg-white hover:border-emerald-300 hover:shadow-sm dark:border-stone-800 dark:bg-stone-900/70'
+              ? 'border-violet-300 bg-violet-50/70 hover:border-violet-400 dark:border-violet-500/60 dark:bg-violet-500/15'
+              : 'border-slate-200 bg-white/85 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/80'
         }`}
       >
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-semibold leading-6">{paper.title}</h3>
+              <h3 className="text-sm font-semibold leading-6">{paper.title}</h3>
               {note && (
-                <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${tierStyle(note.tier)}`}>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tierStyle(note.tier)}`}>
                   {note.tier}
                 </span>
               )}
             </div>
-            <p className="mt-2 text-sm text-stone-600 dark:text-stone-300">
-              {paper.authors || '作者信息缺失'}
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
+              {paper.journal || '未知来源'} · {paper.year || '年份未知'}
             </p>
           </div>
           <div
             className={`mt-1 h-5 w-5 shrink-0 rounded-full border ${
-              isSelected
-                ? 'border-emerald-600 bg-emerald-600'
-                : 'border-stone-300 dark:border-stone-600'
+              isSelected ? 'border-indigo-500 bg-indigo-500' : 'border-slate-300 dark:border-slate-500'
             }`}
           />
         </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
-          <span>{paper.journal || '未知来源'}</span>
-          <span>·</span>
-          <span>{paper.year || '年份未知'}</span>
-          {paper.category && (
-            <span className="rounded-full bg-stone-100 px-2 py-1 dark:bg-stone-800">{paper.category}</span>
-          )}
-        </div>
-
+        <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-300">{paper.authors || '作者信息缺失'}</p>
         {note?.reason && (
-          <p className="mt-3 rounded-2xl bg-stone-50 px-3 py-2 text-sm leading-6 text-stone-600 dark:bg-stone-950/70 dark:text-stone-300">
+          <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
             {note.reason}
           </p>
         )}
-
-        <p className="mt-4 line-clamp-4 text-sm leading-6 text-stone-600 dark:text-stone-300">
+        <p className="mt-3 line-clamp-4 text-sm leading-6 text-slate-600 dark:text-slate-200">
           {paper.abstract || '暂无摘要。'}
         </p>
       </button>
@@ -363,10 +351,10 @@ export function SessionDetailPanel() {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
-          <p className="text-stone-600 dark:text-stone-400">未找到会话</p>
+          <p className="text-slate-600 dark:text-slate-300">未找到会话</p>
           <button
             onClick={() => navigate('/history')}
-            className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+            className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500"
           >
             返回历史
           </button>
@@ -375,30 +363,30 @@ export function SessionDetailPanel() {
     );
   }
 
+  const activeTargetFolderId =
+    activeDeepStartSession.summary.targetFolderId || activeFolderId || folders[0]?.id || '';
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f9f6f0] dark:bg-[#141414]">
-      <div className="border-b border-stone-200 p-4 dark:border-stone-800">
-        <div className="flex items-center gap-4 mb-4">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <div className="border-b border-slate-200/80 bg-white/70 px-6 py-4 backdrop-blur-md dark:border-slate-700/50 dark:bg-slate-900/55">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3">
           <button
             onClick={() => navigate('/history')}
-            className="flex items-center gap-2 text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
           >
             <ArrowLeft className="h-4 w-4" />
             返回历史
           </button>
-          <div className="flex-1">
-            <h2 className="text-lg font-semibold">{activeDeepStartSession.summary.title}</h2>
-            <p className="text-sm text-stone-500 dark:text-stone-400">
-              当前检索: {activeDeepStartSession.summary.currentQuery}
-            </p>
-          </div>
-        </div>
 
-        <div className="flex flex-wrap gap-3">
+          <div className="min-w-[220px] flex-1">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Current Session</p>
+            <h2 className="truncate text-base font-semibold">{activeDeepStartSession.summary.title}</h2>
+          </div>
+
           <select
-            value={activeDeepStartSession.summary.targetFolderId || activeFolderId || folders[0]?.id || ''}
+            value={activeTargetFolderId}
             onChange={(event) => void handleTargetFolderChange(event.target.value)}
-            className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+            className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
           >
             {folders.map((folder) => (
               <option key={folder.id} value={folder.id}>
@@ -407,179 +395,192 @@ export function SessionDetailPanel() {
             ))}
           </select>
 
-          <input
-            type="text"
-            value={rerunQuery}
-            onChange={(event) => setRerunQuery(event.target.value)}
-            onKeyDown={(event) => event.key === 'Enter' && void handleRerun()}
-            placeholder="修改query重新检索"
-            className="flex-1 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
-          />
-
-          <button
-            onClick={() => void handleRerun()}
-            disabled={busyAction !== null}
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {busyAction === 'rerunning' ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            重搜
-          </button>
-
           <button
             onClick={() => void handleCreateFolder()}
             disabled={isCreatingFolder}
-            className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm hover:bg-stone-50 dark:border-stone-700 dark:hover:bg-stone-800"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
           >
             <FolderPlus className="h-4 w-4" />
             新建文件夹
           </button>
+        </div>
 
-          <button
-            onClick={() => void handleImportSelected()}
-            disabled={selectedPaperIds.size === 0 || busyAction !== null}
-            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-60"
-          >
-            <Plus className="h-4 w-4" />
-            导入选中 ({selectedPaperIds.size})
-          </button>
+        <div className="mx-auto mt-3 max-w-7xl rounded-2xl border border-white/80 bg-white/85 p-3 shadow-sm dark:border-slate-500/30 dark:bg-slate-900/80">
+          <div className="flex flex-wrap items-center gap-2">
+            <Sparkles className="h-4 w-4 text-violet-500" />
+            <input
+              type="text"
+              value={rerunQuery}
+              onChange={(event) => setRerunQuery(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && void handleRerun()}
+              placeholder="修改 query 重新检索"
+              className="min-w-[240px] flex-1 border-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-slate-400"
+            />
+            <button
+              onClick={() => void handleRerun()}
+              disabled={busyAction !== null}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-sm text-white transition hover:bg-indigo-500 disabled:opacity-60"
+            >
+              {busyAction === 'rerunning' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              重搜
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-6">
-        <div className="grid gap-6">
-          {/* AI Chat */}
-          <div className="rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900">
-            <div className="flex items-center gap-2 mb-4">
-              <Sparkles className="h-5 w-5 text-emerald-600" />
-              <span className="font-medium">AI 分析</span>
-            </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28 pt-6">
+        <div className="mx-auto grid max-w-7xl gap-6 xl:grid-cols-[330px_1fr]">
+          <aside className="space-y-4">
+            <section className="de-glass rounded-2xl p-4">
+              <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Overview</h3>
+              <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-200">
+                {currentAnalysis?.overview || 'AI 正在构建这轮检索的分组策略。'}
+              </p>
+            </section>
 
-            <div className="space-y-3 mb-4">
-              {activeDeepStartSession.messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`rounded-2xl px-4 py-3 text-sm ${
-                    message.role === 'assistant'
-                      ? 'bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-200'
-                      : 'ml-auto bg-blue-600 text-white max-w-[80%]'
-                  }`}
-                >
-                  {message.content}
+            {(currentAnalysis?.suggestedQueries ?? []).length > 0 && (
+              <section className="de-glass rounded-2xl p-4">
+                <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Suggested Queries</h3>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(currentAnalysis?.suggestedQueries ?? []).map((query) => (
+                    <button
+                      key={query}
+                      onClick={() => void handleRerun(query)}
+                      disabled={busyAction !== null}
+                      className="rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                    >
+                      {query}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </section>
+            )}
 
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={replyInput}
-                onChange={(event) => setReplyInput(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && void handleReply(replyInput)}
-                placeholder="告诉AI你的筛选偏好..."
-                className="flex-1 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
-              />
-              <button
-                onClick={() => void handleReply(replyInput)}
-                disabled={busyAction !== null || !replyInput.trim()}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-60"
-              >
-                {busyAction === 'replying' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Bot className="h-4 w-4" />
-                )}
-                发送
-              </button>
-            </div>
-          </div>
+            <section className="de-glass rounded-2xl p-4">
+              <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Category Tree</h3>
+              <div className="mt-3 space-y-2">
+                {groupedDirections.map((direction, index) => {
+                  const selectedCount = direction.paperIds.filter((paperId) => selectedPaperIds.has(paperId)).length;
+                  return (
+                    <div key={direction.id} className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/80">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-medium">{direction.name}</div>
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
+                          {direction.paperIds.length}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-300">{direction.summary}</p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          onClick={() => void toggleDirection(direction, true)}
+                          disabled={busyAction !== null}
+                          className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          全选 {selectedCount}/{direction.paperIds.length}
+                        </button>
+                        <button
+                          onClick={() => void toggleDirection(direction, false)}
+                          disabled={busyAction !== null}
+                          className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          清空
+                        </button>
+                      </div>
+                      {index < groupedDirections.length - 1 && (
+                        <div className="mx-auto mt-2 h-3 w-px border-l border-dashed border-indigo-300 dark:border-indigo-500/40" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
 
-          {/* Suggested Queries */}
-          {(currentAnalysis?.suggestedQueries ?? []).length > 0 && (
-            <div className="rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900">
-              <p className="text-sm font-medium mb-3">建议扩搜Query</p>
-              <div className="flex flex-wrap gap-2">
-                {(currentAnalysis?.suggestedQueries ?? []).map((query) => (
-                  <button
-                    key={query}
-                    onClick={() => void handleRerun(query)}
-                    disabled={busyAction !== null}
-                    className="rounded-full bg-stone-900 px-3 py-1.5 text-sm text-white hover:bg-stone-700 disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+            <section className="de-glass rounded-2xl p-4">
+              <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">
+                <Bot className="h-3.5 w-3.5" />
+                AI Chat
+              </h3>
+              <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
+                {activeDeepStartSession.messages.slice(-8).map((message) => (
+                  <div
+                    key={message.id}
+                    className={`rounded-xl px-3 py-2 text-xs leading-6 ${
+                      message.role === 'assistant'
+                        ? 'bg-white/80 text-slate-600 dark:bg-slate-900/80 dark:text-slate-200'
+                        : 'ml-4 bg-indigo-600 text-white'
+                    }`}
                   >
-                    {query}
-                  </button>
+                    {message.content}
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Papers by Direction */}
-          {currentResults.length > 0 ? (
-            groupedDirections.map((direction) => {
-              const directionSelectedCount = direction.paperIds.filter((paperId) =>
-                selectedPaperIds.has(paperId)
-              ).length;
-              return (
-                <div
-                  key={direction.id}
-                  className="rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900"
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="text"
+                  value={replyInput}
+                  onChange={(event) => setReplyInput(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && void handleReply(replyInput)}
+                  placeholder="补充你的筛选偏好"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
+                />
+                <button
+                  onClick={() => void handleReply(replyInput)}
+                  disabled={busyAction !== null || !replyInput.trim()}
+                  className="rounded-xl bg-violet-600 px-3 py-2 text-xs text-white transition hover:bg-violet-500 disabled:opacity-60"
                 >
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="text-lg font-semibold">{direction.name}</h3>
-                      <p className="text-sm text-stone-600 dark:text-stone-400 mt-1">
-                        {direction.summary}
-                      </p>
-                      <p className="text-xs text-stone-500 dark:text-stone-500 mt-1">
-                        {direction.why}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => void toggleDirection(direction, true)}
-                        disabled={busyAction !== null}
-                        className="rounded-lg border border-stone-200 px-3 py-1.5 text-sm hover:bg-stone-50 dark:border-stone-700 dark:hover:bg-stone-800"
-                      >
-                        全选 ({directionSelectedCount}/{direction.paperIds.length})
-                      </button>
-                      <button
-                        onClick={() => void toggleDirection(direction, false)}
-                        disabled={busyAction !== null}
-                        className="rounded-lg border border-stone-200 px-3 py-1.5 text-sm hover:bg-stone-50 dark:border-stone-700 dark:hover:bg-stone-800"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
+                  {busyAction === 'replying' ? '发送中' : '发送'}
+                </button>
+              </div>
+            </section>
+          </aside>
 
-                  <div className="grid gap-4 grid-cols-1">
+          <section className="space-y-4">
+            {currentResults.length > 0 ? (
+              groupedDirections.map((direction) => (
+                <div key={direction.id} className="de-glass rounded-2xl p-4">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold">{direction.name}</h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{direction.why}</p>
+                    </div>
+                    <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200">
+                      {direction.paperIds.length} papers
+                    </span>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
                     {direction.paperIds
                       .map((paperId) => paperById.get(paperId))
                       .filter((paper): paper is SearchPaper => Boolean(paper))
                       .map((paper) => renderPaperCard(paper))}
                   </div>
                 </div>
-              );
-            })
-          ) : (
-            <div className="rounded-2xl border border-dashed border-stone-300 bg-white/60 p-12 text-center dark:border-stone-700 dark:bg-stone-900/50">
-              <p className="text-stone-600 dark:text-stone-400">这一轮还没有拿到候选论文</p>
-              <p className="text-sm text-stone-500 dark:text-stone-500 mt-2">
-                点击上面的建议query，或告诉AI你想看什么类型的论文
-              </p>
-            </div>
-          )}
+              ))
+            ) : (
+              <div className="de-glass rounded-2xl p-10 text-center">
+                <p className="text-slate-600 dark:text-slate-200">这一轮还没有拿到候选论文</p>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+                  可以点击左侧建议 query 重跑，或告诉 AI 你更偏好的论文类型。
+                </p>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
 
-          {/* Summary */}
-          <div className="rounded-2xl bg-stone-50 p-4 dark:bg-stone-950/70">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <CheckCheck className="h-4 w-4 text-emerald-600" />
-              当前已选 {selectedPaperIds.size} 篇论文
-            </div>
+      <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-7xl -translate-x-1/2 px-6">
+        <div className="pointer-events-auto mx-auto flex max-w-xl items-center justify-between rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/90">
+          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-200">
+            <CheckCheck className="h-4 w-4 text-indigo-500" />
+            当前已选 <span className="font-semibold text-indigo-600 dark:text-indigo-300">{selectedPaperIds.size}</span> 篇论文
           </div>
+          <button
+            onClick={() => void handleImportSelected()}
+            disabled={selectedPaperIds.size === 0 || busyAction !== null}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busyAction === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            导入选中
+          </button>
         </div>
       </div>
     </div>

@@ -274,8 +274,8 @@ func (a *App) searchDeepStartResults(query string) ([]SearchPaper, string) {
 		return []SearchPaper{}, "搜索服务当前不可用。"
 	}
 
-	// DeepStart 首轮以响应速度优先，避免创建会话阶段长时间等待。
-	results, err := a.search.Search(query, 40)
+	// DeepStart 保证候选规模，便于后续 AI 分类与筛选。
+	results, err := a.search.Search(query, 100)
 	if err != nil {
 		return []SearchPaper{}, fmt.Sprintf("本轮检索暂时失败：%v", err)
 	}

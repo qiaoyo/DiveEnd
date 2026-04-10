@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { BookOpen, BookText, ExternalLink, Languages, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { BookOpen, BookText, ExternalLink, Languages, Loader2, MessageSquare } from 'lucide-react';
 import { getTranslations, translatePaperSection } from '../../lib/backend';
 import { useAppStore } from '../../stores/appStore';
 
@@ -13,6 +13,7 @@ export function DeepReadPanel() {
     setTranslations,
     translations,
   } = useAppStore();
+
   const [section, setSection] = useState('Abstract');
   const [originalText, setOriginalText] = useState('');
 
@@ -39,13 +40,15 @@ export function DeepReadPanel() {
     void loadTranslations();
   }, [selectedPaper, setError, setTranslations]);
 
+  const latestTranslation = useMemo(() => translations[0], [translations]);
+
   if (!selectedPaper) {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-[#f9f6f0] p-8 text-center dark:bg-[#141414]">
-        <BookOpen className="mb-4 h-16 w-16 text-stone-300 dark:text-stone-700" />
-        <h3 className="text-lg font-medium">DeepRead - 论文阅读</h3>
-        <p className="mt-2 max-w-md text-sm leading-7 text-stone-500 dark:text-stone-400">
-          先从右侧论文库选中一篇论文，再把需要精读的章节粘贴进来。翻译和摘要会被保存在当前论文的历史记录里。
+      <div className="flex h-full flex-col items-center justify-center text-center">
+        <BookOpen className="mb-4 h-14 w-14 text-slate-300 dark:text-slate-700" />
+        <h3 className="text-lg font-semibold">DeepRead - 沉浸阅读</h3>
+        <p className="mt-2 max-w-md text-sm leading-7 text-slate-500 dark:text-slate-300">
+          先从右侧论文库选中一篇论文，再进入三栏阅读与翻译工作流。
         </p>
       </div>
     );
@@ -71,24 +74,19 @@ export function DeepReadPanel() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f9f6f0] dark:bg-[#141414]">
-      <div className="border-b border-stone-200 p-6 dark:border-stone-800">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <div className="border-b border-slate-200/80 bg-white/70 px-5 py-3 backdrop-blur-md dark:border-slate-700/50 dark:bg-slate-900/55">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <BookOpen className="h-5 w-5 text-emerald-600" />
-              DeepRead - 论文阅读
-            </h2>
-            <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-              手动粘贴章节内容，保存 AI 翻译和摘要历史。
-            </p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-300">DeepRead</p>
+            <h2 className="max-w-3xl truncate text-base font-semibold">{selectedPaper.title}</h2>
           </div>
           {selectedPaper.url && (
             <a
               href={selectedPaper.url}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-3 py-1.5 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
             >
               打开原文
               <ExternalLink className="h-4 w-4" />
@@ -97,122 +95,101 @@ export function DeepReadPanel() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden">
-        <div className="min-h-0 overflow-y-auto p-6">
-          <div className="rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-            <p className="text-xs uppercase tracking-[0.2em] text-stone-500 dark:text-stone-400">
-              当前论文
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold leading-9">{selectedPaper.title}</h1>
-            <p className="mt-3 text-sm text-stone-600 dark:text-stone-300">{selectedPaper.authors}</p>
-            <p className="mt-2 text-xs uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500">
-              {selectedPaper.journal || '未知来源'} · {selectedPaper.year || '年份未知'}
-            </p>
-            <p className="mt-5 text-sm leading-7 text-stone-600 dark:text-stone-300">
-              {selectedPaper.abstract || '暂无摘要。'}
-            </p>
-          </div>
-
-          <div className="mt-6 rounded-[2rem] border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-            <div className="flex items-center gap-2">
-              <BookText className="h-5 w-5 text-emerald-600" />
-              <h3 className="text-lg font-semibold">手动章节翻译</h3>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-medium">章节名</label>
-                <input
-                  type="text"
-                  value={section}
-                  onChange={(e) => setSection(e.target.value)}
-                  placeholder="例如：Abstract / Method / Discussion"
-                  className="w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-950"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">原文内容</label>
-                <textarea
-                  value={originalText}
-                  onChange={(e) => setOriginalText(e.target.value)}
-                  placeholder="粘贴论文章节内容..."
-                  className="min-h-[240px] w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-7 outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-950"
-                />
-              </div>
-
+      <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[0.95fr_1.6fr_1.05fr]">
+        <aside className="de-glass min-h-0 rounded-2xl p-4">
+          <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Outline</h3>
+          <div className="mt-3 space-y-2">
+            {['Title', 'Abstract', 'Introduction', 'Method', 'Experiments', 'Conclusion'].map((item) => (
               <button
-                onClick={() => void handleTranslate()}
-                disabled={isTranslating}
-                className="flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                key={item}
+                onClick={() => setSection(item)}
+                className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
+                  section === item
+                    ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-500/50 dark:bg-indigo-500/15'
+                    : 'border-slate-200 bg-white/80 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-900/80 dark:hover:border-indigo-500/50'
+                }`}
               >
-                {isTranslating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    翻译中...
-                  </>
-                ) : (
-                  <>
-                    <Languages className="h-4 w-4" />
-                    生成翻译与摘要
-                  </>
-                )}
+                {item}
               </button>
+            ))}
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white/75 p-3 text-xs leading-6 text-slate-500 dark:border-slate-700 dark:bg-slate-900/75 dark:text-slate-300">
+            <p>作者：{selectedPaper.authors || '未知'}</p>
+            <p>来源：{selectedPaper.journal || '未知来源'}</p>
+            <p>年份：{selectedPaper.year || '未知'}</p>
+          </div>
+        </aside>
+
+        <section className="de-glass min-h-0 rounded-2xl p-4">
+          <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">PDF Original Text</h3>
+          <div className="mt-3 flex min-h-0 flex-col gap-3">
+            <input
+              type="text"
+              value={section}
+              onChange={(event) => setSection(event.target.value)}
+              placeholder="章节名"
+              className="rounded-xl border border-slate-200 bg-white/85 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/85"
+            />
+            <textarea
+              value={originalText}
+              onChange={(event) => setOriginalText(event.target.value)}
+              placeholder="粘贴论文原文内容..."
+              className="de-reading min-h-[320px] flex-1 rounded-xl border border-slate-200 bg-white/85 px-4 py-3 text-sm leading-7 outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/85"
+            />
+            <button
+              onClick={() => void handleTranslate()}
+              disabled={isTranslating}
+              className="inline-flex w-fit items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isTranslating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
+              {isTranslating ? '翻译中...' : '生成翻译与摘要'}
+            </button>
+          </div>
+        </section>
+
+        <aside className="de-glass min-h-0 rounded-2xl p-4">
+          <div className="space-y-3">
+            <div className="rounded-xl border border-indigo-300 bg-indigo-50/80 p-3 dark:border-indigo-500/50 dark:bg-indigo-500/15">
+              <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-indigo-700 dark:text-indigo-200">
+                <Languages className="h-3.5 w-3.5" />
+                AI Translation
+              </h3>
+              <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-100">
+                {latestTranslation?.translatedText || '划选或粘贴段落后，这里会显示最新翻译。'}
+              </p>
             </div>
-          </div>
-        </div>
 
-        <aside className="border-t border-stone-200 p-6 dark:border-stone-800">
-          <div className="flex items-center gap-2">
-            <Languages className="h-5 w-5 text-emerald-600" />
-            <h3 className="text-lg font-semibold">翻译历史</h3>
-          </div>
+            <div className="rounded-xl border border-violet-300 bg-violet-50/80 p-3 dark:border-violet-500/50 dark:bg-violet-500/15">
+              <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-violet-700 dark:text-violet-200">
+                <BookText className="h-3.5 w-3.5" />
+                Notes
+              </h3>
+              <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-100">
+                {latestTranslation?.summary || '翻译摘要会自动生成，可继续整理成你的阅读笔记。'}
+              </p>
+            </div>
 
-          <div className="mt-4 space-y-4">
-            {translations.length > 0 ? (
-              translations.map((record) => (
-                <div
-                  key={record.id}
-                  className="rounded-[1.75rem] border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900/70"
-                >
-                  <div>
-                    <h4 className="font-semibold">{record.section}</h4>
-                    <p className="mt-1 text-xs uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">
-                      {new Date(record.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-
-                  <div className="mt-4 space-y-4 text-sm leading-7">
-                    <div>
-                      <p className="mb-1 text-xs uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">
-                        原文
+            <div className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/80">
+              <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">
+                <MessageSquare className="h-3.5 w-3.5" />
+                History
+              </h3>
+              <div className="mt-2 max-h-[280px] space-y-2 overflow-y-auto">
+                {translations.length > 0 ? (
+                  translations.map((record) => (
+                    <div key={record.id} className="rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 text-xs dark:border-slate-700 dark:bg-slate-800/70">
+                      <p className="font-medium">{record.section}</p>
+                      <p className="mt-1 line-clamp-3 text-slate-600 dark:text-slate-200">
+                        {record.summary || record.translatedText}
                       </p>
-                      <p className="text-stone-600 dark:text-stone-300">{record.originalText}</p>
                     </div>
-
-                    <div>
-                      <p className="mb-1 text-xs uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">
-                        中文翻译
-                      </p>
-                      <p className="text-stone-700 dark:text-stone-200">{record.translatedText}</p>
-                    </div>
-
-                    {record.summary && (
-                      <div className="rounded-2xl bg-stone-50 p-4 dark:bg-stone-950">
-                        <p className="mb-1 text-xs uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">
-                          阅读摘要
-                        </p>
-                        <p className="text-stone-600 dark:text-stone-300">{record.summary}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-[1.75rem] border border-dashed border-stone-300 bg-white/60 p-6 text-sm leading-7 text-stone-500 dark:border-stone-700 dark:bg-stone-900/40 dark:text-stone-400">
-                当前论文还没有翻译历史。你可以先从摘要开始，系统会把每次翻译结果保存到这里。
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-500 dark:text-slate-300">暂无翻译历史</p>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </aside>
       </div>

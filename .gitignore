@@ -16,3 +16,4 @@ frontend/package.json.md5
 __pycache__/
 *.pyc
 .pytest_cache/
+frontend_references/

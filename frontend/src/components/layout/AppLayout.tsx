@@ -40,7 +40,7 @@ export function AppLayout() {
   // For main panel, show full-screen without sidebars
   if (activePanel === 'main') {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-[#f5f1e8] text-stone-900 dark:bg-[#151515] dark:text-stone-100">
+      <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -48,7 +48,7 @@ export function AppLayout() {
         )}
         {isHydrating ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="rounded-2xl border border-stone-200 bg-white/80 px-6 py-4 text-sm shadow-sm dark:border-stone-800 dark:bg-stone-900/80">
+            <div className="de-glass rounded-2xl px-6 py-4 text-sm shadow-sm">
               正在加载 DiveEnd 工作区...
             </div>
           </div>
@@ -62,7 +62,7 @@ export function AppLayout() {
   // For history panel, show full-screen without sidebars
   if (activePanel === 'history') {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-[#f5f1e8] text-stone-900 dark:bg-[#151515] dark:text-stone-100">
+      <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -70,7 +70,7 @@ export function AppLayout() {
         )}
         {isHydrating ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="rounded-2xl border border-stone-200 bg-white/80 px-6 py-4 text-sm shadow-sm dark:border-stone-800 dark:bg-stone-900/80">
+            <div className="de-glass rounded-2xl px-6 py-4 text-sm shadow-sm">
               正在加载 DiveEnd 工作区...
             </div>
           </div>
@@ -84,7 +84,7 @@ export function AppLayout() {
   // For session detail, show full-screen without sidebars
   if (activePanel === 'session') {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-[#f5f1e8] text-stone-900 dark:bg-[#151515] dark:text-stone-100">
+      <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -92,7 +92,7 @@ export function AppLayout() {
         )}
         {isHydrating ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="rounded-2xl border border-stone-200 bg-white/80 px-6 py-4 text-sm shadow-sm dark:border-stone-800 dark:bg-stone-900/80">
+            <div className="de-glass rounded-2xl px-6 py-4 text-sm shadow-sm">
               正在加载 DiveEnd 工作区...
             </div>
           </div>
@@ -106,7 +106,7 @@ export function AppLayout() {
   // For deepstart panel, show full-screen without sidebars
   if (activePanel === 'deepstart') {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-[#f5f1e8] text-stone-900 dark:bg-[#151515] dark:text-stone-100">
+      <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -114,7 +114,7 @@ export function AppLayout() {
         )}
         {isHydrating ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="rounded-2xl border border-stone-200 bg-white/80 px-6 py-4 text-sm shadow-sm dark:border-stone-800 dark:bg-stone-900/80">
+            <div className="de-glass rounded-2xl px-6 py-4 text-sm shadow-sm">
               正在加载 DiveEnd 工作区...
             </div>
           </div>
@@ -127,7 +127,7 @@ export function AppLayout() {
 
   // For other panels, show with sidebars
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f5f1e8] text-stone-900 dark:bg-[#151515] dark:text-stone-100">
+    <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="flex h-full min-h-0 flex-col">
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
@@ -137,7 +137,7 @@ export function AppLayout() {
 
         {isHydrating ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="rounded-2xl border border-stone-200 bg-white/80 px-6 py-4 text-sm shadow-sm dark:border-stone-800 dark:bg-stone-900/80">
+            <div className="de-glass rounded-2xl px-6 py-4 text-sm shadow-sm">
               正在加载 DiveEnd 工作区...
             </div>
           </div>

@@ -14,6 +14,7 @@ import type {
   ScreeningSession,
   ScreeningSessionDetail,
   SearchPaper,
+  SearchProgressEvent,
   SyncConflict,
   SyncProgress,
   SyncRecord,
@@ -1015,6 +1016,47 @@ export function onExtractProgress(callback: (progress: ExtractProgress) => void)
   return () => {
     unsubscribe?.();
     EventsOff('extract-progress');
+  };
+}
+
+function normalizeSearchProgressEvent(progress: Partial<SearchProgressEvent> | null | undefined): SearchProgressEvent {
+  const totalSeconds = Number(progress?.totalSeconds ?? 60) || 60;
+  const elapsedSeconds = Math.max(0, Number(progress?.elapsedSeconds ?? 0) || 0);
+  const sources = normalizeArray(progress?.sources).map((source) => ({
+    name: source.name ?? '',
+    attempt: Number(source.attempt ?? 0) || 0,
+    maxAttempts: Number(source.maxAttempts ?? 60) || 60,
+    status: source.status ?? 'pending',
+    success: Boolean(source.success),
+    done: Boolean(source.done),
+    resultCount: Number(source.resultCount ?? 0) || 0,
+    error: source.error ?? '',
+  }));
+
+  return {
+    query: progress?.query ?? '',
+    elapsedSeconds: Math.min(elapsedSeconds, totalSeconds),
+    totalSeconds,
+    completedSources: Number(progress?.completedSources ?? 0) || 0,
+    totalSources: Number(progress?.totalSources ?? sources.length) || sources.length,
+    sources,
+    phase: progress?.phase === 'completed' ? 'completed' : 'searching',
+    message: progress?.message ?? '',
+  };
+}
+
+export function onSearchProgress(callback: (progress: SearchProgressEvent) => void): () => void {
+  if (!hasWailsRuntime()) {
+    return () => undefined;
+  }
+
+  const unsubscribe = EventsOn('search-progress', (progress: SearchProgressEvent) => {
+    callback(normalizeSearchProgressEvent(progress));
+  });
+
+  return () => {
+    unsubscribe?.();
+    EventsOff('search-progress');
   };
 }
 

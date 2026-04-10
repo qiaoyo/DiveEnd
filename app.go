@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App struct - Main Wails application
@@ -309,7 +311,13 @@ func (a *App) ensureReady() error {
 func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.config = normalizeAppConfig(config)
 	a.llm = NewLLMClient(a.config)
-	a.search = NewSearchClient(a.config)
+	searchClient := NewSearchClient(a.config)
+	searchClient.SetProgressReporter(func(progress SearchProgressEvent) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "search-progress", progress)
+		}
+	})
+	a.search = searchClient
 	a.pdfService = NewPDFServiceClient(defaultPDFServiceURL())
 
 	if !reloadDB {

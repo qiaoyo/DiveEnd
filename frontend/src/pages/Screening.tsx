@@ -1,9 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, FileUp, Filter, Loader2, Sparkles } from 'lucide-react';
 import type { ExtractProgress, Paper, ScreeningDecisionNode, ScreeningSessionDetail } from '../types';
 import * as backend from '../lib/backend';
 import { useAppStore } from '../stores/appStore';
 
 type ScreeningStage = 'upload' | 'extract' | 'screen' | 'results';
+
+const stageOrder: ScreeningStage[] = ['upload', 'extract', 'screen', 'results'];
+const stageLabel: Record<ScreeningStage, string> = {
+  upload: '1. Queue',
+  extract: '2. Extracting',
+  screen: '3. AI Screening',
+  results: '4. Results',
+};
 
 export const Screening: React.FC = () => {
   const [currentStage, setCurrentStage] = useState<ScreeningStage>('upload');
@@ -208,28 +217,32 @@ export const Screening: React.FC = () => {
     }
   };
 
-  const stageChip = (stage: ScreeningStage, label: string) => (
-    <div
-      className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-        currentStage === stage
-          ? 'bg-emerald-600 text-white'
-          : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
-      }`}
-    >
-      {label}
+  const renderSteps = () => (
+    <div className="flex flex-wrap gap-2">
+      {stageOrder.map((stage) => {
+        const active = currentStage === stage;
+        const completed = stageOrder.indexOf(stage) < stageOrder.indexOf(currentStage);
+        return (
+          <div
+            key={stage}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+              active
+                ? 'border-violet-400 bg-violet-600 text-white'
+                : completed
+                  ? 'border-indigo-300 bg-indigo-100 text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/20 dark:text-indigo-200'
+                  : 'border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300'
+            }`}
+          >
+            {stageLabel[stage]}
+          </div>
+        );
+      })}
     </div>
   );
 
-  const renderUploadStage = () => (
-    <div className="rounded-[2rem] border border-stone-200 bg-white/80 px-6 py-10 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-      <div className="text-5xl">📄</div>
-      <h3 className="mt-4 text-2xl font-semibold">上传待筛选论文</h3>
-      <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-stone-500 dark:text-stone-400">
-        {canResolvePaths
-          ? '当前运行在 Wails 环境，会把你选择或拖入的 PDF 解析成真实本地路径，再交给 Go 和 PDF 服务处理。'
-          : '当前是浏览器预览模式。你仍然可以体验页面交互，但真实路径解析与本地 PDF 提取需要在 Wails 桌面应用里运行。'}
-      </p>
-
+  const renderUploadCard = () => (
+    <div className="de-glass rounded-2xl p-5">
+      <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Upload & Progress</h3>
       <div
         onDragEnter={(event) => {
           event.preventDefault();
@@ -244,15 +257,19 @@ export const Screening: React.FC = () => {
           setDropActive(false);
         }}
         onDrop={(event) => void handleDrop(event)}
-        className={`mx-auto mt-8 max-w-3xl rounded-[2rem] border border-dashed px-6 py-12 transition ${
+        className={`mt-4 rounded-2xl border border-dashed px-5 py-10 text-center transition ${
           dropActive
-            ? 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/20'
-            : 'border-stone-300 bg-stone-50/70 dark:border-stone-700 dark:bg-stone-950/40'
+            ? 'border-violet-400 bg-violet-100/70 dark:bg-violet-500/15'
+            : 'border-slate-300 bg-white/60 dark:border-slate-600 dark:bg-slate-900/60'
         }`}
       >
-        <p className="text-sm text-stone-500 dark:text-stone-400">拖拽 PDF 到这里，或者直接用文件选择器。</p>
-        <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <label className="cursor-pointer rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-emerald-700">
+        <FileUp className="mx-auto h-8 w-8 text-slate-400" />
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">上传待筛选论文</p>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          拖拽 PDF 到这里，或者使用文件选择器。
+        </p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <label className="cursor-pointer rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">
             <input
               type="file"
               multiple
@@ -265,49 +282,68 @@ export const Screening: React.FC = () => {
           {!canResolvePaths && (
             <button
               onClick={() => void startScreeningWithPaths(['/mock/survey.pdf', '/mock/benchmark.pdf'])}
-              className="rounded-2xl border border-stone-200 px-6 py-3 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+              className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               使用演示样本
             </button>
           )}
         </div>
       </div>
+
+      {papers.length > 0 && (
+        <div className="mt-4 space-y-2 rounded-2xl border border-slate-200 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/75">
+          {papers.map((paper) => (
+            <div key={paper.id} className="flex items-center justify-between rounded-lg bg-slate-100/70 px-3 py-2 text-xs dark:bg-slate-800/70">
+              <span className="truncate">{paper.fileName}</span>
+              <span className={`rounded-full px-2 py-0.5 ${
+                paper.status === 'extracted' || paper.status === 'selected'
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200'
+                  : paper.status === 'extracting'
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200'
+                    : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'
+              }`}
+              >
+                {paper.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
-  const renderExtractStage = () => (
-    <div className="rounded-[2rem] border border-stone-200 bg-white/80 px-6 py-10 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-      <div className="text-5xl">⚙️</div>
-      <h3 className="mt-4 text-2xl font-semibold">提取论文内容</h3>
-      <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">
-        通过 Python PDF 服务抽取 markdown，并调用配置好的强模型生成结构化信息。
+  const renderExtractCard = () => (
+    <div className="de-glass rounded-2xl p-5">
+      <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">提取论文内容</h3>
+      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+        通过 Python PDF 服务抽取 markdown，并调用强模型生成结构化字段。
       </p>
-      <div className="mx-auto mt-8 max-w-xl">
-        <div className="h-2 rounded-full bg-stone-200 dark:bg-stone-800">
-          <div className="h-2 rounded-full bg-emerald-600 transition-all" style={{ width: `${extractionPercent}%` }} />
-        </div>
-        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">
-          已处理 {extractionProgress?.completed ?? 0} / {extractionProgress?.total ?? papers.length} 篇论文
-          {extractionProgress?.currentFile ? ` · 当前：${extractionProgress.currentFile}` : ''}
-        </p>
+      <div className="mt-4 h-2 rounded-full bg-slate-200 dark:bg-slate-800">
+        <div className="h-2 rounded-full bg-violet-600 transition-all" style={{ width: `${extractionPercent}%` }} />
       </div>
+      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        已处理 {extractionProgress?.completed ?? 0} / {extractionProgress?.total ?? papers.length}
+        {extractionProgress?.currentFile ? ` · 当前：${extractionProgress.currentFile}` : ''}
+      </p>
+
       {error && (
-        <div className="mx-auto mt-6 max-w-2xl rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-left text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-200">
+        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-500/15 dark:text-rose-200">
           {error}
         </div>
       )}
-      <div className="mt-8 flex flex-wrap justify-center gap-3">
+
+      <div className="mt-4 flex flex-wrap gap-2">
         <button
           onClick={() => sessionId && void runExtraction(sessionId)}
           disabled={!sessionId || isBusy}
-          className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isBusy ? '重试中...' : '重新提取'}
         </button>
         {papers.some((paper) => paper.status === 'extracted') && (
           <button
             onClick={() => sessionId && void proceedToAnalysis(sessionId)}
-            className="rounded-2xl border border-stone-200 px-4 py-2.5 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+            className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             基于已完成论文继续筛选
           </button>
@@ -316,173 +352,185 @@ export const Screening: React.FC = () => {
     </div>
   );
 
-  const renderScreenStage = () => {
-    if (!currentNode) {
-      return null;
+  const renderDecisionTree = () => {
+    if (currentStage === 'extract') {
+      return (
+        <div className="de-glass rounded-2xl p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Decision Tree</h3>
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/75">
+            <p className="text-sm text-slate-600 dark:text-slate-300">解析完成后，AI 将在这里生成可交互的筛选节点。</p>
+          </div>
+        </div>
+      );
     }
 
-    return (
-      <div className="rounded-[2rem] border border-stone-200 bg-white/80 p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-semibold">{currentNode.message}</h3>
-            <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">
-              维度：<span className="font-medium text-stone-700 dark:text-stone-200">{currentNode.dimension}</span>
-              {currentNode.allowMultiSelect && <span className="ml-2">· 支持多选</span>}
-            </p>
-          </div>
-          <button
-            onClick={resetFlow}
-            className="rounded-2xl border border-stone-200 px-4 py-2 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
-          >
-            重新开始
-          </button>
-        </div>
+    if (currentStage === 'screen' && currentNode) {
+      return (
+        <div className="de-glass rounded-2xl p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Decision Tree</h3>
 
-        {history.length > 0 && (
-          <div className="mt-5 rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
-            <p className="text-xs uppercase tracking-[0.18em] text-stone-400 dark:text-stone-500">历史选择</p>
-            <div className="mt-3 space-y-2 text-sm text-stone-600 dark:text-stone-300">
+          <div className="mt-4 rounded-2xl border border-violet-300 bg-violet-50/80 p-4 dark:border-violet-500/40 dark:bg-violet-500/15">
+            <div className="flex items-center gap-2 text-sm font-semibold text-violet-700 dark:text-violet-200">
+              <Sparkles className="h-4 w-4" />
+              AI Question
+            </div>
+            <p className="mt-2 text-sm leading-7">{currentNode.message}</p>
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">维度：{currentNode.dimension}</p>
+          </div>
+
+          {history.length > 0 && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white/75 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/75 dark:text-slate-200">
               {history.map((step, index) => (
-                <div key={`${step.dimension}-${index}`}>
-                  <span className="font-medium">{step.dimension}：</span>
-                  {step.choice}
+                <div key={`${step.dimension}-${index}`} className="mb-1 last:mb-0">
+                  <span className="font-semibold">{step.dimension}：</span>{step.choice}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
 
-        <div className="mt-5 grid grid-cols-1 gap-3">
-          {currentNode.options.map((option) => {
-            const isSelected = selectedOptions.includes(option.key);
-            return (
-              <button
-                key={option.key}
-                onClick={() => toggleOption(option.key)}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  isSelected
-                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20'
-                    : 'border-stone-200 bg-stone-50/70 hover:border-stone-300 dark:border-stone-800 dark:bg-stone-950/60'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">{option.label}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs text-stone-500 dark:bg-stone-900 dark:text-stone-400">
-                    {option.count}
-                  </span>
-                </div>
-                {isSelected && <div className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">已选中</div>}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 pt-4 text-sm dark:border-stone-800">
-          <div className="text-stone-500 dark:text-stone-400">
-            已选择 <span className="font-medium text-stone-900 dark:text-stone-100">{selectedOptions.length}</span> 个选项
+          <div className="mt-4 grid gap-2">
+            {currentNode.options.map((option) => {
+              const isSelected = selectedOptions.includes(option.key);
+              return (
+                <button
+                  key={option.key}
+                  onClick={() => toggleOption(option.key)}
+                  className={`rounded-xl border p-3 text-left text-sm transition ${
+                    isSelected
+                      ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-500/50 dark:bg-indigo-500/15'
+                      : 'border-slate-200 bg-white/80 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-900/80 dark:hover:border-indigo-500/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>{option.label}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-700 dark:text-slate-200">
+                      {option.count}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <button
-            onClick={() => void handleContinue()}
-            disabled={selectedOptions.length === 0 || isBusy}
-            className="rounded-2xl bg-emerald-600 px-4 py-2.5 font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isBusy ? '处理中...' : '继续下一步'}
-          </button>
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-500 dark:text-slate-300">
+              已选择 {selectedOptions.length} 个选项
+            </p>
+            <button
+              onClick={() => void handleContinue()}
+              disabled={selectedOptions.length === 0 || isBusy}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isBusy ? '处理中...' : '继续下一步'}
+            </button>
+          </div>
         </div>
+      );
+    }
+
+    if (currentStage === 'results') {
+      return (
+        <div className="de-glass rounded-2xl p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Results</h3>
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/40 dark:bg-emerald-500/15">
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-200">
+              <CheckCircle2 className="h-4 w-4" />
+              筛选完成
+            </div>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-200">
+              总计 {detail?.session.totalPapers ?? papers.length} 篇，保留 {resultPapers.length} 篇。
+            </p>
+          </div>
+          {importedPapers.length > 0 && (
+            <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
+              已成功导入 {importedPapers.length} 篇论文到文库。
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="de-glass rounded-2xl p-5">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Decision Tree</h3>
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">上传完成后会自动进入提取和筛选流程。</p>
       </div>
     );
   };
 
-  const renderResultsStage = () => (
-    <div className="rounded-[2rem] border border-stone-200 bg-white/80 px-6 py-10 shadow-sm dark:border-stone-800 dark:bg-stone-900/70">
-      <div className="text-center">
-        <div className="text-5xl">🎯</div>
-        <h3 className="mt-4 text-2xl font-semibold">筛选完成</h3>
-        <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-stone-500 dark:text-stone-400">
-          当前剩余的论文已经缩小到适合直接导入文库的规模。确认后会写入 SQLite 文库并保留原始 PDF 路径。
-        </p>
-      </div>
-
-      <div className="mx-auto mt-8 grid max-w-md grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
-          <div className="text-2xl font-bold text-emerald-600">{detail?.session.totalPapers ?? papers.length}</div>
-          <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">总论文数</div>
-        </div>
-        <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
-          <div className="text-2xl font-bold text-emerald-600">{resultPapers.length}</div>
-          <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">保留数量</div>
-        </div>
-      </div>
-
-      {resultPapers.length > 0 && (
-        <div className="mt-8 space-y-3">
-          {resultPapers.map((paper) => (
-            <div key={paper.id} className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 dark:border-stone-800 dark:bg-stone-950/60">
-              <div className="font-medium">{paper.title || paper.fileName}</div>
-              <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">{paper.authors || paper.fileName}</div>
-              {paper.abstract && (
-                <p className="mt-2 text-sm leading-6 text-stone-600 dark:text-stone-300">{paper.abstract}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {importedPapers.length > 0 && (
-        <div className="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-200">
-          已成功导入 {importedPapers.length} 篇论文到文库。
-        </div>
-      )}
-
-      <div className="mt-8 flex flex-wrap justify-center gap-3">
-        {importedPapers.length === 0 && (
-          <button
-            onClick={() => void handleImport()}
-            disabled={isBusy || resultPapers.length === 0}
-            className="rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isBusy ? '导入中...' : '导入到文库'}
-          </button>
-        )}
-        <button
-          onClick={resetFlow}
-          className="rounded-2xl border border-stone-200 px-6 py-3 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
-        >
-          开始新的筛选
-        </button>
-      </div>
-    </div>
-  );
+  const showActionBar = currentStage === 'screen' || currentStage === 'results';
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f9f6f0] dark:bg-[#141414]">
-      <div className="border-b border-stone-200 p-6 dark:border-stone-800">
-        <h2 className="text-lg font-semibold">Screening - 批量筛选</h2>
-        <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-          现在这条链路会真实调用 Go 后端、SQLite 和 PDF 服务，而不是继续停留在演示节点。
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {stageChip('upload', '上传')}
-          {stageChip('extract', '提取')}
-          {stageChip('screen', '决策树筛选')}
-          {stageChip('results', '结果')}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <div className="border-b border-slate-200/80 bg-white/70 px-6 py-4 backdrop-blur-md dark:border-slate-700/50 dark:bg-slate-900/55">
+        <div className="mx-auto max-w-6xl">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Filter className="h-5 w-5 text-violet-600" />
+            Screening Pipeline
+          </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+            真实链路：上传 PDF ➜ 结构化提取 ➜ AI 决策树筛选 ➜ 导入文库
+          </p>
+          <div className="mt-4">{renderSteps()}</div>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
-        <div className="mx-auto max-w-5xl space-y-6">
-          {error && currentStage !== 'extract' && (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-200">
-              {error}
-            </div>
-          )}
-          {currentStage === 'upload' && renderUploadStage()}
-          {currentStage === 'extract' && renderExtractStage()}
-          {currentStage === 'screen' && renderScreenStage()}
-          {currentStage === 'results' && renderResultsStage()}
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28 pt-6">
+        <div className="mx-auto grid max-w-6xl gap-5 lg:grid-cols-[0.92fr_1.08fr]">
+          <div className="space-y-5">
+            {currentStage === 'extract' ? renderExtractCard() : renderUploadCard()}
+          </div>
+          <div className="space-y-5">
+            {error && currentStage !== 'extract' && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-500/15 dark:text-rose-200">
+                {error}
+              </div>
+            )}
+            {renderDecisionTree()}
+
+            {(currentStage === 'results' || currentStage === 'screen') && resultPapers.length > 0 && (
+              <div className="de-glass rounded-2xl p-4">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Selected Papers</h3>
+                <div className="mt-3 space-y-2">
+                  {resultPapers.map((paper) => (
+                    <div key={paper.id} className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                      <div className="text-sm font-medium">{paper.title || paper.fileName}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-300">{paper.authors || paper.fileName}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {showActionBar && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-6xl -translate-x-1/2 px-6">
+          <div className="pointer-events-auto mx-auto flex max-w-xl items-center justify-between rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/90">
+            <div className="text-sm text-slate-600 dark:text-slate-200">
+              保留 <span className="font-semibold text-indigo-600 dark:text-indigo-300">{resultPapers.length}</span> 篇论文
+            </div>
+            <div className="flex gap-2">
+              {currentStage === 'results' && importedPapers.length === 0 && (
+                <button
+                  onClick={() => void handleImport()}
+                  disabled={isBusy || resultPapers.length === 0}
+                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : '导入到文库'}
+                </button>
+              )}
+              <button
+                onClick={resetFlow}
+                className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                开始新的筛选
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
