@@ -32,6 +32,7 @@ type appYAMLSearchConfig struct {
 		PerSourceResultLimit   int    `yaml:"per_source_result_limit"`
 		RetryDurationSeconds   int    `yaml:"retry_duration_seconds"`
 		RetryIntervalSeconds   int    `yaml:"retry_interval_seconds"`
+		RequestTimeoutSeconds  int    `yaml:"request_timeout_seconds"`
 	} `yaml:"search"`
 }
 
@@ -42,6 +43,7 @@ type appYAMLSearchSettings struct {
 	PerSourceResultLimit   int
 	RetryDurationSeconds   int
 	RetryIntervalSeconds   int
+	RequestTimeoutSeconds  int
 }
 
 var configPathOverride string
@@ -89,6 +91,7 @@ func defaultSearchAPIConfig() SearchAPIConfig {
 		PerSourceResultLimit:   100,
 		RetryDurationSeconds:   60,
 		RetryIntervalSeconds:   1,
+		RequestTimeoutSeconds:  5,
 	}
 }
 
@@ -248,6 +251,9 @@ func normalizeSearchAPIConfig(config SearchAPIConfig) SearchAPIConfig {
 	}
 	if config.RetryDurationSeconds < config.RetryIntervalSeconds {
 		config.RetryDurationSeconds = defaults.RetryDurationSeconds
+	}
+	if config.RequestTimeoutSeconds <= 0 {
+		config.RequestTimeoutSeconds = defaults.RequestTimeoutSeconds
 	}
 
 	config.SemanticScholarAPIKey = strings.TrimSpace(config.SemanticScholarAPIKey)
@@ -426,6 +432,9 @@ func mergeSearchConfigWithAppYAML(searchConfig SearchAPIConfig) SearchAPIConfig 
 	if yamlConfig.RetryIntervalSeconds > 0 {
 		searchConfig.RetryIntervalSeconds = yamlConfig.RetryIntervalSeconds
 	}
+	if yamlConfig.RequestTimeoutSeconds > 0 {
+		searchConfig.RequestTimeoutSeconds = yamlConfig.RequestTimeoutSeconds
+	}
 	return normalizeSearchAPIConfig(searchConfig)
 }
 
@@ -447,6 +456,7 @@ func readAppYAMLSearchConfig() (appYAMLSearchSettings, bool) {
 		PerSourceResultLimit:   raw.Search.PerSourceResultLimit,
 		RetryDurationSeconds:   raw.Search.RetryDurationSeconds,
 		RetryIntervalSeconds:   raw.Search.RetryIntervalSeconds,
+		RequestTimeoutSeconds:  raw.Search.RequestTimeoutSeconds,
 	}, true
 }
 

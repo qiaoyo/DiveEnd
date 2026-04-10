@@ -47,3 +47,4 @@ search:
   per_source_result_limit: 100
   retry_duration_seconds: 60
   retry_interval_seconds: 1
+  request_timeout_seconds: 5

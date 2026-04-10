@@ -457,3 +457,76 @@ func TestSearchClientHonorsSourceEnableFlagsFromConfig(t *testing.T) {
 		t.Fatalf("expected 1 paper, got %d", len(papers))
 	}
 }
+
+func TestBuildSearchQueryCandidatesCompactsSentencePrompt(t *testing.T) {
+	candidates := buildSearchQueryCandidates("I want to sort out the papers in the field of embodied intelligence over the past two years.")
+	if len(candidates) < 2 {
+		t.Fatalf("expected at least two query candidates, got %v", candidates)
+	}
+	if candidates[1] == candidates[0] {
+		t.Fatalf("expected compacted keyword candidate, got %v", candidates)
+	}
+}
+
+func TestSearchClientSemanticRetriesOnEmptyResultsWithQueryVariants(t *testing.T) {
+	config := defaultAppConfig()
+	config.Search.EnableArxiv = false
+	config.Search.EnableSemanticScholar = true
+	config.Search.RetryDurationSeconds = 3
+	config.Search.RetryIntervalSeconds = 1
+	client := NewSearchClient(config)
+
+	seenQueries := make([]string, 0, 3)
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if !strings.Contains(r.URL.Host, "api.semanticscholar.org") {
+				return nil, fmt.Errorf("unexpected host: %s", r.URL.Host)
+			}
+			query := r.URL.Query().Get("query")
+			seenQueries = append(seenQueries, query)
+
+			if len(seenQueries) == 1 {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewBufferString(`{"data":[]}`)),
+					Request:    r,
+				}, nil
+			}
+
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body: io.NopCloser(bytes.NewBufferString(`{
+  "data": [
+    {
+      "paperId": "sem-retry-1",
+      "title": "Embodied Success",
+      "authors": [{"name":"Author Z"}],
+      "abstract": "Recovered after query variant retry",
+      "year": 2025,
+      "venue": "ICRA",
+      "journal": {"name":"ICRA"},
+      "openAccessPdf": {"url":"https://example.com/sem-retry-1.pdf"}
+    }
+  ]
+}`)),
+				Request: r,
+			}, nil
+		}),
+	}
+
+	papers, err := client.Search("I want to sort out the papers in the field of embodied intelligence over the past two years.", 100)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(papers) != 1 {
+		t.Fatalf("expected 1 paper after retry, got %d", len(papers))
+	}
+	if len(seenQueries) < 2 {
+		t.Fatalf("expected at least two semantic attempts, got %d", len(seenQueries))
+	}
+	if seenQueries[0] == seenQueries[1] {
+		t.Fatalf("expected second attempt to use query variant, got queries=%v", seenQueries)
+	}
+}

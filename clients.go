@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type llmService interface {
@@ -711,6 +712,78 @@ func uniqueStrings(values []string) []string {
 	return compactStrings(values, 0)
 }
 
+func buildSearchQueryCandidates(query string) []string {
+	original := strings.TrimSpace(query)
+	if original == "" {
+		return []string{""}
+	}
+
+	candidates := []string{original}
+	lowered := strings.ToLower(original)
+	lowered = normalizeSearchDelimiters(lowered)
+
+	tokens := strings.Fields(lowered)
+	keywords := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		if _, stop := searchEnglishStopWords[token]; stop {
+			continue
+		}
+		if utf8Len(token) <= 1 {
+			continue
+		}
+		keywords = append(keywords, token)
+		if len(keywords) >= 10 {
+			break
+		}
+	}
+	if len(keywords) > 0 {
+		candidates = append(candidates, strings.Join(keywords, " "))
+	}
+
+	if strings.Contains(lowered, "embodied intelligence") || strings.Contains(original, "具身智能") {
+		candidates = append(candidates, "embodied intelligence robotics manipulation navigation")
+		candidates = append(candidates, "vision language action robotics")
+	}
+
+	if strings.Contains(lowered, "vla") || strings.Contains(lowered, "vision-language-action") {
+		candidates = append(candidates, "vision language action robotics")
+	}
+
+	return uniqueStrings(candidates)
+}
+
+func searchQueryVariant(candidates []string, attempt int) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	if attempt <= 0 {
+		return candidates[0]
+	}
+	idx := (attempt - 1) % len(candidates)
+	return candidates[idx]
+}
+
+func normalizeSearchDelimiters(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+			builder.WriteRune(r)
+			continue
+		}
+		builder.WriteRune(' ')
+	}
+	return builder.String()
+}
+
+func utf8Len(value string) int {
+	return len([]rune(value))
+}
+
 type SearchClient struct {
 	semanticScholarAPIKey string
 	enableSemanticScholar bool
@@ -730,6 +803,15 @@ const (
 	searchHTTPTimeout       = 12 * time.Second
 	searchOverallTimeoutPad = 10 * time.Second
 )
+
+var searchEnglishStopWords = map[string]struct{}{
+	"a": {}, "an": {}, "the": {}, "i": {}, "me": {}, "my": {}, "we": {}, "our": {},
+	"want": {}, "need": {}, "to": {}, "in": {}, "of": {}, "for": {}, "on": {}, "at": {},
+	"with": {}, "from": {}, "and": {}, "or": {}, "is": {}, "are": {}, "was": {}, "were": {},
+	"be": {}, "been": {}, "being": {}, "field": {}, "papers": {}, "paper": {}, "sort": {},
+	"out": {}, "over": {}, "past": {}, "last": {}, "two": {}, "year": {}, "years": {},
+	"recent": {}, "about": {}, "this": {}, "that": {}, "it": {}, "as": {}, "by": {},
+}
 
 const (
 	searchSourceSemantic = "Semantic Scholar"
@@ -762,8 +844,15 @@ func NewSearchClient(config AppConfig) *SearchClient {
 	searchConfig := normalizeSearchAPIConfig(config.Search)
 	retryDuration := time.Duration(searchConfig.RetryDurationSeconds) * time.Second
 	retryInterval := time.Duration(searchConfig.RetryIntervalSeconds) * time.Second
+	attemptTimeout := time.Duration(searchConfig.RequestTimeoutSeconds) * time.Second
 	if retryInterval <= 0 {
 		retryInterval = time.Second
+	}
+	if attemptTimeout <= 0 {
+		attemptTimeout = 5 * time.Second
+	}
+	if attemptTimeout > searchHTTPTimeout {
+		attemptTimeout = searchHTTPTimeout
 	}
 	if retryDuration < retryInterval {
 		retryDuration = retryInterval
@@ -780,7 +869,7 @@ func NewSearchClient(config AppConfig) *SearchClient {
 		perSourceResultLimit:  searchConfig.PerSourceResultLimit,
 		retryDuration:         retryDuration,
 		retryInterval:         retryInterval,
-		attemptTimeout:        retryInterval,
+		attemptTimeout:        attemptTimeout,
 		retryMax:              retryMax,
 		overallTimeout:        retryDuration + searchOverallTimeoutPad,
 		httpClient:            &http.Client{Timeout: searchHTTPTimeout},
@@ -991,7 +1080,7 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 
 func (s *SearchClient) retrySourceSearch(
 	sourceName string,
-	fn func() ([]SearchPaper, error),
+	fn func(attempt int) ([]SearchPaper, error),
 	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
 ) ([]SearchPaper, error) {
 	startedAt := time.Now()
@@ -999,7 +1088,7 @@ func (s *SearchClient) retrySourceSearch(
 
 	for attempt := 1; attempt <= s.retryMax; attempt++ {
 		attemptStarted := time.Now()
-		papers, err := fn()
+		papers, err := fn(attempt)
 		if err == nil {
 			log.Printf("[Search][%s] attempt %d/%d succeeded with %d papers", sourceName, attempt, s.retryMax, len(papers))
 			if onAttempt != nil {
@@ -1097,13 +1186,15 @@ func (s *SearchClient) searchSemanticScholar(
 	limit int,
 	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
 ) ([]SearchPaper, error) {
-	apiURL := fmt.Sprintf(
-		"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf",
-		url.QueryEscape(query),
-		limit,
-	)
+	candidates := buildSearchQueryCandidates(query)
+	return s.retrySourceSearch(searchSourceSemantic, func(attempt int) ([]SearchPaper, error) {
+		variant := searchQueryVariant(candidates, attempt)
+		apiURL := fmt.Sprintf(
+			"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf",
+			url.QueryEscape(variant),
+			limit,
+		)
 
-	return s.retrySourceSearch(searchSourceSemantic, func() ([]SearchPaper, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
 		defer cancel()
 
@@ -1155,6 +1246,9 @@ func (s *SearchClient) searchSemanticScholar(
 		if err := json.Unmarshal(body, &result); err != nil {
 			return nil, err
 		}
+		if len(result.Data) == 0 {
+			return nil, fmt.Errorf("empty results for query variant %q", variant)
+		}
 
 		papers := make([]SearchPaper, 0, len(result.Data))
 		for _, item := range result.Data {
@@ -1197,13 +1291,15 @@ func (s *SearchClient) searchArXiv(
 	limit int,
 	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
 ) ([]SearchPaper, error) {
-	apiURL := fmt.Sprintf(
-		"https://export.arxiv.org/api/query?search_query=all:%s&start=0&max_results=%d",
-		url.QueryEscape(query),
-		limit,
-	)
+	candidates := buildSearchQueryCandidates(query)
+	return s.retrySourceSearch(searchSourceArxiv, func(attempt int) ([]SearchPaper, error) {
+		variant := searchQueryVariant(candidates, attempt)
+		apiURL := fmt.Sprintf(
+			"https://export.arxiv.org/api/query?search_query=all:%s&start=0&max_results=%d",
+			url.QueryEscape(variant),
+			limit,
+		)
 
-	return s.retrySourceSearch(searchSourceArxiv, func() ([]SearchPaper, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
 		defer cancel()
 
@@ -1225,7 +1321,14 @@ func (s *SearchClient) searchArXiv(
 			return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
 		}
 
-		return parseArXivXML(body)
+		papers, err := parseArXivXML(body)
+		if err != nil {
+			return nil, err
+		}
+		if len(papers) == 0 {
+			return nil, fmt.Errorf("empty results for query variant %q", variant)
+		}
+		return papers, nil
 	}, onAttempt)
 }
 

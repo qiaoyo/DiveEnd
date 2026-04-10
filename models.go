@@ -26,6 +26,7 @@ type SearchAPIConfig struct {
 	PerSourceResultLimit       int    `json:"perSourceResultLimit"`
 	RetryDurationSeconds       int    `json:"retryDurationSeconds"`
 	RetryIntervalSeconds       int    `json:"retryIntervalSeconds"`
+	RequestTimeoutSeconds      int    `json:"requestTimeoutSeconds"`
 	SemanticScholarAPIKey      string `json:"semanticScholarApiKey,omitempty"`
 	HasSemanticScholarAPIKey   bool   `json:"hasSemanticScholarApiKey"`
 	ClearSemanticScholarAPIKey bool   `json:"clearSemanticScholarApiKey,omitempty"`

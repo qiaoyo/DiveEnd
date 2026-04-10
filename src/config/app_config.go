@@ -60,6 +60,7 @@ type AppConfig struct {
 		PerSourceResultLimit   int    `yaml:"per_source_result_limit"`
 		RetryDurationSeconds   int    `yaml:"retry_duration_seconds"`
 		RetryIntervalSeconds   int    `yaml:"retry_interval_seconds"`
+		RequestTimeoutSeconds  int    `yaml:"request_timeout_seconds"`
 	} `yaml:"search"`
 }
 

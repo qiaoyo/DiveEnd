@@ -20,6 +20,7 @@ export interface SearchAPIConfig {
   perSourceResultLimit: number;
   retryDurationSeconds: number;
   retryIntervalSeconds: number;
+  requestTimeoutSeconds: number;
   semanticScholarApiKey: string;
   hasSemanticScholarApiKey: boolean;
   clearSemanticScholarApiKey: boolean;
@@ -406,6 +407,7 @@ export const defaultConfig: AppConfig = {
     perSourceResultLimit: 100,
     retryDurationSeconds: 60,
     retryIntervalSeconds: 1,
+    requestTimeoutSeconds: 5,
     semanticScholarApiKey: '',
     hasSemanticScholarApiKey: false,
     clearSemanticScholarApiKey: false,
