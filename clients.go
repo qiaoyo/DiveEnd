@@ -874,6 +874,7 @@ func (s *SearchClient) retrySourceSearch(sourceName string, fn func() ([]SearchP
 	var lastErr error
 
 	for attempt := 1; attempt <= searchRetryMax; attempt++ {
+		attemptStarted := time.Now()
 		papers, err := fn()
 		if err == nil {
 			log.Printf("[Search][%s] attempt %d/%d succeeded with %d papers", sourceName, attempt, searchRetryMax, len(papers))
@@ -883,7 +884,9 @@ func (s *SearchClient) retrySourceSearch(sourceName string, fn func() ([]SearchP
 		lastErr = err
 		log.Printf("[Search][%s] attempt %d/%d failed: %v", sourceName, attempt, searchRetryMax, err)
 		if attempt < searchRetryMax {
-			time.Sleep(searchRetryInterval)
+			if wait := searchRetryInterval - time.Since(attemptStarted); wait > 0 {
+				time.Sleep(wait)
+			}
 		}
 	}
 
