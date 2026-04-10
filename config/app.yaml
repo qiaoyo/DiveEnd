@@ -38,3 +38,12 @@ pdf_service:
 llm:
   weak_config_path: "config/weak_llm.json"
   strong_config_path: "config/strong_llm.json"
+
+# Search runtime configuration (non-secret)
+search:
+  enable_semantic_scholar: true
+  enable_arxiv: true
+  semantic_scholar_key_path: "config/semantic_scholar.json"
+  per_source_result_limit: 100
+  retry_duration_seconds: 60
+  retry_interval_seconds: 1

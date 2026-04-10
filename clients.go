@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -712,24 +713,84 @@ func uniqueStrings(values []string) []string {
 
 type SearchClient struct {
 	semanticScholarAPIKey string
+	enableSemanticScholar bool
+	enableArxiv           bool
+	perSourceResultLimit  int
+	retryDuration         time.Duration
+	retryInterval         time.Duration
+	attemptTimeout        time.Duration
+	retryMax              int
+	overallTimeout        time.Duration
 	httpClient            *http.Client
+	progressMu            sync.RWMutex
+	progressReporter      func(SearchProgressEvent)
 }
 
 const (
-	searchHTTPTimeout    = 12 * time.Second
-	searchOverallTimeout = 70 * time.Second
-	searchRetryDuration  = 1 * time.Minute
-	searchRetryInterval  = 1 * time.Second
-	searchAttemptTimeout = 1 * time.Second
-	searchRetryMax       = int(searchRetryDuration / searchRetryInterval)
+	searchHTTPTimeout       = 12 * time.Second
+	searchOverallTimeoutPad = 10 * time.Second
 )
+
+const (
+	searchSourceSemantic = "Semantic Scholar"
+	searchSourceArxiv    = "arXiv"
+)
+
+type SearchSourceProgress struct {
+	Name        string `json:"name"`
+	Attempt     int    `json:"attempt"`
+	MaxAttempts int    `json:"maxAttempts"`
+	Status      string `json:"status"` // "pending" | "retrying" | "success" | "failed"
+	Success     bool   `json:"success"`
+	Done        bool   `json:"done"`
+	ResultCount int    `json:"resultCount"`
+	Error       string `json:"error,omitempty"`
+}
+
+type SearchProgressEvent struct {
+	Query            string                 `json:"query"`
+	ElapsedSeconds   int                    `json:"elapsedSeconds"`
+	TotalSeconds     int                    `json:"totalSeconds"`
+	CompletedSources int                    `json:"completedSources"`
+	TotalSources     int                    `json:"totalSources"`
+	Sources          []SearchSourceProgress `json:"sources"`
+	Phase            string                 `json:"phase"` // "searching" | "completed"
+	Message          string                 `json:"message,omitempty"`
+}
 
 func NewSearchClient(config AppConfig) *SearchClient {
 	searchConfig := normalizeSearchAPIConfig(config.Search)
+	retryDuration := time.Duration(searchConfig.RetryDurationSeconds) * time.Second
+	retryInterval := time.Duration(searchConfig.RetryIntervalSeconds) * time.Second
+	if retryInterval <= 0 {
+		retryInterval = time.Second
+	}
+	if retryDuration < retryInterval {
+		retryDuration = retryInterval
+	}
+	retryMax := int(retryDuration / retryInterval)
+	if retryMax < 1 {
+		retryMax = 1
+	}
+
 	return &SearchClient{
 		semanticScholarAPIKey: searchConfig.SemanticScholarAPIKey,
+		enableSemanticScholar: searchConfig.EnableSemanticScholar,
+		enableArxiv:           searchConfig.EnableArxiv,
+		perSourceResultLimit:  searchConfig.PerSourceResultLimit,
+		retryDuration:         retryDuration,
+		retryInterval:         retryInterval,
+		attemptTimeout:        retryInterval,
+		retryMax:              retryMax,
+		overallTimeout:        retryDuration + searchOverallTimeoutPad,
 		httpClient:            &http.Client{Timeout: searchHTTPTimeout},
 	}
+}
+
+func (s *SearchClient) SetProgressReporter(reporter func(SearchProgressEvent)) {
+	s.progressMu.Lock()
+	s.progressReporter = reporter
+	s.progressMu.Unlock()
 }
 
 func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
@@ -743,90 +804,149 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	if limit > 200 {
 		limit = 200 // 最大限制200条
 	}
+	if !s.enableSemanticScholar && !s.enableArxiv {
+		return nil, fmt.Errorf("no search source enabled; please enable Semantic Scholar and/or arXiv in config/app.yaml")
+	}
 
 	var combined []SearchPaper
 	var errs []string
 
-	// 轻微超采样，避免单源返回偏少导致结果过窄。
+	// 扩大检索窗口：每个源至少拉取配置中的条目，便于后续筛选。
 	searchLimit := limit
-	if limit < 40 {
-		searchLimit = 40
+	if searchLimit < s.perSourceResultLimit {
+		searchLimit = s.perSourceResultLimit
 	}
 
-	// 并行调用多个搜索源
+	startedAt := time.Now()
+
+	sourceStates := map[string]SearchSourceProgress{}
+	if s.enableSemanticScholar {
+		sourceStates[searchSourceSemantic] = SearchSourceProgress{
+			Name:        searchSourceSemantic,
+			MaxAttempts: s.retryMax,
+			Status:      "pending",
+		}
+	}
+	if s.enableArxiv {
+		sourceStates[searchSourceArxiv] = SearchSourceProgress{
+			Name:        searchSourceArxiv,
+			MaxAttempts: s.retryMax,
+			Status:      "pending",
+		}
+	}
+	var sourceStateMu sync.Mutex
+
+	updateProgress := func(sourceName string, attempt int, success bool, done bool, count int, err error) {
+		sourceStateMu.Lock()
+		state := sourceStates[sourceName]
+		state.Attempt = attempt
+		state.MaxAttempts = s.retryMax
+		state.Success = success
+		state.Done = done
+		state.ResultCount = count
+		if success {
+			state.Status = "success"
+			state.Error = ""
+		} else {
+			if done {
+				state.Status = "failed"
+			} else {
+				state.Status = "retrying"
+			}
+			if err != nil {
+				state.Error = strings.TrimSpace(err.Error())
+			}
+		}
+		sourceStates[sourceName] = state
+		snapshot := cloneSearchSourceStates(sourceStates)
+		sourceStateMu.Unlock()
+
+		s.emitSearchProgress(SearchProgressEvent{
+			Query:          query,
+			ElapsedSeconds: elapsedSearchSeconds(startedAt, s.retryDuration),
+			TotalSeconds:   int(s.retryDuration / time.Second),
+			TotalSources:   len(snapshot),
+			Sources:        snapshot,
+			Phase:          "searching",
+		})
+	}
+
+	s.emitSearchProgress(SearchProgressEvent{
+		Query:          query,
+		ElapsedSeconds: 0,
+		TotalSeconds:   int(s.retryDuration / time.Second),
+		TotalSources:   len(sourceStates),
+		Sources:        cloneSearchSourceStates(sourceStates),
+		Phase:          "searching",
+	})
+
+	// 并行调用两个核心搜索源。
 	type sourceResult struct {
 		papers []SearchPaper
 		err    error
 		name   string
 	}
 
-	results := make(chan sourceResult, 3)
-
-	// Semantic Scholar (免费版,无需API key)
-	go func() {
-		papers, err := s.searchSemanticScholar(query, searchLimit)
-		results <- sourceResult{papers: papers, err: err, name: "Semantic Scholar"}
-	}()
-
-	// arXiv
-	go func() {
-		papers, err := s.searchArXiv(query, searchLimit)
-		results <- sourceResult{papers: papers, err: err, name: "arXiv"}
-	}()
-
-	// arxiv-sanity-lite
-	go func() {
-		papers, err := s.searchArxivSanityLite(query, searchLimit)
-		results <- sourceResult{papers: papers, err: err, name: "arxiv-sanity-lite"}
-	}()
-
-	// 收集结果并设置总时限，避免某个源长时间阻塞 DeepStart 创建流程。
-	deadline := time.NewTimer(searchOverallTimeout)
-	defer deadline.Stop()
-
-	sourceStatus := map[string]string{
-		"Semantic Scholar":  "PENDING",
-		"arXiv":             "PENDING",
-		"arxiv-sanity-lite": "PENDING",
+	totalSources := len(sourceStates)
+	results := make(chan sourceResult, totalSources)
+	if s.enableSemanticScholar {
+		go func() {
+			papers, err := s.searchSemanticScholar(query, searchLimit, updateProgress)
+			results <- sourceResult{papers: papers, err: err, name: searchSourceSemantic}
+		}()
+	}
+	if s.enableArxiv {
+		go func() {
+			papers, err := s.searchArXiv(query, searchLimit, updateProgress)
+			results <- sourceResult{papers: papers, err: err, name: searchSourceArxiv}
+		}()
 	}
 
+	// 收集结果并设置总时限，避免极端情况下卡死。
+	deadline := time.NewTimer(s.overallTimeout)
+	defer deadline.Stop()
+
 	received := 0
-	for received < 3 {
+	for received < totalSources {
 		select {
 		case result := <-results:
 			received++
 			if result.err == nil && len(result.papers) > 0 {
 				combined = append(combined, result.papers...)
-				sourceStatus[result.name] = fmt.Sprintf("SUCCESS(count=%d)", len(result.papers))
-				log.Printf("[Search] source=%s status=%s", result.name, sourceStatus[result.name])
 				continue
 			}
 			if result.err != nil {
-				sourceStatus[result.name] = fmt.Sprintf("FAILED(error=%v)", result.err)
-				log.Printf("[Search] source=%s status=%s", result.name, sourceStatus[result.name])
 				errs = append(errs, fmt.Sprintf("%s: %v", result.name, result.err))
 				continue
 			}
-			sourceStatus[result.name] = "SUCCESS(count=0)"
-			log.Printf("[Search] source=%s status=%s", result.name, sourceStatus[result.name])
 		case <-deadline.C:
-			errs = append(errs, fmt.Sprintf("search timed out after %s", searchOverallTimeout))
-			for name, status := range sourceStatus {
-				if status == "PENDING" {
-					sourceStatus[name] = "FAILED(error=overall timeout)"
-					log.Printf("[Search] source=%s status=%s", name, sourceStatus[name])
-				}
-			}
-			received = 3
+			errs = append(errs, fmt.Sprintf("search timed out after %s", s.overallTimeout))
+			received = totalSources
 		}
 	}
 
-	log.Printf(
-		"[Search] summary: Semantic Scholar=%s | arXiv=%s | arxiv-sanity-lite=%s",
-		sourceStatus["Semantic Scholar"],
-		sourceStatus["arXiv"],
-		sourceStatus["arxiv-sanity-lite"],
-	)
+	sourceStateMu.Lock()
+	sourceSnapshot := cloneSearchSourceStates(sourceStates)
+	sourceStateMu.Unlock()
+
+	s.emitSearchProgress(SearchProgressEvent{
+		Query:            query,
+		ElapsedSeconds:   elapsedSearchSeconds(startedAt, s.retryDuration),
+		TotalSeconds:     int(s.retryDuration / time.Second),
+		TotalSources:     len(sourceSnapshot),
+		CompletedSources: countCompletedSources(sourceSnapshot),
+		Sources:          sourceSnapshot,
+		Phase:            "completed",
+	})
+
+	summaryParts := make([]string, 0, 2)
+	if s.enableSemanticScholar {
+		summaryParts = append(summaryParts, fmt.Sprintf("Semantic Scholar=%s", formatSourceSummary(sourceSnapshot, searchSourceSemantic)))
+	}
+	if s.enableArxiv {
+		summaryParts = append(summaryParts, fmt.Sprintf("arXiv=%s", formatSourceSummary(sourceSnapshot, searchSourceArxiv)))
+	}
+	log.Printf("[Search] summary: %s", strings.Join(summaryParts, " | "))
 
 	// 去重（按标题）
 	paperMap := make(map[string]SearchPaper)
@@ -869,28 +989,38 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	return papers, nil
 }
 
-func (s *SearchClient) retrySourceSearch(sourceName string, fn func() ([]SearchPaper, error)) ([]SearchPaper, error) {
+func (s *SearchClient) retrySourceSearch(
+	sourceName string,
+	fn func() ([]SearchPaper, error),
+	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
+) ([]SearchPaper, error) {
 	startedAt := time.Now()
 	var lastErr error
 
-	for attempt := 1; attempt <= searchRetryMax; attempt++ {
+	for attempt := 1; attempt <= s.retryMax; attempt++ {
 		attemptStarted := time.Now()
 		papers, err := fn()
 		if err == nil {
-			log.Printf("[Search][%s] attempt %d/%d succeeded with %d papers", sourceName, attempt, searchRetryMax, len(papers))
+			log.Printf("[Search][%s] attempt %d/%d succeeded with %d papers", sourceName, attempt, s.retryMax, len(papers))
+			if onAttempt != nil {
+				onAttempt(sourceName, attempt, true, true, len(papers), nil)
+			}
 			return papers, nil
 		}
 
 		lastErr = err
-		log.Printf("[Search][%s] attempt %d/%d failed: %v", sourceName, attempt, searchRetryMax, err)
-		if attempt < searchRetryMax {
-			if wait := searchRetryInterval - time.Since(attemptStarted); wait > 0 {
+		log.Printf("[Search][%s] attempt %d/%d failed: %v", sourceName, attempt, s.retryMax, err)
+		if onAttempt != nil {
+			onAttempt(sourceName, attempt, false, attempt == s.retryMax, 0, err)
+		}
+		if attempt < s.retryMax {
+			if wait := s.retryInterval - time.Since(attemptStarted); wait > 0 {
 				time.Sleep(wait)
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("%s failed after %d retries in %v: %v", sourceName, searchRetryMax, time.Since(startedAt), lastErr)
+	return nil, fmt.Errorf("%s failed after %d retries in %v: %v", sourceName, s.retryMax, time.Since(startedAt), lastErr)
 }
 
 // 新增：arxiv-sanity-lite 搜索
@@ -962,15 +1092,19 @@ func (s *SearchClient) searchArxivSanityLite(query string, limit int) ([]SearchP
 	return papers, nil
 }
 
-func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchPaper, error) {
+func (s *SearchClient) searchSemanticScholar(
+	query string,
+	limit int,
+	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
+) ([]SearchPaper, error) {
 	apiURL := fmt.Sprintf(
 		"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf",
 		url.QueryEscape(query),
 		limit,
 	)
 
-	return s.retrySourceSearch("Semantic Scholar", func() ([]SearchPaper, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), searchAttemptTimeout)
+	return s.retrySourceSearch(searchSourceSemantic, func() ([]SearchPaper, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -1055,18 +1189,22 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 		}
 
 		return papers, nil
-	})
+	}, onAttempt)
 }
 
-func (s *SearchClient) searchArXiv(query string, limit int) ([]SearchPaper, error) {
+func (s *SearchClient) searchArXiv(
+	query string,
+	limit int,
+	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
+) ([]SearchPaper, error) {
 	apiURL := fmt.Sprintf(
 		"https://export.arxiv.org/api/query?search_query=all:%s&start=0&max_results=%d",
 		url.QueryEscape(query),
 		limit,
 	)
 
-	return s.retrySourceSearch("arXiv", func() ([]SearchPaper, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), searchAttemptTimeout)
+	return s.retrySourceSearch(searchSourceArxiv, func() ([]SearchPaper, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -1088,7 +1226,73 @@ func (s *SearchClient) searchArXiv(query string, limit int) ([]SearchPaper, erro
 		}
 
 		return parseArXivXML(body)
-	})
+	}, onAttempt)
+}
+
+func (s *SearchClient) emitSearchProgress(progress SearchProgressEvent) {
+	s.progressMu.RLock()
+	reporter := s.progressReporter
+	s.progressMu.RUnlock()
+	if reporter == nil {
+		return
+	}
+	progress.CompletedSources = countCompletedSources(progress.Sources)
+	reporter(progress)
+}
+
+func cloneSearchSourceStates(state map[string]SearchSourceProgress) []SearchSourceProgress {
+	ordered := []string{searchSourceSemantic, searchSourceArxiv}
+	cloned := make([]SearchSourceProgress, 0, len(state))
+	for _, name := range ordered {
+		if value, ok := state[name]; ok {
+			cloned = append(cloned, value)
+		}
+	}
+	return cloned
+}
+
+func countCompletedSources(sources []SearchSourceProgress) int {
+	completed := 0
+	for _, source := range sources {
+		if source.Done {
+			completed++
+		}
+	}
+	return completed
+}
+
+func elapsedSearchSeconds(startedAt time.Time, totalDuration time.Duration) int {
+	if startedAt.IsZero() {
+		return 0
+	}
+	elapsed := int(time.Since(startedAt).Seconds())
+	if elapsed < 0 {
+		return 0
+	}
+	total := int(totalDuration / time.Second)
+	if total <= 0 {
+		total = 1
+	}
+	if elapsed > total {
+		return total
+	}
+	return elapsed
+}
+
+func formatSourceSummary(sources []SearchSourceProgress, sourceName string) string {
+	for _, source := range sources {
+		if source.Name != sourceName {
+			continue
+		}
+		if source.Success {
+			return fmt.Sprintf("SUCCESS(count=%d)", source.ResultCount)
+		}
+		if strings.TrimSpace(source.Error) != "" {
+			return fmt.Sprintf("FAILED(error=%s)", source.Error)
+		}
+		return strings.ToUpper(source.Status)
+	}
+	return "UNKNOWN"
 }
 
 func parseArXivXML(data []byte) ([]SearchPaper, error) {

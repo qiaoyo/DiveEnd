@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type llmSeedConfig struct {
@@ -16,6 +18,30 @@ type llmSeedConfig struct {
 
 type baiduTokenSeed struct {
 	AccessToken string `json:"access_token"`
+}
+
+type semanticScholarSeed struct {
+	APIKey string `json:"api_key"`
+}
+
+type appYAMLSearchConfig struct {
+	Search struct {
+		EnableSemanticScholar  *bool  `yaml:"enable_semantic_scholar"`
+		EnableArxiv            *bool  `yaml:"enable_arxiv"`
+		SemanticScholarKeyPath string `yaml:"semantic_scholar_key_path"`
+		PerSourceResultLimit   int    `yaml:"per_source_result_limit"`
+		RetryDurationSeconds   int    `yaml:"retry_duration_seconds"`
+		RetryIntervalSeconds   int    `yaml:"retry_interval_seconds"`
+	} `yaml:"search"`
+}
+
+type appYAMLSearchSettings struct {
+	EnableSemanticScholar  *bool
+	EnableArxiv            *bool
+	SemanticScholarKeyPath string
+	PerSourceResultLimit   int
+	RetryDurationSeconds   int
+	RetryIntervalSeconds   int
 }
 
 var configPathOverride string
@@ -55,6 +81,17 @@ func defaultWeakLLMConfig() LLMConfig {
 	return config
 }
 
+func defaultSearchAPIConfig() SearchAPIConfig {
+	return SearchAPIConfig{
+		EnableSemanticScholar:  true,
+		EnableArxiv:            true,
+		SemanticScholarKeyPath: filepath.Join("config", "semantic_scholar.json"),
+		PerSourceResultLimit:   100,
+		RetryDurationSeconds:   60,
+		RetryIntervalSeconds:   1,
+	}
+}
+
 func defaultAppConfig() AppConfig {
 	homeDir, err := userHomeDirFunc()
 	if err != nil || strings.TrimSpace(homeDir) == "" {
@@ -64,7 +101,7 @@ func defaultAppConfig() AppConfig {
 	return AppConfig{
 		LLM:             defaultAnthropicLLMConfig(),
 		WeakLLM:         defaultWeakLLMConfig(),
-		Search:          SearchAPIConfig{},
+		Search:          defaultSearchAPIConfig(),
 		Theme:           "light",
 		LeftPanelWidth:  280,
 		RightPanelWidth: 340,
@@ -186,6 +223,33 @@ func normalizeLLMConfig(config LLMConfig) LLMConfig {
 }
 
 func normalizeSearchAPIConfig(config SearchAPIConfig) SearchAPIConfig {
+	defaults := defaultSearchAPIConfig()
+	if !config.EnableSemanticScholar && !config.EnableArxiv &&
+		strings.TrimSpace(config.SemanticScholarKeyPath) == "" &&
+		config.PerSourceResultLimit == 0 &&
+		config.RetryDurationSeconds == 0 &&
+		config.RetryIntervalSeconds == 0 {
+		config.EnableSemanticScholar = defaults.EnableSemanticScholar
+		config.EnableArxiv = defaults.EnableArxiv
+	}
+
+	config.SemanticScholarKeyPath = strings.TrimSpace(config.SemanticScholarKeyPath)
+	if config.SemanticScholarKeyPath == "" {
+		config.SemanticScholarKeyPath = defaults.SemanticScholarKeyPath
+	}
+	if config.PerSourceResultLimit < 100 {
+		config.PerSourceResultLimit = defaults.PerSourceResultLimit
+	}
+	if config.RetryIntervalSeconds <= 0 {
+		config.RetryIntervalSeconds = defaults.RetryIntervalSeconds
+	}
+	if config.RetryDurationSeconds <= 0 {
+		config.RetryDurationSeconds = defaults.RetryDurationSeconds
+	}
+	if config.RetryDurationSeconds < config.RetryIntervalSeconds {
+		config.RetryDurationSeconds = defaults.RetryDurationSeconds
+	}
+
 	config.SemanticScholarAPIKey = strings.TrimSpace(config.SemanticScholarAPIKey)
 	config.HasSemanticScholarAPIKey = config.SemanticScholarAPIKey != ""
 	config.ClearSemanticScholarAPIKey = false
@@ -286,6 +350,7 @@ func getConfigPath() string {
 
 func loadBootstrapConfig() AppConfig {
 	config := defaultAppConfig()
+	config.Search = mergeSearchConfigWithAppYAML(config.Search)
 
 	if seed, ok := readStrongLLMSeed(); ok {
 		config.LLM = llmConfigFromSeed(seed)
@@ -300,10 +365,18 @@ func loadBootstrapConfig() AppConfig {
 		config.BaiduCloud.Token = token
 	}
 
+	if config.Search.EnableSemanticScholar {
+		if key, ok := readSemanticScholarSeed(config.Search.SemanticScholarKeyPath); ok {
+			config.Search.SemanticScholarAPIKey = key
+		}
+	}
+
 	return normalizeAppConfig(config)
 }
 
 func mergeSeedSecrets(config AppConfig) AppConfig {
+	config.Search = mergeSearchConfigWithAppYAML(config.Search)
+
 	if seed, ok := readStrongLLMSeed(); ok {
 		config.LLM = mergeLLMSeedConfig(config.LLM, seed)
 	}
@@ -321,7 +394,60 @@ func mergeSeedSecrets(config AppConfig) AppConfig {
 		}
 	}
 
+	if config.Search.EnableSemanticScholar && strings.TrimSpace(config.Search.SemanticScholarAPIKey) == "" {
+		if key, ok := readSemanticScholarSeed(config.Search.SemanticScholarKeyPath); ok {
+			config.Search.SemanticScholarAPIKey = key
+		}
+	}
+
 	return normalizeAppConfig(config)
+}
+
+func mergeSearchConfigWithAppYAML(searchConfig SearchAPIConfig) SearchAPIConfig {
+	yamlConfig, ok := readAppYAMLSearchConfig()
+	if !ok {
+		return normalizeSearchAPIConfig(searchConfig)
+	}
+	if yamlConfig.EnableSemanticScholar != nil {
+		searchConfig.EnableSemanticScholar = *yamlConfig.EnableSemanticScholar
+	}
+	if yamlConfig.EnableArxiv != nil {
+		searchConfig.EnableArxiv = *yamlConfig.EnableArxiv
+	}
+	if strings.TrimSpace(yamlConfig.SemanticScholarKeyPath) != "" {
+		searchConfig.SemanticScholarKeyPath = strings.TrimSpace(yamlConfig.SemanticScholarKeyPath)
+	}
+	if yamlConfig.PerSourceResultLimit > 0 {
+		searchConfig.PerSourceResultLimit = yamlConfig.PerSourceResultLimit
+	}
+	if yamlConfig.RetryDurationSeconds > 0 {
+		searchConfig.RetryDurationSeconds = yamlConfig.RetryDurationSeconds
+	}
+	if yamlConfig.RetryIntervalSeconds > 0 {
+		searchConfig.RetryIntervalSeconds = yamlConfig.RetryIntervalSeconds
+	}
+	return normalizeSearchAPIConfig(searchConfig)
+}
+
+func readAppYAMLSearchConfig() (appYAMLSearchSettings, bool) {
+	data, err := os.ReadFile(filepath.Join("config", "app.yaml"))
+	if err != nil {
+		return appYAMLSearchSettings{}, false
+	}
+
+	var raw appYAMLSearchConfig
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return appYAMLSearchSettings{}, false
+	}
+
+	return appYAMLSearchSettings{
+		EnableSemanticScholar:  raw.Search.EnableSemanticScholar,
+		EnableArxiv:            raw.Search.EnableArxiv,
+		SemanticScholarKeyPath: strings.TrimSpace(raw.Search.SemanticScholarKeyPath),
+		PerSourceResultLimit:   raw.Search.PerSourceResultLimit,
+		RetryDurationSeconds:   raw.Search.RetryDurationSeconds,
+		RetryIntervalSeconds:   raw.Search.RetryIntervalSeconds,
+	}, true
 }
 
 func readStrongLLMSeed() (llmSeedConfig, bool) {
@@ -363,6 +489,26 @@ func readBaiduTokenSeed() (string, bool) {
 
 	token := strings.TrimSpace(seed.AccessToken)
 	return token, token != ""
+}
+
+func readSemanticScholarSeed(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+
+	var seed semanticScholarSeed
+	if err := json.Unmarshal(data, &seed); err != nil {
+		return "", false
+	}
+
+	key := strings.TrimSpace(seed.APIKey)
+	return key, key != ""
 }
 
 func llmConfigFromSeed(seed llmSeedConfig) LLMConfig {

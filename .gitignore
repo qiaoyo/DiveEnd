@@ -7,6 +7,7 @@ node_modules/
 baiduyun_token.json
 config/weak_llm.json
 config/strong_llm.json
+config/semantic_scholar.json
 DiveEnd
 data/diveend.db
 frontend/package.json.md5

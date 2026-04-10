@@ -20,6 +20,12 @@ type LLMConfig struct {
 }
 
 type SearchAPIConfig struct {
+	EnableSemanticScholar      bool   `json:"enableSemanticScholar"`
+	EnableArxiv                bool   `json:"enableArxiv"`
+	SemanticScholarKeyPath     string `json:"semanticScholarKeyPath"`
+	PerSourceResultLimit       int    `json:"perSourceResultLimit"`
+	RetryDurationSeconds       int    `json:"retryDurationSeconds"`
+	RetryIntervalSeconds       int    `json:"retryIntervalSeconds"`
 	SemanticScholarAPIKey      string `json:"semanticScholarApiKey,omitempty"`
 	HasSemanticScholarAPIKey   bool   `json:"hasSemanticScholarApiKey"`
 	ClearSemanticScholarAPIKey bool   `json:"clearSemanticScholarApiKey,omitempty"`

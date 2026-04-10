@@ -492,7 +492,7 @@ export function SettingsPanel() {
                   <div>
                     <p className="text-sm font-medium">论文搜索方案</p>
                     <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">
-                      当前后端固定并行检索 `Semantic Scholar + arXiv` 后去重汇总，未暴露搜索源切换，也不再要求你额外准备 Semantic Scholar key。
+                      搜索源与重试策略由 `config/app.yaml` 的 `search` 段控制；Semantic Scholar key 通过 `config/semantic_scholar.json` 管理，不会写入界面配置。
                     </p>
                   </div>
                   <div className="rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-950/60 dark:text-stone-300">

@@ -14,6 +14,12 @@ export interface LLMConfig {
 }
 
 export interface SearchAPIConfig {
+  enableSemanticScholar: boolean;
+  enableArxiv: boolean;
+  semanticScholarKeyPath: string;
+  perSourceResultLimit: number;
+  retryDurationSeconds: number;
+  retryIntervalSeconds: number;
   semanticScholarApiKey: string;
   hasSemanticScholarApiKey: boolean;
   clearSemanticScholarApiKey: boolean;
@@ -78,6 +84,28 @@ export interface SearchSourceStatus {
   success: boolean;
   error?: string;
   count: number;
+}
+
+export interface SearchProgressSource {
+  name: string;
+  attempt: number;
+  maxAttempts: number;
+  status: 'pending' | 'retrying' | 'success' | 'failed' | string;
+  success: boolean;
+  done: boolean;
+  resultCount: number;
+  error?: string;
+}
+
+export interface SearchProgressEvent {
+  query: string;
+  elapsedSeconds: number;
+  totalSeconds: number;
+  completedSources: number;
+  totalSources: number;
+  sources: SearchProgressSource[];
+  phase: 'searching' | 'completed';
+  message?: string;
 }
 
 export interface EnhancedSearchResult {
@@ -372,6 +400,12 @@ export const defaultConfig: AppConfig = {
     clearApiKey: false,
   },
   search: {
+    enableSemanticScholar: true,
+    enableArxiv: true,
+    semanticScholarKeyPath: 'config/semantic_scholar.json',
+    perSourceResultLimit: 100,
+    retryDurationSeconds: 60,
+    retryIntervalSeconds: 1,
     semanticScholarApiKey: '',
     hasSemanticScholarApiKey: false,
     clearSemanticScholarApiKey: false,

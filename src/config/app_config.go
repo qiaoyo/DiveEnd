@@ -52,6 +52,15 @@ type AppConfig struct {
 		WeakConfigPath   string `yaml:"weak_config_path"`
 		StrongConfigPath string `yaml:"strong_config_path"`
 	} `yaml:"llm"`
+
+	Search struct {
+		EnableSemanticScholar  bool   `yaml:"enable_semantic_scholar"`
+		EnableArxiv            bool   `yaml:"enable_arxiv"`
+		SemanticScholarKeyPath string `yaml:"semantic_scholar_key_path"`
+		PerSourceResultLimit   int    `yaml:"per_source_result_limit"`
+		RetryDurationSeconds   int    `yaml:"retry_duration_seconds"`
+		RetryIntervalSeconds   int    `yaml:"retry_interval_seconds"`
+	} `yaml:"search"`
 }
 
 // LoadAppConfig loads application configuration from YAML file

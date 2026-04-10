@@ -232,3 +232,80 @@ func TestLoadAppConfigBootstrapsStrongWeakAndBaiduSeeds(t *testing.T) {
 		t.Fatalf("expected baidu token to bootstrap, got %q", config.BaiduCloud.Token)
 	}
 }
+
+func TestLoadAppConfigBootstrapsSearchFromAppYAMLAndSemanticKeyFile(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := os.MkdirAll("config", 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	appYAML := `search:
+  enable_semantic_scholar: true
+  enable_arxiv: false
+  semantic_scholar_key_path: "config/semantic_scholar.private.json"
+  per_source_result_limit: 120
+  retry_duration_seconds: 45
+  retry_interval_seconds: 1
+`
+	if err := os.WriteFile(filepath.Join("config", "app.yaml"), []byte(appYAML), 0644); err != nil {
+		t.Fatalf("WriteFile app.yaml error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "semantic_scholar.private.json"), []byte(`{"api_key":"semantic-seed-key"}`), 0600); err != nil {
+		t.Fatalf("WriteFile semantic key seed error = %v", err)
+	}
+
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+
+	if !config.Search.EnableSemanticScholar {
+		t.Fatal("expected Semantic Scholar to be enabled from app.yaml")
+	}
+	if config.Search.EnableArxiv {
+		t.Fatal("expected arXiv to be disabled from app.yaml")
+	}
+	if config.Search.SemanticScholarKeyPath != filepath.Join("config", "semantic_scholar.private.json") {
+		t.Fatalf("expected semantic key path to apply from app.yaml, got %q", config.Search.SemanticScholarKeyPath)
+	}
+	if config.Search.SemanticScholarAPIKey != "semantic-seed-key" {
+		t.Fatalf("expected semantic key to load from seed file, got %q", config.Search.SemanticScholarAPIKey)
+	}
+	if config.Search.PerSourceResultLimit != 120 {
+		t.Fatalf("expected per source result limit 120, got %d", config.Search.PerSourceResultLimit)
+	}
+	if config.Search.RetryDurationSeconds != 45 {
+		t.Fatalf("expected retry duration 45s, got %d", config.Search.RetryDurationSeconds)
+	}
+}
+
+func TestLoadAppConfigDoesNotReadSemanticKeyWhenSourceDisabled(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := os.MkdirAll("config", 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	appYAML := `search:
+  enable_semantic_scholar: false
+  enable_arxiv: true
+  semantic_scholar_key_path: "config/semantic_scholar.private.json"
+`
+	if err := os.WriteFile(filepath.Join("config", "app.yaml"), []byte(appYAML), 0644); err != nil {
+		t.Fatalf("WriteFile app.yaml error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "semantic_scholar.private.json"), []byte(`{"api_key":"semantic-seed-key"}`), 0600); err != nil {
+		t.Fatalf("WriteFile semantic key seed error = %v", err)
+	}
+
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+
+	if config.Search.EnableSemanticScholar {
+		t.Fatal("expected Semantic Scholar to remain disabled")
+	}
+	if config.Search.SemanticScholarAPIKey != "" {
+		t.Fatalf("expected semantic key to stay empty when semantic source disabled, got %q", config.Search.SemanticScholarAPIKey)
+	}
+}
