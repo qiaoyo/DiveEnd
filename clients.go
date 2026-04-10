@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -714,11 +716,12 @@ type SearchClient struct {
 }
 
 const (
-	searchHTTPTimeout      = 12 * time.Second
-	searchOverallTimeout   = 15 * time.Second
-	semanticRetryMax       = 3
-	semanticRetryWindow    = 12 * time.Second
-	semanticRetryBackoffMS = 500 * time.Millisecond
+	searchHTTPTimeout    = 12 * time.Second
+	searchOverallTimeout = 70 * time.Second
+	searchRetryDuration  = 1 * time.Minute
+	searchRetryInterval  = 1 * time.Second
+	searchAttemptTimeout = 1 * time.Second
+	searchRetryMax       = int(searchRetryDuration / searchRetryInterval)
 )
 
 func NewSearchClient(config AppConfig) *SearchClient {
@@ -781,6 +784,12 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	deadline := time.NewTimer(searchOverallTimeout)
 	defer deadline.Stop()
 
+	sourceStatus := map[string]string{
+		"Semantic Scholar":  "PENDING",
+		"arXiv":             "PENDING",
+		"arxiv-sanity-lite": "PENDING",
+	}
+
 	received := 0
 	for received < 3 {
 		select {
@@ -788,16 +797,36 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 			received++
 			if result.err == nil && len(result.papers) > 0 {
 				combined = append(combined, result.papers...)
+				sourceStatus[result.name] = fmt.Sprintf("SUCCESS(count=%d)", len(result.papers))
+				log.Printf("[Search] source=%s status=%s", result.name, sourceStatus[result.name])
 				continue
 			}
 			if result.err != nil {
+				sourceStatus[result.name] = fmt.Sprintf("FAILED(error=%v)", result.err)
+				log.Printf("[Search] source=%s status=%s", result.name, sourceStatus[result.name])
 				errs = append(errs, fmt.Sprintf("%s: %v", result.name, result.err))
+				continue
 			}
+			sourceStatus[result.name] = "SUCCESS(count=0)"
+			log.Printf("[Search] source=%s status=%s", result.name, sourceStatus[result.name])
 		case <-deadline.C:
 			errs = append(errs, fmt.Sprintf("search timed out after %s", searchOverallTimeout))
+			for name, status := range sourceStatus {
+				if status == "PENDING" {
+					sourceStatus[name] = "FAILED(error=overall timeout)"
+					log.Printf("[Search] source=%s status=%s", name, sourceStatus[name])
+				}
+			}
 			received = 3
 		}
 	}
+
+	log.Printf(
+		"[Search] summary: Semantic Scholar=%s | arXiv=%s | arxiv-sanity-lite=%s",
+		sourceStatus["Semantic Scholar"],
+		sourceStatus["arXiv"],
+		sourceStatus["arxiv-sanity-lite"],
+	)
 
 	// 去重（按标题）
 	paperMap := make(map[string]SearchPaper)
@@ -838,6 +867,27 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	}
 
 	return papers, nil
+}
+
+func (s *SearchClient) retrySourceSearch(sourceName string, fn func() ([]SearchPaper, error)) ([]SearchPaper, error) {
+	startedAt := time.Now()
+	var lastErr error
+
+	for attempt := 1; attempt <= searchRetryMax; attempt++ {
+		papers, err := fn()
+		if err == nil {
+			log.Printf("[Search][%s] attempt %d/%d succeeded with %d papers", sourceName, attempt, searchRetryMax, len(papers))
+			return papers, nil
+		}
+
+		lastErr = err
+		log.Printf("[Search][%s] attempt %d/%d failed: %v", sourceName, attempt, searchRetryMax, err)
+		if attempt < searchRetryMax {
+			time.Sleep(searchRetryInterval)
+		}
+	}
+
+	return nil, fmt.Errorf("%s failed after %d retries in %v: %v", sourceName, searchRetryMax, time.Since(startedAt), lastErr)
 }
 
 // 新增：arxiv-sanity-lite 搜索
@@ -916,26 +966,13 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 		limit,
 	)
 
-	// 轻量重试：控制在秒级窗口，避免 DeepStart 首次创建被长时间阻塞。
-	maxRetries := semanticRetryMax
-	maxDuration := semanticRetryWindow
-	startTime := time.Now()
+	return s.retrySourceSearch("Semantic Scholar", func() ([]SearchPaper, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), searchAttemptTimeout)
+		defer cancel()
 
-	var lastErr error
-	for retry := 0; retry < maxRetries; retry++ {
-		if time.Since(startTime) > maxDuration {
-			break
-		}
-
-		if retry > 0 {
-			delay := time.Duration(retry) * semanticRetryBackoffMS
-			time.Sleep(delay)
-		}
-
-		req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 		if err != nil {
-			lastErr = err
-			continue
+			return nil, err
 		}
 		if s.semanticScholarAPIKey != "" {
 			req.Header.Set("x-api-key", s.semanticScholarAPIKey)
@@ -944,27 +981,21 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
-			lastErr = err
-			continue
+			return nil, err
 		}
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		// 429 基本属于短期配额限制，继续重试收益极低，直接快速失败。
-		if resp.StatusCode == 429 {
-			return nil, fmt.Errorf("rate limited (429)")
+			return nil, err
 		}
 
 		if resp.StatusCode >= 400 {
-			lastErr = fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
-			continue
+			if resp.StatusCode == http.StatusTooManyRequests {
+				return nil, fmt.Errorf("rate limited (429)")
+			}
+			return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
 		}
 
-		// 成功，解析结果
 		var result struct {
 			Data []struct {
 				PaperID string `json:"paperId"`
@@ -985,8 +1016,7 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 		}
 
 		if err := json.Unmarshal(body, &result); err != nil {
-			lastErr = err
-			continue
+			return nil, err
 		}
 
 		papers := make([]SearchPaper, 0, len(result.Data))
@@ -1022,9 +1052,7 @@ func (s *SearchClient) searchSemanticScholar(query string, limit int) ([]SearchP
 		}
 
 		return papers, nil
-	}
-
-	return nil, fmt.Errorf("semantic scholar failed after %d retries in %v: %v", maxRetries, time.Since(startTime), lastErr)
+	})
 }
 
 func (s *SearchClient) searchArXiv(query string, limit int) ([]SearchPaper, error) {
@@ -1034,21 +1062,30 @@ func (s *SearchClient) searchArXiv(query string, limit int) ([]SearchPaper, erro
 		limit,
 	)
 
-	resp, err := s.httpClient.Get(apiURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	return s.retrySourceSearch("arXiv", func() ([]SearchPaper, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), searchAttemptTimeout)
+		defer cancel()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
-	}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if err != nil {
+			return nil, err
+		}
 
-	return parseArXivXML(body)
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
+		}
+
+		return parseArXivXML(body)
+	})
 }
 
 func parseArXivXML(data []byte) ([]SearchPaper, error) {
