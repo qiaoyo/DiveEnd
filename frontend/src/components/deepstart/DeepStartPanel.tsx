@@ -1,15 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BrainCircuit, Loader2, Search, Sparkles } from 'lucide-react';
-import { onDeepStartProgress, onSearchProgress, startDeepStartSession } from '../../lib/backend';
+import { BrainCircuit, Loader2, Search, Sparkles, Square } from 'lucide-react';
+import { cancelDeepStartTask, onDeepStartProgress, onSearchProgress, startDeepStartSession } from '../../lib/backend';
 import type { DeepStartProgressEvent, SearchProgressEvent } from '../../types';
 import { useAppStore } from '../../stores/appStore';
+
+function isDeepStartCancelledError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes('cancelled') || message.includes('canceled');
+}
 
 export function DeepStartPanel() {
   const navigate = useNavigate();
   const { activeFolderId, folders, setActiveDeepStartSession, setError } = useAppStore();
 
   const [isStarting, setIsStarting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [newPrompt, setNewPrompt] = useState('');
   const [searchProgress, setSearchProgress] = useState<SearchProgressEvent | null>(null);
   const [deepStartProgress, setDeepStartProgress] = useState<DeepStartProgressEvent | null>(null);
@@ -70,12 +79,18 @@ export function DeepStartPanel() {
         return '生成 AI 分析';
       case 'persisting':
         return '保存会话';
+      case 'cancelling':
+        return '正在停止';
+      case 'cancelled':
+        return '已停止';
       case 'completed':
         return '准备完成';
       default:
         return '检索中';
     }
   }, [deepStartProgress?.phase]);
+
+  const runningSessionId = deepStartProgress?.sessionId?.trim() ?? '';
 
   const handleStartSession = async () => {
     const prompt = newPrompt.trim();
@@ -85,6 +100,7 @@ export function DeepStartPanel() {
     }
 
     setIsStarting(true);
+    setIsCancelling(false);
     setDeepStartProgress({
       phase: 'searching',
       sessionId: '',
@@ -135,9 +151,48 @@ export function DeepStartPanel() {
       // 创建成功后跳转到会话详情页面
       navigate(`/session/${detail.summary.id}`);
     } catch (error) {
+      if (isDeepStartCancelledError(error)) {
+        setDeepStartProgress((prev) => ({
+          sessionId: prev?.sessionId ?? '',
+          phase: 'cancelled',
+          message: '已停止本次探索，未保存任何新结果',
+          elapsedSeconds: prev?.elapsedSeconds ?? 0,
+          estimatedRemainingSeconds: 0,
+          total: prev?.total ?? 0,
+          completed: prev?.completed ?? 0,
+          overallPercent: prev?.overallPercent ?? 0,
+          stats: prev?.stats,
+        }));
+        return;
+      }
       setError(error instanceof Error ? error.message : '创建探索会话失败');
     } finally {
       setIsStarting(false);
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCancelSession = async () => {
+    if (!runningSessionId) {
+      return;
+    }
+    setIsCancelling(true);
+    setDeepStartProgress((prev) => ({
+      sessionId: prev?.sessionId ?? runningSessionId,
+      phase: 'cancelling',
+      message: '正在停止本次探索并撤销暂存结果',
+      elapsedSeconds: prev?.elapsedSeconds ?? 0,
+      estimatedRemainingSeconds: 1,
+      total: prev?.total ?? 0,
+      completed: prev?.completed ?? 0,
+      overallPercent: prev?.overallPercent ?? 0,
+      stats: prev?.stats,
+    }));
+    try {
+      await cancelDeepStartTask(runningSessionId);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '停止探索失败');
+      setIsCancelling(false);
     }
   };
 
@@ -180,6 +235,17 @@ export function DeepStartPanel() {
                 {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
                 {isStarting ? '正在创建探索会话...' : '开始探索'}
               </button>
+              {isStarting && (
+                <button
+                  type="button"
+                  onClick={() => void handleCancelSession()}
+                  disabled={isCancelling || !runningSessionId}
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200 dark:hover:bg-rose-500/20"
+                >
+                  {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                  {isCancelling ? '停止中...' : '停止本次探索'}
+                </button>
+              )}
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-violet-600 dark:bg-violet-500/20 dark:text-violet-300">
                 <Sparkles className="h-4 w-4" />
               </span>
@@ -202,17 +268,33 @@ export function DeepStartPanel() {
                 <div className="flex items-center justify-between text-xs text-indigo-700 dark:text-indigo-200">
                   <span>{deepStartProgress?.message || '正在搜索并重试（最多 1 分钟）'}</span>
                   <span>
-                    {deepStartProgress
-                      ? `阶段：${phaseLabel} · 预计剩余 ${deepStartProgress.estimatedRemainingSeconds}s`
-                      : `${searchProgress.elapsedSeconds}s / ${searchProgress.totalSeconds}s`}
+                    {deepStartProgress?.phase === 'analyzing' || deepStartProgress?.phase === 'persisting' ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        阶段：{phaseLabel}
+                      </span>
+                    ) : deepStartProgress ? (
+                      `阶段：${phaseLabel} · 预计剩余 ${deepStartProgress.estimatedRemainingSeconds}s`
+                    ) : (
+                      `${searchProgress.elapsedSeconds}s / ${searchProgress.totalSeconds}s`
+                    )}
                   </span>
                 </div>
                 <div className="mt-2 h-2 rounded-full bg-indigo-100 dark:bg-indigo-500/20">
                   <div className="h-2 rounded-full bg-indigo-600 transition-all" style={{ width: `${progressPercent}%` }} />
                 </div>
+                {(deepStartProgress?.phase === 'cancelling' || deepStartProgress?.phase === 'cancelled') && (
+                  <div className="mt-2 text-xs text-rose-700 dark:text-rose-300">{deepStartProgress.message}</div>
+                )}
                 {deepStartProgress?.phase === 'enriching' && (
                   <div className="mt-2 text-xs text-indigo-700 dark:text-indigo-200">
                     正在导入 {deepStartProgress.total} 篇论文，已完成 {deepStartProgress.completed} 篇，预计剩余 {deepStartProgress.estimatedRemainingSeconds} 秒
+                  </div>
+                )}
+                {(deepStartProgress?.phase === 'analyzing' || deepStartProgress?.phase === 'persisting') && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-200">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    正在等待 AI 返回结果
                   </div>
                 )}
                 {deepStartProgress?.stats && (

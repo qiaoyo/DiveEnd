@@ -2,7 +2,7 @@ package main
 
 import "time"
 
-const defaultFolderName = "Inbox"
+const defaultFolderName = "Cache"
 
 type LLMConfig struct {
 	ProviderID             string `json:"providerId"`
@@ -154,23 +154,40 @@ type PathHistoryItem struct {
 type Folder struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	ParentID  string    `json:"parentId,omitempty"`
+	Path      string    `json:"path"`
+	IsSystem  bool      `json:"isSystem"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type FolderNode struct {
+	Folder   Folder       `json:"folder"`
+	Children []FolderNode `json:"children"`
+}
+
+type CreateFolderNodeRequest struct {
+	ParentID string `json:"parentId,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
 type Paper struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Authors   string    `json:"authors"`
-	Abstract  string    `json:"abstract"`
-	Year      int       `json:"year"`
-	Journal   string    `json:"journal"`
-	URL       string    `json:"url"`
-	PDFPath   string    `json:"pdfPath,omitempty"`
-	FolderID  string    `json:"folderId"`
-	Category  string    `json:"category"`
-	Tags      []string  `json:"tags"`
-	AddedAt   time.Time `json:"addedAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID             string    `json:"id"`
+	SourcePaperID  string    `json:"sourcePaperId"`
+	Title          string    `json:"title"`
+	Authors        string    `json:"authors"`
+	Abstract       string    `json:"abstract"`
+	Year           int       `json:"year"`
+	Journal        string    `json:"journal"`
+	URL            string    `json:"url"`
+	PDFPath        string    `json:"pdfPath,omitempty"`
+	DownloadStatus string    `json:"downloadStatus"`
+	DownloadError  string    `json:"downloadError,omitempty"`
+	FolderID       string    `json:"folderId"`
+	Category       string    `json:"category"`
+	Tags           []string  `json:"tags"`
+	AddedAt        time.Time `json:"addedAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type SearchPaper struct {
@@ -188,6 +205,61 @@ type SearchPaper struct {
 	Keywords       []string `json:"keywords"`
 	SourceLabel    string   `json:"sourceLabel"`
 	EnrichmentNote string   `json:"enrichmentNote,omitempty"`
+}
+
+type ImportSkippedPaper struct {
+	SourcePaperID string `json:"sourcePaperId"`
+	Title         string `json:"title"`
+	Reason        string `json:"reason"`
+}
+
+type ImportPapersWithAssetsResult struct {
+	Imported []Paper              `json:"imported"`
+	Skipped  []ImportSkippedPaper `json:"skipped"`
+	Queued   int                  `json:"queued"`
+	Message  string               `json:"message,omitempty"`
+}
+
+type LocalStorageFolderOverview struct {
+	FolderID        string `json:"folderId"`
+	FolderName      string `json:"folderName"`
+	FolderPath      string `json:"folderPath"`
+	TotalPapers     int    `json:"totalPapers"`
+	Queued          int    `json:"queued"`
+	Downloading     int    `json:"downloading"`
+	Downloaded      int    `json:"downloaded"`
+	Failed          int    `json:"failed"`
+	StoredFileCount int    `json:"storedFileCount"`
+}
+
+type FolderStorageTreeNode struct {
+	FolderID    string                  `json:"folderId"`
+	FolderName  string                  `json:"folderName"`
+	FolderPath  string                  `json:"folderPath"`
+	PaperCount  int                     `json:"paperCount"`
+	Queued      int                     `json:"queued"`
+	Downloading int                     `json:"downloading"`
+	Downloaded  int                     `json:"downloaded"`
+	Failed      int                     `json:"failed"`
+	Children    []FolderStorageTreeNode `json:"children"`
+}
+
+type FolderStorageTreeOverview struct {
+	RootPath    string                  `json:"rootPath"`
+	Directories []FolderStorageTreeNode `json:"directories"`
+	GeneratedAt time.Time               `json:"generatedAt"`
+}
+
+type LocalStorageOverview struct {
+	RootPath     string                       `json:"rootPath"`
+	TotalFolders int                          `json:"totalFolders"`
+	TotalFiles   int                          `json:"totalFiles"`
+	Queued       int                          `json:"queued"`
+	Downloading  int                          `json:"downloading"`
+	Downloaded   int                          `json:"downloaded"`
+	Failed       int                          `json:"failed"`
+	Folders      []LocalStorageFolderOverview `json:"folders"`
+	GeneratedAt  time.Time                    `json:"generatedAt"`
 }
 
 type SearchRetrievalStats struct {
@@ -257,6 +329,7 @@ type DeepStartAnalysis struct {
 	FollowUpQuestions   []string             `json:"followUpQuestions"`
 	SuggestedQueries    []string             `json:"suggestedQueries"`
 	RecommendedPaperIDs []string             `json:"recommendedPaperIds"`
+	RetainedPaperIDs    []string             `json:"retainedPaperIds"`
 	SearchStats         SearchRetrievalStats `json:"searchStats"`
 }
 
@@ -270,7 +343,7 @@ type DeepStartSessionDetail struct {
 
 type DeepStartProgressEvent struct {
 	SessionID                 string                `json:"sessionId,omitempty"`
-	Phase                     string                `json:"phase"` // searching | enriching | analyzing | persisting | completed
+	Phase                     string                `json:"phase"` // searching | enriching | analyzing | persisting | cancelling | cancelled | completed
 	Message                   string                `json:"message,omitempty"`
 	ElapsedSeconds            int                   `json:"elapsedSeconds"`
 	EstimatedRemainingSeconds int                   `json:"estimatedRemainingSeconds"`

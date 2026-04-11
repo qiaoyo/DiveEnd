@@ -10,6 +10,10 @@ export function ApplyScreeningChoice(arg1, arg2) {
   return window['go']['main']['App']['ApplyScreeningChoice'](arg1, arg2);
 }
 
+export function CancelDeepStartTask(arg1) {
+  return window['go']['main']['App']['CancelDeepStartTask'](arg1);
+}
+
 export function CancelScreening(arg1) {
   return window['go']['main']['App']['CancelScreening'](arg1);
 }
@@ -22,8 +26,16 @@ export function CreateFolder(arg1) {
   return window['go']['main']['App']['CreateFolder'](arg1);
 }
 
+export function CreateFolderNode(arg1) {
+  return window['go']['main']['App']['CreateFolderNode'](arg1);
+}
+
 export function CreateScreeningSession(arg1) {
   return window['go']['main']['App']['CreateScreeningSession'](arg1);
+}
+
+export function DeleteFolderNode(arg1) {
+  return window['go']['main']['App']['DeleteFolderNode'](arg1);
 }
 
 export function DeletePaper(arg1) {
@@ -46,12 +58,24 @@ export function GetExtractProgress(arg1) {
   return window['go']['main']['App']['GetExtractProgress'](arg1);
 }
 
+export function GetFolderStorageTreeOverview() {
+  return window['go']['main']['App']['GetFolderStorageTreeOverview']();
+}
+
+export function GetFolderTree() {
+  return window['go']['main']['App']['GetFolderTree']();
+}
+
 export function GetFolders() {
   return window['go']['main']['App']['GetFolders']();
 }
 
 export function GetInitialState() {
   return window['go']['main']['App']['GetInitialState']();
+}
+
+export function GetLocalStorageOverview() {
+  return window['go']['main']['App']['GetLocalStorageOverview']();
 }
 
 export function GetPapers(arg1) {
@@ -94,6 +118,10 @@ export function ImportPapers(arg1, arg2) {
   return window['go']['main']['App']['ImportPapers'](arg1, arg2);
 }
 
+export function ImportPapersWithAssets(arg1, arg2) {
+  return window['go']['main']['App']['ImportPapersWithAssets'](arg1, arg2);
+}
+
 export function ListDeepStartSessions() {
   return window['go']['main']['App']['ListDeepStartSessions']();
 }
@@ -132,6 +160,10 @@ export function TranslatePaperSection(arg1, arg2, arg3) {
 
 export function TriggerSync() {
   return window['go']['main']['App']['TriggerSync']();
+}
+
+export function UndoDeepStartNarrow(arg1) {
+  return window['go']['main']['App']['UndoDeepStartNarrow'](arg1);
 }
 
 export function UpdateDeepStartSelections(arg1, arg2, arg3) {

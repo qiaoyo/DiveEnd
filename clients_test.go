@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -300,6 +302,37 @@ func TestSearchClientSearchRequestsAtLeast100FromSemanticAndArxiv(t *testing.T) 
 	}
 	if len(papers) != 2 {
 		t.Fatalf("expected 2 papers, got %d", len(papers))
+	}
+}
+
+func TestSearchClientSearchWithContextCancellation(t *testing.T) {
+	config := defaultAppConfig()
+	client := NewSearchClient(config)
+
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			select {
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			case <-time.After(2 * time.Second):
+				return nil, fmt.Errorf("unexpected long wait")
+			}
+		}),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	startedAt := time.Now()
+	_, err := client.SearchWithContext(ctx, "embodied", 100)
+	if err == nil {
+		t.Fatal("expected cancellation error, got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "canceled") && !strings.Contains(strings.ToLower(err.Error()), "cancelled") {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("expected SearchWithContext to stop quickly, took %v", elapsed)
 	}
 }
 

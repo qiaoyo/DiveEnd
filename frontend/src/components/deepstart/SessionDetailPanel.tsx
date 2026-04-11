@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -14,17 +14,47 @@ import {
   X,
 } from 'lucide-react';
 import {
-  createFolder,
+  cancelDeepStartTask,
+  createFolderNode,
+  deleteFolderNode,
+  getFolderStorageTreeOverview,
+  getFolderTree,
   getPapers,
-  importPapers,
+  importPapersWithAssets,
+  onDeepStartProgress,
   replyDeepStartSession,
   rerunDeepStartSearch,
+  undoDeepStartNarrow,
   updateDeepStartSelections,
 } from '../../lib/backend';
 import { useAppStore } from '../../stores/appStore';
-import type { DeepStartDirection, DeepStartPaperNote, SearchPaper } from '../../types';
+import type {
+  DeepStartDirection,
+  DeepStartPaperNote,
+  DeepStartProgressEvent,
+  Folder,
+  FolderNode,
+  FolderStorageTreeOverview,
+  SearchPaper,
+} from '../../types';
 
-type BusyAction = 'replying' | 'rerunning' | 'selecting' | 'importing' | null;
+type BusyAction = 'replying' | 'rerunning' | 'selecting' | 'importing' | 'undoing' | null;
+
+type ChatRuntimeState = {
+  status: 'idle' | 'running' | 'cancelling' | 'cancelled' | 'failed' | 'completed';
+  phase: DeepStartProgressEvent['phase'] | 'idle';
+  percent: number;
+  eta: number;
+  message: string;
+};
+
+function isDeepStartCancelledError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes('cancelled') || message.includes('canceled');
+}
 
 function tierStyle(tier: string) {
   switch (tier) {
@@ -60,10 +90,6 @@ function splitAuthors(authors: string): string[] {
     .filter(Boolean);
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function highlightTokens(query: string, note: DeepStartPaperNote | undefined, paper: SearchPaper | null): string[] {
   const tokens = new Set<string>();
   for (const item of query.split(/\s+/)) {
@@ -86,7 +112,77 @@ function highlightTokens(query: string, note: DeepStartPaperNote | undefined, pa
   return [...tokens].slice(0, 16);
 }
 
-function renderHighlightedText(text: string, tokens: string[]): ReactNode {
+function splitAbstractSentences(text: string): string[] {
+  const content = text.trim();
+  if (!content) {
+    return [];
+  }
+
+  const chunks = content
+    .split(/(?<=[。！？.!?])\s+|\n+/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  if (chunks.length > 0) {
+    return chunks;
+  }
+  return [content];
+}
+
+function scoreSentence(sentence: string, tokens: string[]): number {
+  if (!sentence || tokens.length === 0) {
+    return 0;
+  }
+
+  const loweredSentence = sentence.toLowerCase();
+  let score = 0;
+  for (const token of tokens) {
+    const normalized = token.toLowerCase().trim();
+    if (!normalized) {
+      continue;
+    }
+    if (loweredSentence.includes(normalized)) {
+      score += normalized.length >= 6 ? 3 : 2;
+    }
+  }
+  return score;
+}
+
+function extractKeySentences(text: string, tokens: string[]): string[] {
+  const sentences = splitAbstractSentences(text);
+  if (sentences.length === 0) {
+    return [];
+  }
+
+  const ranked = sentences.map((sentence, index) => ({
+    sentence,
+    index,
+    score: scoreSentence(sentence, tokens),
+  }));
+
+  const topCandidates = ranked
+    .filter((item) => item.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return a.index - b.index;
+    })
+    .slice(0, 3)
+    .sort((a, b) => a.index - b.index)
+    .map((item) => item.sentence);
+
+  if (topCandidates.length > 0) {
+    return topCandidates;
+  }
+  return sentences.slice(0, Math.min(2, sentences.length));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 保留旧版词级高亮逻辑，默认不启用，必要时可快速回滚。
+function renderLegacyHighlightedText(text: string, tokens: string[]): ReactNode {
   const content = text.trim();
   if (!content) {
     return '暂无摘要。';
@@ -107,17 +203,76 @@ function renderHighlightedText(text: string, tokens: string[]): ReactNode {
 
   return chunks.map((chunk, index) => {
     if (index % 2 === 1) {
-      return (
-        <mark
-          key={`${chunk}-${index}`}
-          className="rounded bg-amber-200/80 px-1 text-slate-900 dark:bg-amber-400/30 dark:text-amber-100"
-        >
-          {chunk}
-        </mark>
-      );
+      return <mark key={`${chunk}-${index}`}>{chunk}</mark>;
     }
     return <span key={`${chunk}-${index}`}>{chunk}</span>;
   });
+}
+
+function renderInlineHighlightedAbstract(text: string, tokens: string[]): ReactNode {
+  const content = text.trim();
+  if (!content) {
+    return '暂无摘要。';
+  }
+
+  const keySentences = new Set(extractKeySentences(content, tokens));
+  if (keySentences.size === 0) {
+    return content;
+  }
+
+  const sentences = splitAbstractSentences(content);
+  if (sentences.length === 0) {
+    return content;
+  }
+
+  return (
+    <>
+      {sentences.map((sentence, index) => {
+        const highlighted = keySentences.has(sentence);
+        return (
+          <span key={`abstract-sentence-${index}`}>
+            {highlighted ? (
+              <mark className="rounded bg-amber-100/90 px-1 py-0.5 text-slate-900 dark:bg-amber-400/30 dark:text-amber-50">
+                <strong>{sentence}</strong>
+              </mark>
+            ) : (
+              sentence
+            )}
+            {index < sentences.length - 1 ? ' ' : ''}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+type FolderOption = {
+  id: string;
+  label: string;
+};
+
+function flattenFolderTree(nodes: FolderNode[], depth = 0): FolderOption[] {
+  const options: FolderOption[] = [];
+  for (const node of nodes) {
+    options.push({
+      id: node.folder.id,
+      label: `${'  '.repeat(depth)}${node.folder.name}`,
+    });
+    options.push(...flattenFolderTree(node.children, depth + 1));
+  }
+  return options;
+}
+
+function flattenFolderNodes(nodes: FolderNode[]): Folder[] {
+  const list: Folder[] = [];
+  const walk = (nodeList: FolderNode[]) => {
+    for (const node of nodeList) {
+      list.push(node.folder);
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return list;
 }
 
 export function SessionDetailPanel() {
@@ -127,7 +282,6 @@ export function SessionDetailPanel() {
     activeFolderId,
     folders,
     setActiveFolderId,
-    setActivePanel,
     setError,
     setFolders,
     setPapers,
@@ -137,16 +291,47 @@ export function SessionDetailPanel() {
 
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderPath, setNewFolderPath] = useState('');
+  const [newFolderParentId, setNewFolderParentId] = useState('');
+  const [newFolderError, setNewFolderError] = useState('');
   const [replyInput, setReplyInput] = useState('');
   const [rerunQuery, setRerunQuery] = useState(activeDeepStartSession?.summary.currentQuery ?? '');
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [activePaperId, setActivePaperId] = useState<string | null>(null);
+  const [importFeedback, setImportFeedback] = useState('');
+  const [folderTree, setFolderTree] = useState<FolderNode[]>([]);
+  const [storageTreeOverview, setStorageTreeOverview] = useState<FolderStorageTreeOverview | null>(null);
+  const [loadingStorageOverview, setLoadingStorageOverview] = useState(false);
+  const [optimisticUserMessage, setOptimisticUserMessage] = useState('');
+  const [initialSuggestedQueries, setInitialSuggestedQueries] = useState<string[]>([]);
+  const [chatRuntime, setChatRuntime] = useState<ChatRuntimeState>({
+    status: 'idle',
+    phase: 'idle',
+    percent: 0,
+    eta: 0,
+    message: '',
+  });
+  const useLegacyAbstractHighlight = false;
+  const skipStoragePollingInTests = import.meta.env.MODE === 'test';
+  const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (activeDeepStartSession) {
       setRerunQuery(activeDeepStartSession.summary.currentQuery);
+      setInitialSuggestedQueries(activeDeepStartSession.currentAnalysis?.suggestedQueries ?? []);
+      setNewFolderParentId(activeDeepStartSession.summary.targetFolderId || activeFolderId || '');
+      setChatRuntime({
+        status: 'idle',
+        phase: 'idle',
+        percent: 0,
+        eta: 0,
+        message: '',
+      });
+      setOptimisticUserMessage('');
     }
-  }, [activeDeepStartSession?.summary.currentQuery, activeDeepStartSession]);
+  }, [activeDeepStartSession?.summary.currentQuery, activeDeepStartSession, activeFolderId]);
 
   useEffect(() => {
     const targetFolderId = activeDeepStartSession?.summary.targetFolderId;
@@ -173,6 +358,113 @@ export function SessionDetailPanel() {
       cancelled = true;
     };
   }, [activeDeepStartSession?.summary.targetFolderId, setActiveFolderId, setError, setPapers]);
+
+  useEffect(() => {
+    if (skipStoragePollingInTests) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshOverview = async (markLoading: boolean) => {
+      if (markLoading) {
+        setLoadingStorageOverview(true);
+      }
+      try {
+        const [overview, tree] = await Promise.all([
+          getFolderStorageTreeOverview(),
+          getFolderTree(),
+        ]);
+        if (!cancelled) {
+          setStorageTreeOverview(overview);
+          setFolderTree(tree);
+          setFolders(flattenFolderNodes(tree));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStorageTreeOverview(null);
+          setError(error instanceof Error ? error.message : '读取本地存储速览失败');
+        }
+      } finally {
+        if (!cancelled && markLoading) {
+          setLoadingStorageOverview(false);
+        }
+      }
+    };
+
+    void refreshOverview(true);
+    const timer = window.setInterval(() => {
+      void refreshOverview(false);
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [setError, setFolders, skipStoragePollingInTests]);
+
+  useEffect(() => {
+    const sessionID = activeDeepStartSession?.summary.id;
+    if (!sessionID) {
+      return;
+    }
+
+    return onDeepStartProgress((progress) => {
+      if (progress.sessionId && progress.sessionId !== sessionID) {
+        return;
+      }
+
+      if (progress.phase === 'cancelling') {
+        setChatRuntime({
+          status: 'cancelling',
+          phase: progress.phase,
+          percent: progress.overallPercent,
+          eta: progress.estimatedRemainingSeconds,
+          message: progress.message || '正在停止本次任务',
+        });
+        return;
+      }
+
+      if (progress.phase === 'cancelled') {
+        setChatRuntime({
+          status: 'cancelled',
+          phase: progress.phase,
+          percent: progress.overallPercent,
+          eta: 0,
+          message: progress.message || '本次任务已停止并回滚',
+        });
+        setOptimisticUserMessage('');
+        setBusyAction(null);
+        return;
+      }
+
+      if (progress.phase === 'completed') {
+        setChatRuntime({
+          status: 'completed',
+          phase: progress.phase,
+          percent: progress.overallPercent,
+          eta: 0,
+          message: progress.message || '任务完成',
+        });
+        return;
+      }
+
+      if (
+        progress.phase === 'searching' ||
+        progress.phase === 'enriching' ||
+        progress.phase === 'analyzing' ||
+        progress.phase === 'persisting'
+      ) {
+        setChatRuntime({
+          status: 'running',
+          phase: progress.phase,
+          percent: progress.overallPercent,
+          eta: progress.estimatedRemainingSeconds,
+          message: progress.message || '后台正在处理中',
+        });
+      }
+    });
+  }, [activeDeepStartSession?.summary.id]);
 
   const currentResults = activeDeepStartSession?.currentResults ?? [];
   const currentAnalysis = activeDeepStartSession?.currentAnalysis;
@@ -203,6 +495,24 @@ export function SessionDetailPanel() {
   const summaryHighlightTokens = useMemo(
     () => highlightTokens(activeDeepStartSession?.summary.currentQuery ?? '', activePaperNote, activePaper),
     [activeDeepStartSession?.summary.currentQuery, activePaper, activePaperNote]
+  );
+  const chatMessages = useMemo(() => {
+    const base = activeDeepStartSession?.messages ?? [];
+    if (!optimisticUserMessage.trim()) {
+      return base.slice(-20);
+    }
+    const optimistic = {
+      id: `optimistic-${Date.now()}`,
+      sessionId: activeDeepStartSession?.summary.id ?? '',
+      role: 'user' as const,
+      content: optimisticUserMessage,
+      createdAt: new Date().toISOString(),
+    };
+    return [...base, optimistic].slice(-20);
+  }, [activeDeepStartSession?.messages, activeDeepStartSession?.summary.id, optimisticUserMessage]);
+  const firstAssistantMessageId = useMemo(
+    () => (activeDeepStartSession?.messages ?? []).find((message) => message.role === 'assistant')?.id ?? '',
+    [activeDeepStartSession?.messages]
   );
 
   useEffect(() => {
@@ -244,6 +554,13 @@ export function SessionDetailPanel() {
     return groups.filter((direction) => direction.paperIds.length > 0 || direction.id !== 'remaining');
   }, [currentAnalysis?.directions, currentResults, paperById]);
 
+  const folderOptions = useMemo(() => {
+    if (folderTree.length > 0) {
+      return flattenFolderTree(folderTree);
+    }
+    return folders.map((folder) => ({ id: folder.id, label: folder.name }));
+  }, [folderTree, folders]);
+
   const persistSession = (detail: NonNullable<typeof activeDeepStartSession>) => {
     upsertDeepStartSession(detail);
     if (detail.summary.targetFolderId) {
@@ -262,14 +579,71 @@ export function SessionDetailPanel() {
       setError('请输入你想补充的筛选偏好');
       return;
     }
+    if (busyAction === 'replying' || busyAction === 'rerunning') {
+      return;
+    }
 
     setBusyAction('replying');
+    setOptimisticUserMessage(content);
+    setReplyInput('');
+    setChatRuntime({
+      status: 'running',
+      phase: 'analyzing',
+      percent: 35,
+      eta: 0,
+      message: '正在基于当前候选池生成会话内缩窄建议',
+    });
     try {
       const detail = await replyDeepStartSession(activeDeepStartSession.summary.id, content);
       persistSession(detail);
-      setReplyInput('');
+      setOptimisticUserMessage('');
+      setChatRuntime((prev) => ({
+        ...prev,
+        status: 'completed',
+        phase: 'completed',
+        percent: 100,
+        eta: 0,
+        message: '会话内缩窄完成',
+      }));
     } catch (error) {
+      setOptimisticUserMessage('');
+      if (isDeepStartCancelledError(error)) {
+        setChatRuntime({
+          status: 'cancelled',
+          phase: 'cancelled',
+          percent: 0,
+          eta: 0,
+          message: '本次会话内缩窄已停止',
+        });
+        return;
+      }
+      setChatRuntime((prev) => ({
+        ...prev,
+        status: 'failed',
+        phase: 'failed',
+        message: error instanceof Error ? error.message : '发送 DeepStart 对话失败',
+      }));
       setError(error instanceof Error ? error.message : '发送 DeepStart 对话失败');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleUndoNarrow = async () => {
+    if (!activeDeepStartSession) {
+      return;
+    }
+    if (busyAction) {
+      return;
+    }
+
+    setBusyAction('undoing');
+    try {
+      const detail = await undoDeepStartNarrow(activeDeepStartSession.summary.id);
+      persistSession(detail);
+      setImportFeedback(`已回退上一轮缩窄，当前候选池 ${detail.currentResults.length} 篇。`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '回退上一轮失败');
     } finally {
       setBusyAction(null);
     }
@@ -286,17 +660,76 @@ export function SessionDetailPanel() {
       setError('请输入新的检索 query');
       return;
     }
+    if (busyAction === 'rerunning' || busyAction === 'replying') {
+      return;
+    }
 
     setBusyAction('rerunning');
+    setChatRuntime({
+      status: 'running',
+      phase: 'searching',
+      percent: 3,
+      eta: 60,
+      message: '正在根据新 query 重新检索候选',
+    });
     try {
       const detail = await rerunDeepStartSearch(activeDeepStartSession.summary.id, nextQuery);
       persistSession(detail);
       setRerunQuery(nextQuery);
       setActivePaperId(null);
+      setChatRuntime((prev) => ({
+        ...prev,
+        status: 'completed',
+        phase: 'completed',
+        percent: 100,
+        eta: 0,
+        message: '新一轮候选已准备完成',
+      }));
     } catch (error) {
+      if (isDeepStartCancelledError(error)) {
+        setChatRuntime((prev) => ({
+          ...prev,
+          status: 'cancelled',
+          phase: 'cancelled',
+          eta: 0,
+          message: '本次重搜已停止，原会话保持不变',
+        }));
+        return;
+      }
+      setChatRuntime((prev) => ({
+        ...prev,
+        status: 'failed',
+        phase: 'failed',
+        message: error instanceof Error ? error.message : '重新检索失败',
+      }));
       setError(error instanceof Error ? error.message : '重新检索失败');
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const handleCancelRunningTask = async () => {
+    if (!activeDeepStartSession) {
+      return;
+    }
+
+    setChatRuntime((prev) => ({
+      ...prev,
+      status: 'cancelling',
+      phase: 'cancelling',
+      message: '正在停止本次任务并回滚暂存结果',
+      eta: 1,
+    }));
+    try {
+      await cancelDeepStartTask(activeDeepStartSession.summary.id);
+    } catch (error) {
+      setChatRuntime((prev) => ({
+        ...prev,
+        status: 'failed',
+        phase: 'failed',
+        message: error instanceof Error ? error.message : '停止任务失败',
+      }));
+      setError(error instanceof Error ? error.message : '停止任务失败');
     }
   };
 
@@ -349,22 +782,78 @@ export function SessionDetailPanel() {
     }
   };
 
-  const handleCreateFolder = async () => {
-    const name = window.prompt('输入新文件夹名称');
-    if (!name?.trim()) return;
+  const handleCreateFolder = () => {
+    setNewFolderError('');
+    setNewFolderName('');
+    setNewFolderPath('');
+    setNewFolderParentId(activeDeepStartSession?.summary.targetFolderId || activeFolderId || '');
+    setIsFolderModalOpen(true);
+  };
+
+  const submitCreateFolder = async () => {
+    const name = newFolderName.trim();
+    const path = newFolderPath.trim();
+    if (!name && !path) {
+      setNewFolderError('请填写目录名称或目录路径');
+      return;
+    }
+    if (name.length > 60 || path.length > 180) {
+      setNewFolderError('目录名称或路径过长，请缩短后重试');
+      return;
+    }
 
     setIsCreatingFolder(true);
     try {
-      const folder = await createFolder(name.trim());
-      const nextFolders = [...folders.filter((item) => item.id !== folder.id), folder].sort((a, b) =>
-        a.createdAt.localeCompare(b.createdAt)
-      );
-      setFolders(nextFolders);
+      const folder = await createFolderNode({
+        parentId: newFolderParentId || undefined,
+        path: path || undefined,
+        name: path ? undefined : name,
+      });
+      const [tree, overview] = await Promise.all([
+        getFolderTree(),
+        getFolderStorageTreeOverview(),
+      ]);
+      setFolderTree(tree);
+      setFolders(flattenFolderNodes(tree));
+      setStorageTreeOverview(overview);
       await handleTargetFolderChange(folder.id);
+      setIsFolderModalOpen(false);
+      setImportFeedback(`已创建文件夹「${folder.name}」`);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '创建文件夹失败');
+      const message = error instanceof Error ? error.message : '创建文件夹失败';
+      setNewFolderError(message);
+      setError(message);
     } finally {
       setIsCreatingFolder(false);
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    if (busyAction) {
+      return;
+    }
+
+    setBusyAction('selecting');
+    try {
+      await deleteFolderNode(folderId);
+      const [tree, overview] = await Promise.all([
+        getFolderTree(),
+        getFolderStorageTreeOverview(),
+      ]);
+      setFolderTree(tree);
+      const flattened = flattenFolderNodes(tree);
+      setFolders(flattened);
+      setStorageTreeOverview(overview);
+
+      const nextTarget = flattened.find((folder) => folder.isSystem) ?? flattened[0];
+      if (nextTarget && activeDeepStartSession) {
+        await handlePersistSelections([...selectedPaperIds], nextTarget.id);
+      }
+      setImportFeedback('目录已删除。');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '删除目录失败');
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -390,20 +879,89 @@ export function SessionDetailPanel() {
     }
 
     setBusyAction('importing');
+    setImportFeedback('');
     try {
-      const imported = await importPapers(folderId, selected);
-      const papers = await getPapers(folderId);
+      const result = await importPapersWithAssets(folderId, selected);
+      const [papers, treeOverview] = await Promise.all([
+        getPapers(folderId),
+        getFolderStorageTreeOverview(),
+      ]);
       setActiveFolderId(folderId);
       setPapers(papers);
-      if (imported[0]) {
-        setSelectedPaper(imported[0]);
-        setActivePanel('deepread');
+      setStorageTreeOverview(treeOverview);
+      if (result.imported[0]) {
+        setSelectedPaper(result.imported[0]);
       }
+      if (activeDeepStartSession) {
+        const cleared = await updateDeepStartSelections(
+          activeDeepStartSession.summary.id,
+          [],
+          folderId
+        );
+        persistSession(cleared);
+      }
+      const skippedText = result.skipped.length > 0 ? `，跳过重复 ${result.skipped.length} 篇` : '';
+      setImportFeedback(
+        result.message ||
+          `已导入并清空选中：新增 ${result.imported.length} 篇${skippedText}，后台继续下载 PDF。`
+      );
     } catch (error) {
       setError(error instanceof Error ? error.message : '导入论文失败');
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const renderStorageNode = (node: FolderStorageTreeOverview['directories'][number], depth = 0) => {
+    const queueing = node.queued + node.downloading;
+    const isTarget = activeTargetFolderId === node.folderId;
+
+    return (
+      <div key={node.folderId} className="space-y-1">
+        <div
+          className={`rounded-lg border px-3 py-2 text-xs ${
+            isTarget
+              ? 'border-indigo-300 bg-indigo-50/80 text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-500/15 dark:text-indigo-200'
+              : 'border-slate-200 bg-white/80 text-slate-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200'
+          }`}
+          style={{ marginLeft: depth * 10 }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => void handleTargetFolderChange(node.folderId)}
+              className="truncate text-left font-medium hover:text-indigo-700 dark:hover:text-indigo-200"
+            >
+              {node.folderName}
+            </button>
+            {(() => {
+              const folder = folders.find((item) => item.id === node.folderId);
+              if (folder?.isSystem) {
+                return (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                    系统
+                  </span>
+                );
+              }
+              return (
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteFolder(node.folderId)}
+                  className="rounded border border-rose-200 px-1.5 py-0.5 text-[10px] text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-200 dark:hover:bg-rose-500/15"
+                >
+                  删除
+                </button>
+              );
+            })()}
+          </div>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
+            论文卡片: {node.paperCount} · 排队中: {queueing}/{node.paperCount || 0} · 已下载: {node.downloaded}/
+            {node.paperCount || 0}
+          </p>
+        </div>
+        {node.children.map((child) => renderStorageNode(child, depth + 1))}
+      </div>
+    );
   };
 
   const renderPaperCard = (paper: SearchPaper) => {
@@ -449,18 +1007,18 @@ export function SessionDetailPanel() {
           </div>
           <button
             type="button"
-            disabled={busyAction !== null}
+            disabled={isSelectionActionBlocked}
             onClick={(event) => {
               event.stopPropagation();
               void toggleSelect(paper.id);
             }}
-            className={`mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs ${
+            className={`mt-1 inline-flex shrink-0 items-center justify-center rounded-full border px-2.5 py-1 text-xs font-medium ${
               isSelected
                 ? 'border-indigo-500 bg-indigo-500 text-white'
-                : 'border-slate-300 text-slate-500 dark:border-slate-500 dark:text-slate-200'
+                : 'border-slate-300 text-slate-500 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-500 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300'
             }`}
           >
-            {isSelected ? '✓' : ''}
+            {isSelected ? '已选择' : '选择'}
           </button>
         </div>
         {keywords.length > 0 && (
@@ -502,8 +1060,28 @@ export function SessionDetailPanel() {
   }
 
   const activeTargetFolderId =
-    activeDeepStartSession.summary.targetFolderId || activeFolderId || folders[0]?.id || '';
+    activeDeepStartSession.summary.targetFolderId || activeFolderId || folderOptions[0]?.id || folders[0]?.id || '';
   const searchStats = currentAnalysis?.searchStats;
+  const currentPoolCount = activeDeepStartSession.currentResults.length;
+  const selectedCount = selectedPaperIds.size;
+  const isSelectionActionBlocked = busyAction === 'selecting' || busyAction === 'importing' || busyAction === 'undoing';
+  const isRerunBlocked = busyAction === 'rerunning' || busyAction === 'replying' || busyAction === 'undoing';
+  const isReplyBlocked = busyAction === 'replying' || busyAction === 'rerunning' || busyAction === 'undoing';
+  const showRerunStop = busyAction === 'rerunning' || chatRuntime.status === 'cancelling';
+  const isChatThinking =
+    chatRuntime.status === 'running' &&
+    (chatRuntime.phase === 'analyzing' || chatRuntime.phase === 'persisting');
+
+  let importDisabledReason = '';
+  if (busyAction === 'importing') {
+    importDisabledReason = '导入进行中';
+  } else if (busyAction === 'rerunning') {
+    importDisabledReason = '重搜进行中，请等待结果稳定后再导入';
+  } else if (!activeTargetFolderId) {
+    importDisabledReason = '请选择目标文件夹';
+  } else if (selectedCount === 0) {
+    importDisabledReason = '请先选择至少一篇论文';
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -527,15 +1105,15 @@ export function SessionDetailPanel() {
             onChange={(event) => void handleTargetFolderChange(event.target.value)}
             className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
           >
-            {folders.map((folder) => (
+            {folderOptions.map((folder) => (
               <option key={folder.id} value={folder.id}>
-                入库到：{folder.name}
+                入库到：{folder.label}
               </option>
             ))}
           </select>
 
           <button
-            onClick={() => void handleCreateFolder()}
+            onClick={handleCreateFolder}
             disabled={isCreatingFolder}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
           >
@@ -557,11 +1135,29 @@ export function SessionDetailPanel() {
             />
             <button
               onClick={() => void handleRerun()}
-              disabled={busyAction !== null}
+              disabled={isRerunBlocked}
               className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-sm text-white transition hover:bg-indigo-500 disabled:opacity-60"
             >
               {busyAction === 'rerunning' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               重搜
+            </button>
+            {showRerunStop && (
+              <button
+                onClick={() => void handleCancelRunningTask()}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200 dark:hover:bg-rose-500/20"
+              >
+                <Loader2 className={`h-4 w-4 ${chatRuntime.status === 'cancelling' ? 'animate-spin' : ''}`} />
+                停止
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void handleUndoNarrow()}
+              disabled={Boolean(busyAction)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+            >
+              {busyAction === 'undoing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeft className="h-4 w-4" />}
+              回退上一轮
             </button>
           </div>
         </div>
@@ -584,23 +1180,41 @@ export function SessionDetailPanel() {
 
             {!chatCollapsed && (
               <div className="mt-3 space-y-3">
-                {(currentAnalysis?.suggestedQueries ?? []).length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {(currentAnalysis?.suggestedQueries ?? []).map((query) => (
-                      <button
-                        key={query}
-                        onClick={() => void handleRerun(query)}
-                        disabled={busyAction !== null}
-                        className="rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
-                      >
-                        {query}
-                      </button>
-                    ))}
+                {chatRuntime.status !== 'idle' && chatRuntime.message && (
+                  <div
+                    className={`rounded-xl border px-3 py-2 text-xs ${
+                      chatRuntime.status === 'failed'
+                        ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200'
+                        : chatRuntime.status === 'cancelled'
+                          ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200'
+                          : 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5">
+                        {(isChatThinking || chatRuntime.status === 'cancelling') && (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        )}
+                        {chatRuntime.message}
+                      </span>
+                      {!isChatThinking && <span>{chatRuntime.percent}%</span>}
+                    </div>
+                    {(chatRuntime.status === 'running' || chatRuntime.status === 'cancelling') && !isChatThinking && (
+                      <>
+                        <div className="mt-2 h-1.5 rounded-full bg-indigo-100/80 dark:bg-indigo-500/20">
+                          <div
+                            className="h-1.5 rounded-full bg-indigo-600 transition-all dark:bg-indigo-300"
+                            style={{ width: `${Math.max(0, Math.min(100, chatRuntime.percent))}%` }}
+                          />
+                        </div>
+                        {chatRuntime.eta > 0 && <div className="mt-1 text-[11px] opacity-80">预计剩余 {chatRuntime.eta}s</div>}
+                      </>
+                    )}
                   </div>
                 )}
 
                 <div className="max-h-48 space-y-2 overflow-y-auto">
-                  {activeDeepStartSession.messages.slice(-8).map((message) => (
+                  {chatMessages.map((message) => (
                     <div
                       key={message.id}
                       className={`rounded-xl px-3 py-2 text-xs leading-6 ${
@@ -610,27 +1224,59 @@ export function SessionDetailPanel() {
                       }`}
                     >
                       {message.content}
+                      {message.role === 'assistant' &&
+                        message.id === firstAssistantMessageId &&
+                        initialSuggestedQueries.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {initialSuggestedQueries.map((query) => (
+                              <button
+                                key={`${message.id}-${query}`}
+                                onClick={() => {
+                                  setReplyInput(query);
+                                  replyInputRef.current?.focus();
+                                }}
+                                className="rounded-full border border-slate-200 bg-white/90 px-2.5 py-1 text-[11px] text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                              >
+                                {query}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                     </div>
                   ))}
                 </div>
 
                 <div className="flex gap-2">
-                  <input
-                    type="text"
+                  <textarea
+                    ref={replyInputRef}
                     value={replyInput}
                     onChange={(event) => setReplyInput(event.target.value)}
-                    onKeyDown={(event) => event.key === 'Enter' && void handleReply(replyInput)}
+                    onKeyDown={(event) => {
+                      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                        event.preventDefault();
+                        void handleReply(replyInput);
+                      }
+                    }}
                     placeholder="补充你的筛选偏好"
-                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
+                    rows={3}
+                    className="min-h-[74px] min-w-0 flex-1 resize-y rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
                   />
                   <button
                     onClick={() => void handleReply(replyInput)}
-                    disabled={busyAction !== null || !replyInput.trim()}
-                    className="rounded-xl bg-violet-600 px-3 py-2 text-xs text-white transition hover:bg-violet-500 disabled:opacity-60"
+                    disabled={isReplyBlocked || !replyInput.trim()}
+                    className="inline-flex h-fit items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-xs text-white transition hover:bg-violet-500 disabled:opacity-60"
                   >
-                    {busyAction === 'replying' ? '发送中' : '发送'}
+                    {busyAction === 'replying' ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        处理中
+                      </>
+                    ) : (
+                      '发送'
+                    )}
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-300">Enter 换行，Ctrl/Cmd + Enter 发送</p>
               </div>
             )}
           </section>
@@ -645,7 +1291,10 @@ export function SessionDetailPanel() {
                 {searchStats && (
                   <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-slate-200">
                     <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-                      检索统计：原始 {searchStats.rawCount} · 去重后 {searchStats.dedupCount} · 入池 {searchStats.finalCount}
+                      首轮检索基线：原始 {searchStats.rawCount} · 去重后 {searchStats.dedupCount} · 入池 {searchStats.finalCount}
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                      当前候选池：{currentPoolCount} 篇
                     </div>
                   </div>
                 )}
@@ -668,14 +1317,14 @@ export function SessionDetailPanel() {
                         <div className="mt-2 flex gap-2">
                           <button
                             onClick={() => void toggleDirection(direction, true)}
-                            disabled={busyAction !== null}
+                            disabled={isSelectionActionBlocked}
                             className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                           >
                             全选 {selectedCount}/{direction.paperIds.length}
                           </button>
                           <button
                             onClick={() => void toggleDirection(direction, false)}
-                            disabled={busyAction !== null}
+                            disabled={isSelectionActionBlocked}
                             className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                           >
                             清空
@@ -688,6 +1337,20 @@ export function SessionDetailPanel() {
                     );
                   })}
                 </div>
+              </section>
+
+              <section className="de-glass rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">本地存储速览</h3>
+                  {loadingStorageOverview && <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" />}
+                </div>
+                {storageTreeOverview ? (
+                  <div className="mt-3 max-h-64 space-y-2 overflow-y-auto text-xs text-slate-600 dark:text-slate-200">
+                    {storageTreeOverview.directories.map((node) => renderStorageNode(node))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-slate-500 dark:text-slate-300">暂时无法读取本地目录状态。</p>
+                )}
               </section>
             </aside>
 
@@ -757,7 +1420,7 @@ export function SessionDetailPanel() {
               <button
                 type="button"
                 onClick={() => void toggleSelect(activePaper.id)}
-                disabled={busyAction !== null}
+                disabled={isSelectionActionBlocked}
                 className={`rounded-xl px-3 py-1.5 text-xs font-medium ${
                   selectedPaperIds.has(activePaper.id)
                     ? 'bg-indigo-600 text-white'
@@ -826,7 +1489,7 @@ export function SessionDetailPanel() {
 
               <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
                 <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">完整摘要（规则高亮）</h4>
+                  <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">完整摘要</h4>
                   <button
                     type="button"
                     onClick={() => void navigator.clipboard.writeText(activePaper.abstract || '')}
@@ -836,7 +1499,9 @@ export function SessionDetailPanel() {
                   </button>
                 </div>
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
-                  {renderHighlightedText(activePaper.abstract || '', summaryHighlightTokens)}
+                  {useLegacyAbstractHighlight
+                    ? renderLegacyHighlightedText(activePaper.abstract || '', summaryHighlightTokens)
+                    : renderInlineHighlightedAbstract(activePaper.abstract || '', summaryHighlightTokens)}
                 </p>
               </section>
             </div>
@@ -844,20 +1509,126 @@ export function SessionDetailPanel() {
         </>
       )}
 
-      <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-7xl -translate-x-1/2 px-6">
-        <div className="pointer-events-auto mx-auto flex max-w-xl items-center justify-between rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/90">
-          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-200">
-            <CheckCheck className="h-4 w-4 text-indigo-500" />
-            当前已选 <span className="font-semibold text-indigo-600 dark:text-indigo-300">{selectedPaperIds.size}</span> 篇论文
+      {isFolderModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <h3 className="text-base font-semibold">新建文件夹</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">支持多级目录：可选父目录 + 名称，或直接输入路径。</p>
+            <select
+              value={newFolderParentId}
+              onChange={(event) => setNewFolderParentId(event.target.value)}
+              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+            >
+              <option value="">根目录</option>
+              {folderOptions.map((option) => (
+                <option key={`parent-${option.id}`} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              autoFocus
+              value={newFolderName}
+              onChange={(event) => {
+                setNewFolderName(event.target.value);
+                if (newFolderError) {
+                  setNewFolderError('');
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  void submitCreateFolder();
+                }
+              }}
+              placeholder="目录名（可选）"
+              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+            />
+            <input
+              type="text"
+              value={newFolderPath}
+              onChange={(event) => {
+                setNewFolderPath(event.target.value);
+                if (newFolderError) {
+                  setNewFolderError('');
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  void submitCreateFolder();
+                }
+              }}
+              placeholder="或直接输入路径，例如 Robotics/VLA/Benchmarks"
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+            />
+            {newFolderError && <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">{newFolderError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsFolderModalOpen(false)}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-200"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitCreateFolder()}
+                disabled={isCreatingFolder}
+                className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-60"
+              >
+                {isCreatingFolder ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+                创建
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => void handleImportSelected()}
-            disabled={selectedPaperIds.size === 0 || busyAction !== null}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busyAction === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            导入选中
-          </button>
+        </div>
+      )}
+
+      <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-7xl -translate-x-1/2 px-6">
+        <div className="pointer-events-auto mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/90">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-200">
+              <CheckCheck className="h-4 w-4 text-indigo-500" />
+              当前已选 <span className="font-semibold text-indigo-600 dark:text-indigo-300">{selectedCount}</span> 篇论文
+            </div>
+            <button
+              onClick={() => void handleImportSelected()}
+              disabled={Boolean(importDisabledReason)}
+              title={importDisabledReason || '导入到目标文件夹并后台下载 PDF'}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busyAction === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {busyAction === 'importing' ? '导入中' : '导入选中'}
+            </button>
+          </div>
+          {(importDisabledReason || importFeedback) && (
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{importFeedback || importDisabledReason}</p>
+          )}
+          {importFeedback && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/deepread')}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+              >
+                去 DeepRead
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/history')}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+              >
+                去历史
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+              >
+                回首页
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

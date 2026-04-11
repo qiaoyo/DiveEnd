@@ -165,6 +165,22 @@ export namespace main {
 	        this.hasBaiduToken = source["hasBaiduToken"];
 	    }
 	}
+	export class CreateFolderNodeRequest {
+	    parentId?: string;
+	    path?: string;
+	    name?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateFolderNodeRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.parentId = source["parentId"];
+	        this.path = source["path"];
+	        this.name = source["name"];
+	    }
+	}
 	export class SearchRetrievalStats {
 	    query: string;
 	    rawCount: number;
@@ -228,6 +244,7 @@ export namespace main {
 	    followUpQuestions: string[];
 	    suggestedQueries: string[];
 	    recommendedPaperIds: string[];
+	    retainedPaperIds: string[];
 	    searchStats: SearchRetrievalStats;
 	
 	    static createFrom(source: any = {}) {
@@ -242,6 +259,7 @@ export namespace main {
 	        this.followUpQuestions = source["followUpQuestions"];
 	        this.suggestedQueries = source["suggestedQueries"];
 	        this.recommendedPaperIds = source["recommendedPaperIds"];
+	        this.retainedPaperIds = source["retainedPaperIds"];
 	        this.searchStats = this.convertValues(source["searchStats"], SearchRetrievalStats);
 	    }
 	
@@ -516,6 +534,9 @@ export namespace main {
 	export class Folder {
 	    id: string;
 	    name: string;
+	    parentId?: string;
+	    path: string;
+	    isSystem: boolean;
 	    // Go type: time
 	    createdAt: any;
 	
@@ -527,6 +548,9 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.name = source["name"];
+	        this.parentId = source["parentId"];
+	        this.path = source["path"];
+	        this.isSystem = source["isSystem"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	    }
 	
@@ -548,8 +572,138 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class FolderNode {
+	    folder: Folder;
+	    children: FolderNode[];
+	
+	    static createFrom(source: any = {}) {
+	        return new FolderNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folder = this.convertValues(source["folder"], Folder);
+	        this.children = this.convertValues(source["children"], FolderNode);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FolderStorageTreeNode {
+	    folderId: string;
+	    folderName: string;
+	    folderPath: string;
+	    paperCount: number;
+	    queued: number;
+	    downloading: number;
+	    downloaded: number;
+	    failed: number;
+	    children: FolderStorageTreeNode[];
+	
+	    static createFrom(source: any = {}) {
+	        return new FolderStorageTreeNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folderId = source["folderId"];
+	        this.folderName = source["folderName"];
+	        this.folderPath = source["folderPath"];
+	        this.paperCount = source["paperCount"];
+	        this.queued = source["queued"];
+	        this.downloading = source["downloading"];
+	        this.downloaded = source["downloaded"];
+	        this.failed = source["failed"];
+	        this.children = this.convertValues(source["children"], FolderStorageTreeNode);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FolderStorageTreeOverview {
+	    rootPath: string;
+	    directories: FolderStorageTreeNode[];
+	    // Go type: time
+	    generatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new FolderStorageTreeOverview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rootPath = source["rootPath"];
+	        this.directories = this.convertValues(source["directories"], FolderStorageTreeNode);
+	        this.generatedAt = this.convertValues(source["generatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ImportSkippedPaper {
+	    sourcePaperId: string;
+	    title: string;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportSkippedPaper(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sourcePaperId = source["sourcePaperId"];
+	        this.title = source["title"];
+	        this.reason = source["reason"];
+	    }
+	}
 	export class Paper {
 	    id: string;
+	    sourcePaperId: string;
 	    title: string;
 	    authors: string;
 	    abstract: string;
@@ -557,6 +711,8 @@ export namespace main {
 	    journal: string;
 	    url: string;
 	    pdfPath?: string;
+	    downloadStatus: string;
+	    downloadError?: string;
 	    folderId: string;
 	    category: string;
 	    tags: string[];
@@ -572,6 +728,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.sourcePaperId = source["sourcePaperId"];
 	        this.title = source["title"];
 	        this.authors = source["authors"];
 	        this.abstract = source["abstract"];
@@ -579,6 +736,8 @@ export namespace main {
 	        this.journal = source["journal"];
 	        this.url = source["url"];
 	        this.pdfPath = source["pdfPath"];
+	        this.downloadStatus = source["downloadStatus"];
+	        this.downloadError = source["downloadError"];
 	        this.folderId = source["folderId"];
 	        this.category = source["category"];
 	        this.tags = source["tags"];
@@ -604,6 +763,43 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ImportPapersWithAssetsResult {
+	    imported: Paper[];
+	    skipped: ImportSkippedPaper[];
+	    queued: number;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportPapersWithAssetsResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.imported = this.convertValues(source["imported"], Paper);
+	        this.skipped = this.convertValues(source["skipped"], ImportSkippedPaper);
+	        this.queued = source["queued"];
+	        this.message = source["message"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class InitialState {
 	    config: AppConfig;
 	    folders: Folder[];
@@ -645,6 +841,81 @@ export namespace main {
 		}
 	}
 	
+	export class LocalStorageFolderOverview {
+	    folderId: string;
+	    folderName: string;
+	    folderPath: string;
+	    totalPapers: number;
+	    queued: number;
+	    downloading: number;
+	    downloaded: number;
+	    failed: number;
+	    storedFileCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LocalStorageFolderOverview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folderId = source["folderId"];
+	        this.folderName = source["folderName"];
+	        this.folderPath = source["folderPath"];
+	        this.totalPapers = source["totalPapers"];
+	        this.queued = source["queued"];
+	        this.downloading = source["downloading"];
+	        this.downloaded = source["downloaded"];
+	        this.failed = source["failed"];
+	        this.storedFileCount = source["storedFileCount"];
+	    }
+	}
+	export class LocalStorageOverview {
+	    rootPath: string;
+	    totalFolders: number;
+	    totalFiles: number;
+	    queued: number;
+	    downloading: number;
+	    downloaded: number;
+	    failed: number;
+	    folders: LocalStorageFolderOverview[];
+	    // Go type: time
+	    generatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new LocalStorageOverview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rootPath = source["rootPath"];
+	        this.totalFolders = source["totalFolders"];
+	        this.totalFiles = source["totalFiles"];
+	        this.queued = source["queued"];
+	        this.downloading = source["downloading"];
+	        this.downloaded = source["downloaded"];
+	        this.failed = source["failed"];
+	        this.folders = this.convertValues(source["folders"], LocalStorageFolderOverview);
+	        this.generatedAt = this.convertValues(source["generatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	export class PathHistoryItem {
 	    dimension: string;

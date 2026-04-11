@@ -7,8 +7,13 @@ import type {
   DeepStartSessionSummary,
   EnhancedSearchResult,
   ExtractProgress,
+  FolderNode,
+  FolderStorageTreeOverview,
   Folder,
+  CreateFolderNodeRequest,
+  ImportPapersWithAssetsResult,
   InitialState,
+  LocalStorageOverview,
   Paper,
   SaveConfigResult,
   ScreeningDecisionNode,
@@ -47,7 +52,9 @@ declare global {
           ListDeepStartSessions(): Promise<DeepStartSessionSummary[]>;
           GetDeepStartSession(sessionId: string): Promise<DeepStartSessionDetail>;
           StartDeepStartSession(prompt: string, targetFolderId: string): Promise<DeepStartSessionDetail>;
+          CancelDeepStartTask(sessionId: string): Promise<void>;
           ReplyDeepStartSession(sessionId: string, message: string): Promise<DeepStartSessionDetail>;
+          UndoDeepStartNarrow(sessionId: string): Promise<DeepStartSessionDetail>;
           RerunDeepStartSearch(sessionId: string, query: string): Promise<DeepStartSessionDetail>;
           UpdateDeepStartSelections(
             sessionId: string,
@@ -56,8 +63,14 @@ declare global {
           ): Promise<DeepStartSessionDetail>;
           GetFolders(): Promise<Folder[]>;
           CreateFolder(name: string): Promise<Folder>;
+          GetFolderTree(): Promise<FolderNode[]>;
+          CreateFolderNode(request: CreateFolderNodeRequest): Promise<Folder>;
+          DeleteFolderNode(folderId: string): Promise<void>;
           GetPapers(folderId: string): Promise<Paper[]>;
           ImportPapers(folderId: string, papers: SearchPaper[]): Promise<Paper[]>;
+          ImportPapersWithAssets(folderId: string, papers: SearchPaper[]): Promise<ImportPapersWithAssetsResult>;
+          GetLocalStorageOverview(): Promise<LocalStorageOverview>;
+          GetFolderStorageTreeOverview(): Promise<FolderStorageTreeOverview>;
           DeletePaper(id: string): Promise<void>;
           TranslatePaperSection(
             paperId: string,
@@ -124,6 +137,109 @@ function normalizeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeFolder(folder: Partial<Folder> | null | undefined): Folder {
+  return {
+    id: folder?.id ?? '',
+    name: folder?.name ?? '',
+    parentId: folder?.parentId ?? '',
+    path: folder?.path ?? folder?.name ?? '',
+    isSystem: Boolean(folder?.isSystem),
+    createdAt: folder?.createdAt ?? new Date().toISOString(),
+  };
+}
+
+function normalizeFolderNode(node: Partial<FolderNode> | null | undefined): FolderNode {
+  return {
+    folder: normalizeFolder(node?.folder),
+    children: normalizeArray(node?.children).map((child) => normalizeFolderNode(child)),
+  };
+}
+
+function normalizeFolderStorageTreeOverview(
+  overview: Partial<FolderStorageTreeOverview> | null | undefined,
+): FolderStorageTreeOverview {
+  type TreeNode = FolderStorageTreeOverview['directories'][number];
+  const normalizeNode = (node: Partial<TreeNode> | null | undefined): TreeNode => ({
+    folderId: node?.folderId ?? '',
+    folderName: node?.folderName ?? '',
+    folderPath: node?.folderPath ?? '',
+    paperCount: Number(node?.paperCount ?? 0) || 0,
+    queued: Number(node?.queued ?? 0) || 0,
+    downloading: Number(node?.downloading ?? 0) || 0,
+    downloaded: Number(node?.downloaded ?? 0) || 0,
+    failed: Number(node?.failed ?? 0) || 0,
+    children: normalizeArray(node?.children).map((child) => normalizeNode(child as Partial<TreeNode>)),
+  });
+
+  return {
+    rootPath: overview?.rootPath ?? '',
+    directories: normalizeArray(overview?.directories).map((node) => normalizeNode(node)),
+    generatedAt: overview?.generatedAt ?? new Date().toISOString(),
+  };
+}
+
+function normalizePaper(paper: Partial<Paper> | null | undefined): Paper {
+  return {
+    id: paper?.id ?? '',
+    sourcePaperId: paper?.sourcePaperId ?? '',
+    title: paper?.title ?? '',
+    authors: paper?.authors ?? '',
+    abstract: paper?.abstract ?? '',
+    year: paper?.year ?? 0,
+    journal: paper?.journal ?? '',
+    url: paper?.url ?? '',
+    pdfPath: paper?.pdfPath ?? '',
+    downloadStatus: paper?.downloadStatus ?? 'queued',
+    downloadError: paper?.downloadError ?? '',
+    folderId: paper?.folderId ?? '',
+    category: paper?.category ?? '',
+    tags: normalizeArray(paper?.tags),
+    addedAt: paper?.addedAt ?? new Date().toISOString(),
+    updatedAt: paper?.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+function normalizeImportWithAssetsResult(
+  result: Partial<ImportPapersWithAssetsResult> | null | undefined,
+): ImportPapersWithAssetsResult {
+  return {
+    imported: normalizeArray(result?.imported).map((paper) => normalizePaper(paper)),
+    skipped: normalizeArray(result?.skipped).map((item) => ({
+      sourcePaperId: item?.sourcePaperId ?? '',
+      title: item?.title ?? '',
+      reason: item?.reason ?? '',
+    })),
+    queued: Number(result?.queued ?? 0) || 0,
+    message: result?.message ?? '',
+  };
+}
+
+function normalizeLocalStorageOverview(
+  overview: Partial<LocalStorageOverview> | null | undefined,
+): LocalStorageOverview {
+  return {
+    rootPath: overview?.rootPath ?? '',
+    totalFolders: Number(overview?.totalFolders ?? 0) || 0,
+    totalFiles: Number(overview?.totalFiles ?? 0) || 0,
+    queued: Number(overview?.queued ?? 0) || 0,
+    downloading: Number(overview?.downloading ?? 0) || 0,
+    downloaded: Number(overview?.downloaded ?? 0) || 0,
+    failed: Number(overview?.failed ?? 0) || 0,
+    folders: normalizeArray(overview?.folders).map((item) => ({
+      folderId: item?.folderId ?? '',
+      folderName: item?.folderName ?? '',
+      folderPath: item?.folderPath ?? '',
+      totalPapers: Number(item?.totalPapers ?? 0) || 0,
+      queued: Number(item?.queued ?? 0) || 0,
+      downloading: Number(item?.downloading ?? 0) || 0,
+      downloaded: Number(item?.downloaded ?? 0) || 0,
+      failed: Number(item?.failed ?? 0) || 0,
+      storedFileCount: Number(item?.storedFileCount ?? 0) || 0,
+    })),
+    generatedAt: overview?.generatedAt ?? new Date().toISOString(),
+  };
+}
+
 function normalizeSearchPaper(paper: Partial<SearchPaper> | null | undefined): SearchPaper {
   return {
     id: paper?.id ?? '',
@@ -155,6 +271,7 @@ function normalizeAnalysis(analysis: DeepStartAnalysis | null | undefined): Deep
     followUpQuestions: normalizeArray(analysis.followUpQuestions),
     suggestedQueries: normalizeArray(analysis.suggestedQueries),
     recommendedPaperIds: normalizeArray(analysis.recommendedPaperIds),
+    retainedPaperIds: normalizeArray(analysis.retainedPaperIds),
     searchStats: {
       query: analysis.searchStats?.query ?? '',
       rawCount: analysis.searchStats?.rawCount ?? 0,
@@ -221,8 +338,8 @@ function normalizeInitialState(state: Partial<InitialState> | null | undefined):
     ...defaultInitialState,
     ...state,
     config: normalizeConfig(state?.config),
-    folders: normalizeArray(state?.folders),
-    papers: normalizeArray(state?.papers),
+    folders: normalizeArray(state?.folders).map((folder) => normalizeFolder(folder)),
+    papers: normalizeArray(state?.papers).map((paper) => normalizePaper(paper)),
     activeFolderId: state?.activeFolderId ?? '',
     deepStartSessions: normalizeArray(state?.deepStartSessions),
     activeDeepStartSession: normalizeSessionDetail(state?.activeDeepStartSession),
@@ -313,7 +430,10 @@ function normalizeSyncProgress(progress: Partial<SyncProgress> | null | undefine
 const mockFolders: Folder[] = [
   {
     id: 'mock-inbox',
-    name: 'Inbox',
+    name: 'Cache',
+    parentId: '',
+    path: 'Cache',
+    isSystem: true,
     createdAt: new Date().toISOString(),
   },
 ];
@@ -323,6 +443,45 @@ let mockPapers: Paper[] = [];
 const mockTranslations = new Map<string, TranslationRecord[]>();
 let mockDeepStartSessions: DeepStartSessionSummary[] = [];
 const mockDeepStartDetails = new Map<string, DeepStartSessionDetail>();
+
+function normalizeFolderPathForMock(value: string): string {
+  return value
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join('/');
+}
+
+function buildMockFolderTree(): FolderNode[] {
+  const map = new Map<string, FolderNode>();
+  for (const folder of mockFolders) {
+    map.set(folder.id, {
+      folder: normalizeFolder(folder),
+      children: [],
+    });
+  }
+
+  const roots: FolderNode[] = [];
+  for (const folder of mockFolders) {
+    const node = map.get(folder.id);
+    if (!node) {
+      continue;
+    }
+    const parentId = folder.parentId?.trim();
+    if (!parentId) {
+      roots.push(node);
+      continue;
+    }
+    const parentNode = map.get(parentId);
+    if (parentNode) {
+      parentNode.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
 
 function redactConfig(config: AppConfig): AppConfig {
   return {
@@ -397,7 +556,7 @@ function mockInitialState(): InitialState {
     ...defaultInitialState,
     config: mockConfig,
     folders: [...mockFolders],
-    papers: mockPapers.filter((paper) => paper.folderId === mockFolders[0].id),
+    papers: mockPapers.filter((paper) => paper.folderId === mockFolders[0].id).map((paper) => normalizePaper(paper)),
     activeFolderId: mockFolders[0]?.id ?? '',
     deepStartSessions: [...mockDeepStartSessions],
     activeDeepStartSession: mockDeepStartSessions[0]
@@ -690,6 +849,7 @@ function buildMockDeepStartAnalysis(query: string, results: SearchPaper[]): Deep
     ],
     suggestedQueries: [`${query} survey`, `${query} benchmark`, `${query} recent progress`],
     recommendedPaperIds,
+    retainedPaperIds: recommendedPaperIds,
     searchStats: {
       query,
       rawCount: results.length,
@@ -784,6 +944,13 @@ export async function startDeepStartSession(
   return detail;
 }
 
+export async function cancelDeepStartTask(sessionId: string): Promise<void> {
+  const app = runtimeApp();
+  if (app?.CancelDeepStartTask) {
+    return app.CancelDeepStartTask(sessionId);
+  }
+}
+
 export async function replyDeepStartSession(
   sessionId: string,
   message: string
@@ -828,6 +995,24 @@ export async function replyDeepStartSession(
   };
   upsertMockDeepStartSession(detail);
   return detail;
+}
+
+export async function undoDeepStartNarrow(sessionId: string): Promise<DeepStartSessionDetail> {
+  const app = runtimeApp();
+  if (app?.UndoDeepStartNarrow) {
+    const detail = await app.UndoDeepStartNarrow(sessionId);
+    const normalized = normalizeSessionDetail(detail);
+    if (!normalized) {
+      throw new Error('会话不存在');
+    }
+    return normalized;
+  }
+
+  const existing = mockDeepStartDetails.get(sessionId);
+  if (!existing) {
+    throw new Error('会话不存在');
+  }
+  return existing;
 }
 
 export async function rerunDeepStartSearch(
@@ -922,53 +1107,140 @@ export async function updateDeepStartSelections(
 export async function getFolders(): Promise<Folder[]> {
   const app = runtimeApp();
   if (app?.GetFolders) {
-    return normalizeArray(await app.GetFolders());
+    return normalizeArray(await app.GetFolders()).map((folder) => normalizeFolder(folder));
   }
-  return [...mockFolders];
+  return [...mockFolders].map((folder) => normalizeFolder(folder));
 }
 
 export async function createFolder(name: string): Promise<Folder> {
   const app = runtimeApp();
   if (app?.CreateFolder) {
-    return app.CreateFolder(name);
+    return normalizeFolder(await app.CreateFolder(name));
   }
 
   const existing = mockFolders.find((folder) => folder.name === name);
   if (existing) {
-    return existing;
+    return normalizeFolder(existing);
   }
 
   const folder: Folder = {
     id: `mock-folder-${Date.now()}`,
     name,
+    parentId: '',
+    path: normalizeFolderPathForMock(name),
+    isSystem: false,
     createdAt: new Date().toISOString(),
   };
   mockFolders.push(folder);
-  return folder;
+  return normalizeFolder(folder);
+}
+
+export async function getFolderTree(): Promise<FolderNode[]> {
+  const app = runtimeApp();
+  if (app?.GetFolderTree) {
+    return normalizeArray(await app.GetFolderTree()).map((node) => normalizeFolderNode(node));
+  }
+  return buildMockFolderTree();
+}
+
+export async function createFolderNode(request: CreateFolderNodeRequest): Promise<Folder> {
+  const app = runtimeApp();
+  if (app?.CreateFolderNode) {
+    return normalizeFolder(await app.CreateFolderNode(request));
+  }
+
+  const parentId = (request.parentId ?? '').trim();
+  const pathInput = (request.path ?? '').trim();
+  const nameInput = (request.name ?? '').trim();
+
+  const parent = parentId ? mockFolders.find((folder) => folder.id === parentId) : undefined;
+  const parentPath = parent?.path?.trim() ?? '';
+  const relativePath = pathInput || nameInput;
+  const normalizedPath = normalizeFolderPathForMock(relativePath);
+  if (!normalizedPath) {
+    throw new Error('文件夹名称不能为空');
+  }
+
+  const finalPath = parentPath ? normalizeFolderPathForMock(`${parentPath}/${normalizedPath}`) : normalizedPath;
+  const finalName = finalPath.split('/').pop() || normalizedPath;
+  const existing = mockFolders.find((folder) => folder.path === finalPath);
+  if (existing) {
+    return normalizeFolder(existing);
+  }
+
+  const folder: Folder = {
+    id: `mock-folder-${Date.now()}`,
+    name: finalName,
+    parentId: parentId || '',
+    path: finalPath,
+    isSystem: false,
+    createdAt: new Date().toISOString(),
+  };
+  mockFolders.push(folder);
+  return normalizeFolder(folder);
+}
+
+export async function deleteFolderNode(folderId: string): Promise<void> {
+  const app = runtimeApp();
+  if (app?.DeleteFolderNode) {
+    return app.DeleteFolderNode(folderId);
+  }
+
+  const target = mockFolders.find((folder) => folder.id === folderId);
+  if (!target) {
+    return;
+  }
+  if (target.isSystem) {
+    throw new Error('系统目录不可删除');
+  }
+
+  const idsToDelete = new Set<string>();
+  const walk = (id: string) => {
+    idsToDelete.add(id);
+    for (const folder of mockFolders) {
+      if ((folder.parentId ?? '') === id) {
+        walk(folder.id);
+      }
+    }
+  };
+  walk(folderId);
+
+  mockPapers = mockPapers.filter((paper) => !idsToDelete.has(paper.folderId));
+  for (const id of [...idsToDelete]) {
+    mockTranslations.delete(id);
+  }
+  for (let i = mockFolders.length - 1; i >= 0; i -= 1) {
+    if (idsToDelete.has(mockFolders[i].id)) {
+      mockFolders.splice(i, 1);
+    }
+  }
 }
 
 export async function getPapers(folderId: string): Promise<Paper[]> {
   const app = runtimeApp();
   if (app?.GetPapers) {
-    return normalizeArray(await app.GetPapers(folderId));
+    return normalizeArray(await app.GetPapers(folderId)).map((paper) => normalizePaper(paper));
   }
-  return mockPapers.filter((paper) => paper.folderId === folderId);
+  return mockPapers.filter((paper) => paper.folderId === folderId).map((paper) => normalizePaper(paper));
 }
 
 export async function importPapers(folderId: string, papers: SearchPaper[]): Promise<Paper[]> {
   const app = runtimeApp();
   if (app?.ImportPapers) {
-    return normalizeArray(await app.ImportPapers(folderId, papers));
+    return normalizeArray(await app.ImportPapers(folderId, papers)).map((paper) => normalizePaper(paper));
   }
 
   const imported = papers.map<Paper>((paper) => ({
     id: paper.id,
+    sourcePaperId: paper.id,
     title: paper.title,
     authors: paper.authors,
     abstract: paper.abstract,
     year: paper.year,
     journal: paper.journal,
     url: paper.url,
+    downloadStatus: 'queued',
+    downloadError: '',
     folderId,
     category: paper.category,
     tags: paper.tags,
@@ -981,6 +1253,119 @@ export async function importPapers(folderId: string, papers: SearchPaper[]): Pro
   }
 
   return imported;
+}
+
+export async function importPapersWithAssets(
+  folderId: string,
+  papers: SearchPaper[],
+): Promise<ImportPapersWithAssetsResult> {
+  const app = runtimeApp();
+  if (app?.ImportPapersWithAssets) {
+    return normalizeImportWithAssetsResult(await app.ImportPapersWithAssets(folderId, papers));
+  }
+
+  const imported = await importPapers(folderId, papers);
+  return normalizeImportWithAssetsResult({
+    imported,
+    queued: imported.length,
+    skipped: [],
+    message: imported.length > 0 ? `已导入 ${imported.length} 篇论文（演示模式）` : '',
+  });
+}
+
+export async function getLocalStorageOverview(): Promise<LocalStorageOverview> {
+  const app = runtimeApp();
+  if (app?.GetLocalStorageOverview) {
+    return normalizeLocalStorageOverview(await app.GetLocalStorageOverview());
+  }
+
+  return normalizeLocalStorageOverview({
+    rootPath: '',
+    totalFolders: mockFolders.length,
+    totalFiles: mockPapers.filter((paper) => paper.pdfPath).length,
+    queued: mockPapers.filter((paper) => paper.downloadStatus === 'queued').length,
+    downloading: mockPapers.filter((paper) => paper.downloadStatus === 'downloading').length,
+    downloaded: mockPapers.filter((paper) => paper.downloadStatus === 'downloaded').length,
+    failed: mockPapers.filter((paper) => paper.downloadStatus === 'failed').length,
+    folders: mockFolders.map((folder) => {
+      const folderPapers = mockPapers.filter((paper) => paper.folderId === folder.id);
+      return {
+        folderId: folder.id,
+        folderName: folder.name,
+        folderPath: '',
+        totalPapers: folderPapers.length,
+        queued: folderPapers.filter((paper) => paper.downloadStatus === 'queued').length,
+        downloading: folderPapers.filter((paper) => paper.downloadStatus === 'downloading').length,
+        downloaded: folderPapers.filter((paper) => paper.downloadStatus === 'downloaded').length,
+        failed: folderPapers.filter((paper) => paper.downloadStatus === 'failed').length,
+        storedFileCount: folderPapers.filter((paper) => paper.pdfPath).length,
+      };
+    }),
+  });
+}
+
+export async function getFolderStorageTreeOverview(): Promise<FolderStorageTreeOverview> {
+  const app = runtimeApp();
+  if (app?.GetFolderStorageTreeOverview) {
+    return normalizeFolderStorageTreeOverview(await app.GetFolderStorageTreeOverview());
+  }
+
+  const nodeById = new Map<string, FolderStorageTreeOverview['directories'][number]>();
+  const makeNode = (folder: Folder): FolderStorageTreeOverview['directories'][number] => {
+    const papers = mockPapers.filter((paper) => paper.folderId === folder.id);
+    return {
+      folderId: folder.id,
+      folderName: folder.name,
+      folderPath: folder.path,
+      paperCount: papers.length,
+      queued: papers.filter((paper) => paper.downloadStatus === 'queued').length,
+      downloading: papers.filter((paper) => paper.downloadStatus === 'downloading').length,
+      downloaded: papers.filter((paper) => paper.downloadStatus === 'downloaded').length,
+      failed: papers.filter((paper) => paper.downloadStatus === 'failed').length,
+      children: [],
+    };
+  };
+  for (const folder of mockFolders) {
+    nodeById.set(folder.id, makeNode(folder));
+  }
+
+  const roots: FolderStorageTreeOverview['directories'] = [];
+  for (const folder of mockFolders) {
+    const node = nodeById.get(folder.id);
+    if (!node) {
+      continue;
+    }
+    if (!folder.parentId) {
+      roots.push(node);
+      continue;
+    }
+    const parentNode = nodeById.get(folder.parentId);
+    if (parentNode) {
+      parentNode.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  const aggregate = (node: FolderStorageTreeOverview['directories'][number]) => {
+    for (const child of node.children) {
+      aggregate(child);
+      node.paperCount += child.paperCount;
+      node.queued += child.queued;
+      node.downloading += child.downloading;
+      node.downloaded += child.downloaded;
+      node.failed += child.failed;
+    }
+  };
+  for (const root of roots) {
+    aggregate(root);
+  }
+
+  return normalizeFolderStorageTreeOverview({
+    rootPath: '',
+    directories: roots,
+    generatedAt: new Date().toISOString(),
+  });
 }
 
 export async function deletePaper(id: string): Promise<void> {
@@ -1097,6 +1482,9 @@ function normalizeDeepStartProgressEvent(
       progress?.phase === 'enriching' ||
       progress?.phase === 'analyzing' ||
       progress?.phase === 'persisting' ||
+      progress?.phase === 'cancelling' ||
+      progress?.phase === 'cancelled' ||
+      progress?.phase === 'failed' ||
       progress?.phase === 'completed'
         ? progress.phase
         : 'searching',
@@ -1266,7 +1654,7 @@ export async function applyScreeningChoice(
 export async function completeScreening(sessionId: string, targetFolderId: string): Promise<Paper[]> {
   const app = runtimeApp();
   if (app?.CompleteScreening) {
-    return normalizeArray(await app.CompleteScreening(sessionId, targetFolderId));
+    return normalizeArray(await app.CompleteScreening(sessionId, targetFolderId)).map((paper) => normalizePaper(paper));
   }
   return [];
 }

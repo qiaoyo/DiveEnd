@@ -17,6 +17,15 @@ type DB struct {
 	conn *sql.DB
 }
 
+type DeepStartSearchRoundRecord struct {
+	ID        string
+	SessionID string
+	Query     string
+	Results   []SearchPaper
+	Analysis  *DeepStartAnalysis
+	CreatedAt time.Time
+}
+
 func NewDB(dataPath string) (*DB, error) {
 	if err := os.MkdirAll(dataPath, 0700); err != nil {
 		return nil, err
@@ -52,11 +61,16 @@ func (db *DB) migrate() error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS folders (
 			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL UNIQUE,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			name TEXT NOT NULL,
+			parent_id TEXT,
+			path TEXT,
+			is_system INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY(parent_id) REFERENCES folders(id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS papers (
 			id TEXT PRIMARY KEY,
+			source_paper_id TEXT,
 			title TEXT NOT NULL,
 			authors TEXT,
 			abstract TEXT,
@@ -64,6 +78,8 @@ func (db *DB) migrate() error {
 			journal TEXT,
 			url TEXT,
 			pdf_path TEXT,
+			download_status TEXT,
+			download_error TEXT,
 			folder_id TEXT,
 			category TEXT,
 			tags TEXT,
@@ -136,14 +152,35 @@ func (db *DB) migrate() error {
 	}{
 		{name: "url", typ: "TEXT"},
 		{name: "folder_id", typ: "TEXT"},
+		{name: "source_paper_id", typ: "TEXT"},
+		{name: "download_status", typ: "TEXT"},
+		{name: "download_error", typ: "TEXT"},
 	} {
 		if err := db.ensurePaperColumn(column.name, column.typ); err != nil {
 			return err
 		}
 	}
 
+	for _, column := range []struct {
+		name string
+		typ  string
+	}{
+		{name: "parent_id", typ: "TEXT"},
+		{name: "path", typ: "TEXT"},
+		{name: "is_system", typ: "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := db.ensureFolderColumn(column.name, column.typ); err != nil {
+			return err
+		}
+	}
+
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_papers_folder_id ON papers(folder_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_papers_download_status ON papers(download_status)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_papers_folder_source_paper ON papers(folder_id, source_paper_id) WHERE source_paper_id IS NOT NULL AND TRIM(source_paper_id) <> ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_path ON folders(path) WHERE path IS NOT NULL AND TRIM(path) <> ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_parent_name ON folders(parent_id, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_translations_paper_id ON translations(paper_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_sessions_updated_at ON deepstart_sessions(updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_messages_session_id ON deepstart_messages(session_id, created_at ASC)`,
@@ -155,6 +192,10 @@ func (db *DB) migrate() error {
 		}
 	}
 
+	if _, err := db.conn.Exec(`UPDATE folders SET path = name WHERE path IS NULL OR TRIM(path) = ''`); err != nil {
+		return err
+	}
+
 	defaultFolder, err := db.ensureDefaultFolder()
 	if err != nil {
 		return err
@@ -162,6 +203,19 @@ func (db *DB) migrate() error {
 
 	_, err = db.conn.Exec(`UPDATE papers SET folder_id = ? WHERE folder_id IS NULL OR TRIM(folder_id) = ''`, defaultFolder.ID)
 	if err != nil {
+		return err
+	}
+	if _, err := db.conn.Exec(`UPDATE papers SET source_paper_id = id WHERE source_paper_id IS NULL OR TRIM(source_paper_id) = ''`); err != nil {
+		return err
+	}
+	if _, err := db.conn.Exec(`
+		UPDATE papers
+		SET download_status = CASE
+			WHEN pdf_path IS NOT NULL AND TRIM(pdf_path) <> '' THEN 'downloaded'
+			ELSE 'queued'
+		END
+		WHERE download_status IS NULL OR TRIM(download_status) = ''
+	`); err != nil {
 		return err
 	}
 
@@ -202,17 +256,111 @@ func (db *DB) ensurePaperColumn(columnName, columnType string) error {
 	return err
 }
 
+func (db *DB) ensureFolderColumn(columnName, columnType string) error {
+	rows, err := db.conn.Query(`PRAGMA table_info(folders)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+
+	_, err = db.conn.Exec(fmt.Sprintf(`ALTER TABLE folders ADD COLUMN %s %s`, columnName, columnType))
+	return err
+}
+
 func (db *DB) ensureDefaultFolder() (Folder, error) {
-	return db.CreateFolder(defaultFolderName)
+	if folder, err := db.getRootFolderByName(defaultFolderName); err == nil {
+		if !folder.IsSystem || strings.TrimSpace(folder.Path) != defaultFolderName {
+			if _, execErr := db.conn.Exec(
+				`UPDATE folders SET is_system = 1, path = ? WHERE id = ?`,
+				defaultFolderName,
+				folder.ID,
+			); execErr != nil {
+				return Folder{}, execErr
+			}
+			return db.GetFolderByID(folder.ID)
+		}
+		return folder, nil
+	} else if err != sql.ErrNoRows {
+		return Folder{}, err
+	}
+
+	if legacy, err := db.getRootFolderByName("Inbox"); err == nil {
+		if _, execErr := db.conn.Exec(
+			`UPDATE folders SET name = ?, path = ?, is_system = 1 WHERE id = ?`,
+			defaultFolderName,
+			defaultFolderName,
+			legacy.ID,
+		); execErr == nil {
+			return db.GetFolderByID(legacy.ID)
+		}
+	}
+
+	if folder, err := db.getFolderByPath(defaultFolderName); err == nil {
+		if !folder.IsSystem {
+			if _, execErr := db.conn.Exec(`UPDATE folders SET is_system = 1 WHERE id = ?`, folder.ID); execErr != nil {
+				return Folder{}, execErr
+			}
+			return db.GetFolderByID(folder.ID)
+		}
+		return folder, nil
+	} else if err != sql.ErrNoRows {
+		return Folder{}, err
+	}
+
+	folder, err := db.CreateFolderNode("", defaultFolderName)
+	if err != nil {
+		return Folder{}, err
+	}
+	if !folder.IsSystem {
+		if _, execErr := db.conn.Exec(`UPDATE folders SET is_system = 1 WHERE id = ?`, folder.ID); execErr != nil {
+			return Folder{}, execErr
+		}
+		return db.GetFolderByID(folder.ID)
+	}
+	return folder, nil
 }
 
 func (db *DB) CreateFolder(name string) (Folder, error) {
+	return db.CreateFolderNode("", name)
+}
+
+func (db *DB) CreateFolderNode(parentID, name string) (Folder, error) {
 	name = strings.TrimSpace(name)
-	if name == "" {
+	if name == "" || name == "." || name == ".." {
 		return Folder{}, fmt.Errorf("folder name cannot be empty")
 	}
+	name = normalizeFolderSegment(name)
 
-	existing, err := db.getFolderByName(name)
+	parentID = strings.TrimSpace(parentID)
+	parentPath := ""
+	if parentID != "" {
+		parentFolder, err := db.GetFolderByID(parentID)
+		if err != nil {
+			return Folder{}, err
+		}
+		parentPath = strings.TrimSpace(parentFolder.Path)
+	}
+
+	path := name
+	if parentPath != "" {
+		path = parentPath + "/" + name
+	}
+	path = normalizeFolderPath(path)
+
+	existing, err := db.getFolderByPath(path)
 	if err == nil {
 		return existing, nil
 	}
@@ -223,13 +371,19 @@ func (db *DB) CreateFolder(name string) (Folder, error) {
 	folder := Folder{
 		ID:        uuid.NewString(),
 		Name:      name,
+		ParentID:  parentID,
+		Path:      path,
+		IsSystem:  false,
 		CreatedAt: time.Now(),
 	}
 
 	_, err = db.conn.Exec(
-		`INSERT INTO folders (id, name, created_at) VALUES (?, ?, ?)`,
+		`INSERT INTO folders (id, name, parent_id, path, is_system, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		folder.ID,
 		folder.Name,
+		nullIfBlank(folder.ParentID),
+		folder.Path,
+		boolToInt(folder.IsSystem),
 		folder.CreatedAt,
 	)
 	if err != nil {
@@ -241,10 +395,10 @@ func (db *DB) CreateFolder(name string) (Folder, error) {
 
 func (db *DB) GetFolders() ([]Folder, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, name, created_at
+		SELECT id, name, parent_id, path, is_system, created_at
 		FROM folders
-		ORDER BY CASE WHEN name = ? THEN 0 ELSE 1 END, created_at ASC
-	`, defaultFolderName)
+		ORDER BY is_system DESC, path ASC, created_at ASC
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -253,9 +407,20 @@ func (db *DB) GetFolders() ([]Folder, error) {
 	var folders []Folder
 	for rows.Next() {
 		var folder Folder
-		if err := rows.Scan(&folder.ID, &folder.Name, &folder.CreatedAt); err != nil {
+		var (
+			parentID sql.NullString
+			path     sql.NullString
+			isSystem int
+		)
+		if err := rows.Scan(&folder.ID, &folder.Name, &parentID, &path, &isSystem, &folder.CreatedAt); err != nil {
 			return nil, err
 		}
+		folder.ParentID = strings.TrimSpace(parentID.String)
+		folder.Path = normalizeFolderPath(path.String)
+		if folder.Path == "" {
+			folder.Path = normalizeFolderPath(folder.Name)
+		}
+		folder.IsSystem = isSystem > 0
 		folders = append(folders, folder)
 	}
 
@@ -263,18 +428,101 @@ func (db *DB) GetFolders() ([]Folder, error) {
 }
 
 func (db *DB) getFolderByName(name string) (Folder, error) {
+	return db.getRootFolderByName(name)
+}
+
+func (db *DB) getRootFolderByName(name string) (Folder, error) {
+	name = strings.TrimSpace(name)
 	var folder Folder
+	var (
+		parentID sql.NullString
+		path     sql.NullString
+		isSystem int
+	)
 	err := db.conn.QueryRow(
-		`SELECT id, name, created_at FROM folders WHERE name = ?`,
+		`SELECT id, name, parent_id, path, is_system, created_at FROM folders WHERE name = ? AND (parent_id IS NULL OR TRIM(parent_id) = '') LIMIT 1`,
 		name,
-	).Scan(&folder.ID, &folder.Name, &folder.CreatedAt)
+	).Scan(&folder.ID, &folder.Name, &parentID, &path, &isSystem, &folder.CreatedAt)
+	folder.ParentID = strings.TrimSpace(parentID.String)
+	folder.Path = normalizeFolderPath(path.String)
+	if folder.Path == "" {
+		folder.Path = normalizeFolderPath(folder.Name)
+	}
+	folder.IsSystem = isSystem > 0
 	return folder, err
+}
+
+func (db *DB) getFolderByPath(path string) (Folder, error) {
+	path = normalizeFolderPath(path)
+	var folder Folder
+	var (
+		parentID sql.NullString
+		pathRaw  sql.NullString
+		isSystem int
+	)
+	err := db.conn.QueryRow(
+		`SELECT id, name, parent_id, path, is_system, created_at FROM folders WHERE path = ? LIMIT 1`,
+		path,
+	).Scan(&folder.ID, &folder.Name, &parentID, &pathRaw, &isSystem, &folder.CreatedAt)
+	folder.ParentID = strings.TrimSpace(parentID.String)
+	folder.Path = normalizeFolderPath(pathRaw.String)
+	if folder.Path == "" {
+		folder.Path = normalizeFolderPath(folder.Name)
+	}
+	folder.IsSystem = isSystem > 0
+	return folder, err
+}
+
+func (db *DB) GetFolderByID(folderID string) (Folder, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return Folder{}, sql.ErrNoRows
+	}
+	var folder Folder
+	var (
+		parentID sql.NullString
+		pathRaw  sql.NullString
+		isSystem int
+	)
+	err := db.conn.QueryRow(
+		`SELECT id, name, parent_id, path, is_system, created_at FROM folders WHERE id = ? LIMIT 1`,
+		folderID,
+	).Scan(&folder.ID, &folder.Name, &parentID, &pathRaw, &isSystem, &folder.CreatedAt)
+	if err != nil {
+		return Folder{}, err
+	}
+	folder.ParentID = strings.TrimSpace(parentID.String)
+	folder.Path = normalizeFolderPath(pathRaw.String)
+	if folder.Path == "" {
+		folder.Path = normalizeFolderPath(folder.Name)
+	}
+	folder.IsSystem = isSystem > 0
+	return folder, nil
+}
+
+func (db *DB) DeleteFolder(folderID string) error {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return nil
+	}
+	_, err := db.conn.Exec(`DELETE FROM folders WHERE id = ?`, folderID)
+	return err
 }
 
 func (db *DB) UpsertPaper(paper *Paper) error {
 	now := time.Now()
 	if paper.ID == "" {
 		paper.ID = uuid.NewString()
+	}
+	if strings.TrimSpace(paper.SourcePaperID) == "" {
+		paper.SourcePaperID = paper.ID
+	}
+	if strings.TrimSpace(paper.DownloadStatus) == "" {
+		if strings.TrimSpace(paper.PDFPath) != "" {
+			paper.DownloadStatus = "downloaded"
+		} else {
+			paper.DownloadStatus = "queued"
+		}
 	}
 	if paper.AddedAt.IsZero() {
 		paper.AddedAt = now
@@ -290,9 +538,10 @@ func (db *DB) UpsertPaper(paper *Paper) error {
 
 	_, err = db.conn.Exec(`
 		INSERT INTO papers (
-			id, title, authors, abstract, year, journal, url, pdf_path, folder_id, category, tags, added_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, source_paper_id, title, authors, abstract, year, journal, url, pdf_path, download_status, download_error, folder_id, category, tags, added_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			source_paper_id = excluded.source_paper_id,
 			title = excluded.title,
 			authors = excluded.authors,
 			abstract = excluded.abstract,
@@ -300,12 +549,15 @@ func (db *DB) UpsertPaper(paper *Paper) error {
 			journal = excluded.journal,
 			url = excluded.url,
 			pdf_path = excluded.pdf_path,
+			download_status = excluded.download_status,
+			download_error = excluded.download_error,
 			folder_id = excluded.folder_id,
 			category = excluded.category,
 			tags = excluded.tags,
 			updated_at = excluded.updated_at
 	`,
 		paper.ID,
+		paper.SourcePaperID,
 		paper.Title,
 		paper.Authors,
 		paper.Abstract,
@@ -313,6 +565,8 @@ func (db *DB) UpsertPaper(paper *Paper) error {
 		paper.Journal,
 		paper.URL,
 		paper.PDFPath,
+		paper.DownloadStatus,
+		nullIfBlank(paper.DownloadError),
 		paper.FolderID,
 		paper.Category,
 		string(tagsJSON),
@@ -324,7 +578,7 @@ func (db *DB) UpsertPaper(paper *Paper) error {
 
 func (db *DB) GetPapers(folderID string) ([]Paper, error) {
 	baseQuery := `
-		SELECT id, title, authors, abstract, year, journal, url, pdf_path, folder_id, category, tags, added_at, updated_at
+		SELECT id, source_paper_id, title, authors, abstract, year, journal, url, pdf_path, download_status, download_error, folder_id, category, tags, added_at, updated_at
 		FROM papers
 	`
 	args := []interface{}{}
@@ -348,11 +602,14 @@ func (db *DB) GetPapers(folderID string) ([]Paper, error) {
 		var journal sql.NullString
 		var urlValue sql.NullString
 		var pdfPath sql.NullString
+		var downloadStatus sql.NullString
+		var downloadError sql.NullString
 		var folderID sql.NullString
 		var category sql.NullString
 		var tagsRaw sql.NullString
 		if err := rows.Scan(
 			&paper.ID,
+			&paper.SourcePaperID,
 			&paper.Title,
 			&authors,
 			&abstract,
@@ -360,6 +617,8 @@ func (db *DB) GetPapers(folderID string) ([]Paper, error) {
 			&journal,
 			&urlValue,
 			&pdfPath,
+			&downloadStatus,
+			&downloadError,
 			&folderID,
 			&category,
 			&tagsRaw,
@@ -373,6 +632,15 @@ func (db *DB) GetPapers(folderID string) ([]Paper, error) {
 		paper.Journal = journal.String
 		paper.URL = urlValue.String
 		paper.PDFPath = pdfPath.String
+		paper.DownloadStatus = strings.TrimSpace(downloadStatus.String)
+		if paper.DownloadStatus == "" {
+			if strings.TrimSpace(paper.PDFPath) != "" {
+				paper.DownloadStatus = "downloaded"
+			} else {
+				paper.DownloadStatus = "queued"
+			}
+		}
+		paper.DownloadError = strings.TrimSpace(downloadError.String)
 		paper.FolderID = folderID.String
 		paper.Category = category.String
 		paper.Tags = decodeTags(tagsRaw.String)
@@ -380,6 +648,143 @@ func (db *DB) GetPapers(folderID string) ([]Paper, error) {
 	}
 
 	return papers, rows.Err()
+}
+
+func (db *DB) GetPaperByFolderAndSource(folderID, sourcePaperID string) (*Paper, error) {
+	folderID = strings.TrimSpace(folderID)
+	sourcePaperID = strings.TrimSpace(sourcePaperID)
+	if folderID == "" || sourcePaperID == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	var (
+		paper          Paper
+		authors        sql.NullString
+		abstract       sql.NullString
+		journal        sql.NullString
+		urlValue       sql.NullString
+		pdfPath        sql.NullString
+		downloadStatus sql.NullString
+		downloadError  sql.NullString
+		category       sql.NullString
+		tagsRaw        sql.NullString
+	)
+	err := db.conn.QueryRow(`
+		SELECT id, source_paper_id, title, authors, abstract, year, journal, url, pdf_path, download_status, download_error, folder_id, category, tags, added_at, updated_at
+		FROM papers
+		WHERE folder_id = ? AND source_paper_id = ?
+		LIMIT 1
+	`, folderID, sourcePaperID).Scan(
+		&paper.ID,
+		&paper.SourcePaperID,
+		&paper.Title,
+		&authors,
+		&abstract,
+		&paper.Year,
+		&journal,
+		&urlValue,
+		&pdfPath,
+		&downloadStatus,
+		&downloadError,
+		&paper.FolderID,
+		&category,
+		&tagsRaw,
+		&paper.AddedAt,
+		&paper.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	paper.Authors = authors.String
+	paper.Abstract = abstract.String
+	paper.Journal = journal.String
+	paper.URL = urlValue.String
+	paper.PDFPath = pdfPath.String
+	paper.DownloadStatus = strings.TrimSpace(downloadStatus.String)
+	if paper.DownloadStatus == "" {
+		if strings.TrimSpace(paper.PDFPath) != "" {
+			paper.DownloadStatus = "downloaded"
+		} else {
+			paper.DownloadStatus = "queued"
+		}
+	}
+	paper.DownloadError = strings.TrimSpace(downloadError.String)
+	paper.Category = category.String
+	paper.Tags = decodeTags(tagsRaw.String)
+
+	return &paper, nil
+}
+
+func (db *DB) UpdatePaperDownloadState(paperID, status, pdfPath, downloadError string) error {
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return fmt.Errorf("paper id cannot be empty")
+	}
+
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "queued"
+	}
+
+	_, err := db.conn.Exec(`
+		UPDATE papers
+		SET download_status = ?, pdf_path = ?, download_error = ?, updated_at = ?
+		WHERE id = ?
+	`, status, nullIfBlank(pdfPath), nullIfBlank(downloadError), time.Now(), paperID)
+	return err
+}
+
+type FolderPaperStats struct {
+	Total       int
+	Queued      int
+	Downloading int
+	Downloaded  int
+	Failed      int
+}
+
+func (db *DB) GetFolderPaperStats(folderID string) (FolderPaperStats, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return FolderPaperStats{}, fmt.Errorf("folder id cannot be empty")
+	}
+
+	rows, err := db.conn.Query(`
+		SELECT COALESCE(download_status, ''), COUNT(*)
+		FROM papers
+		WHERE folder_id = ?
+		GROUP BY COALESCE(download_status, '')
+	`, folderID)
+	if err != nil {
+		return FolderPaperStats{}, err
+	}
+	defer rows.Close()
+
+	stats := FolderPaperStats{}
+	for rows.Next() {
+		var (
+			status string
+			count  int
+		)
+		if err := rows.Scan(&status, &count); err != nil {
+			return FolderPaperStats{}, err
+		}
+		stats.Total += count
+		switch strings.TrimSpace(strings.ToLower(status)) {
+		case "queued":
+			stats.Queued += count
+		case "downloading":
+			stats.Downloading += count
+		case "downloaded":
+			stats.Downloaded += count
+		case "failed":
+			stats.Failed += count
+		default:
+			stats.Queued += count
+		}
+	}
+
+	return stats, rows.Err()
 }
 
 func (db *DB) DeletePaper(id string) error {
@@ -574,6 +979,62 @@ func (db *DB) SaveDeepStartSearchRound(sessionID, query string, results []Search
 		analysisJSON,
 		time.Now(),
 	)
+	return err
+}
+
+func (db *DB) ListDeepStartSearchRounds(sessionID string, limit int) ([]DeepStartSearchRoundRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return []DeepStartSearchRoundRecord{}, nil
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := db.conn.Query(`
+		SELECT id, session_id, query, results_json, analysis_json, created_at
+		FROM deepstart_search_rounds
+		WHERE session_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?
+	`, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rounds := make([]DeepStartSearchRoundRecord, 0, limit)
+	for rows.Next() {
+		var (
+			record      DeepStartSearchRoundRecord
+			resultsJSON string
+			analysisRaw sql.NullString
+		)
+		if err := rows.Scan(
+			&record.ID,
+			&record.SessionID,
+			&record.Query,
+			&resultsJSON,
+			&analysisRaw,
+			&record.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		record.Results = decodeSearchPapers(resultsJSON)
+		record.Analysis = decodeDeepStartAnalysis(analysisRaw.String)
+		rounds = append(rounds, record)
+	}
+
+	return rounds, rows.Err()
+}
+
+func (db *DB) DeleteDeepStartSearchRound(roundID string) error {
+	roundID = strings.TrimSpace(roundID)
+	if roundID == "" {
+		return nil
+	}
+	_, err := db.conn.Exec(`DELETE FROM deepstart_search_rounds WHERE id = ?`, roundID)
 	return err
 }
 

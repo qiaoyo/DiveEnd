@@ -23,12 +23,19 @@ type App struct {
 	syncManager       *SyncManager
 	stateMu           sync.RWMutex
 	extractProgress   map[string]*ExtractProgress
+	downloadQueue     chan paperDownloadJob
+	downloadCancel    context.CancelFunc
+	downloadWG        sync.WaitGroup
+	downloadMu        sync.Mutex
+	deepStartTaskMu   sync.Mutex
+	deepStartTasks    map[string]context.CancelFunc
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
 		extractProgress: map[string]*ExtractProgress{},
+		deepStartTasks:  map[string]context.CancelFunc{},
 	}
 }
 
@@ -49,6 +56,8 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown is called when the app closes
 func (a *App) shutdown(ctx context.Context) {
+	a.cancelAllDeepStartTasks()
+	a.stopDownloadWorkers()
 	if a.db != nil {
 		_ = a.db.Close()
 	}
@@ -222,19 +231,22 @@ func (a *App) ImportPapers(folderID string, papers []SearchPaper) ([]Paper, erro
 
 	imported := make([]Paper, 0, len(papers))
 	for _, searchPaper := range papers {
+		sourcePaperID := normalizeSourcePaperID(searchPaper)
 		paper := Paper{
-			ID:        strings.TrimSpace(searchPaper.ID),
-			Title:     strings.TrimSpace(searchPaper.Title),
-			Authors:   strings.TrimSpace(searchPaper.Authors),
-			Abstract:  strings.TrimSpace(searchPaper.Abstract),
-			Year:      searchPaper.Year,
-			Journal:   strings.TrimSpace(searchPaper.Journal),
-			URL:       strings.TrimSpace(searchPaper.URL),
-			FolderID:  folderID,
-			Category:  strings.TrimSpace(searchPaper.Category),
-			Tags:      searchPaper.Tags,
-			AddedAt:   time.Now(),
-			UpdatedAt: time.Now(),
+			ID:             strings.TrimSpace(searchPaper.ID),
+			SourcePaperID:  sourcePaperID,
+			Title:          strings.TrimSpace(searchPaper.Title),
+			Authors:        strings.TrimSpace(searchPaper.Authors),
+			Abstract:       strings.TrimSpace(searchPaper.Abstract),
+			Year:           searchPaper.Year,
+			Journal:        strings.TrimSpace(searchPaper.Journal),
+			URL:            strings.TrimSpace(searchPaper.URL),
+			FolderID:       folderID,
+			Category:       strings.TrimSpace(searchPaper.Category),
+			Tags:           searchPaper.Tags,
+			DownloadStatus: "queued",
+			AddedAt:        time.Now(),
+			UpdatedAt:      time.Now(),
 		}
 
 		if paper.ID == "" {
@@ -326,11 +338,13 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 		if a.db != nil {
 			a.deepStartEnricher = NewDeepStartEnricher(a.db)
 			a.syncManager = NewSyncManager(a.db, a.config)
+			a.startDownloadWorkers()
 		}
 		return nil
 	}
 
 	if a.db != nil {
+		a.stopDownloadWorkers()
 		_ = a.db.Close()
 		a.db = nil
 	}
@@ -342,6 +356,7 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.db = db
 	a.deepStartEnricher = NewDeepStartEnricher(a.db)
 	a.syncManager = NewSyncManager(a.db, a.config)
+	a.startDownloadWorkers()
 	return nil
 }
 

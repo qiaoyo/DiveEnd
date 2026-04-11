@@ -6,13 +6,19 @@ export function AnalyzePapers(arg1:string):Promise<main.ScreeningDecisionNode>;
 
 export function ApplyScreeningChoice(arg1:string,arg2:Array<string>):Promise<main.ScreeningDecisionNode>;
 
+export function CancelDeepStartTask(arg1:string):Promise<void>;
+
 export function CancelScreening(arg1:string):Promise<void>;
 
 export function CompleteScreening(arg1:string,arg2:string):Promise<Array<main.Paper>>;
 
 export function CreateFolder(arg1:string):Promise<main.Folder>;
 
+export function CreateFolderNode(arg1:main.CreateFolderNodeRequest):Promise<main.Folder>;
+
 export function CreateScreeningSession(arg1:string):Promise<main.ScreeningSession>;
+
+export function DeleteFolderNode(arg1:string):Promise<void>;
 
 export function DeletePaper(arg1:string):Promise<void>;
 
@@ -24,9 +30,15 @@ export function GetDeepStartSession(arg1:string):Promise<main.DeepStartSessionDe
 
 export function GetExtractProgress(arg1:string):Promise<main.ExtractProgress>;
 
+export function GetFolderStorageTreeOverview():Promise<main.FolderStorageTreeOverview>;
+
+export function GetFolderTree():Promise<Array<main.FolderNode>>;
+
 export function GetFolders():Promise<Array<main.Folder>>;
 
 export function GetInitialState():Promise<main.InitialState>;
+
+export function GetLocalStorageOverview():Promise<main.LocalStorageOverview>;
 
 export function GetPapers(arg1:string):Promise<Array<main.Paper>>;
 
@@ -48,6 +60,8 @@ export function Greet(arg1:string):Promise<string>;
 
 export function ImportPapers(arg1:string,arg2:Array<main.SearchPaper>):Promise<Array<main.Paper>>;
 
+export function ImportPapersWithAssets(arg1:string,arg2:Array<main.SearchPaper>):Promise<main.ImportPapersWithAssetsResult>;
+
 export function ListDeepStartSessions():Promise<Array<main.DeepStartSessionSummary>>;
 
 export function ListScreeningSessions():Promise<Array<main.ScreeningSession>>;
@@ -67,6 +81,8 @@ export function StartDeepStartSession(arg1:string,arg2:string):Promise<main.Deep
 export function TranslatePaperSection(arg1:string,arg2:string,arg3:string):Promise<main.TranslationRecord>;
 
 export function TriggerSync():Promise<main.SyncProgress>;
+
+export function UndoDeepStartNarrow(arg1:string):Promise<main.DeepStartSessionDetail>;
 
 export function UpdateDeepStartSelections(arg1:string,arg2:Array<string>,arg3:string):Promise<main.DeepStartSessionDetail>;
 

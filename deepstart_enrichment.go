@@ -423,14 +423,14 @@ func (e *DeepStartEnricher) getJSON(ctx context.Context, endpoint string, accept
 	return io.ReadAll(resp.Body)
 }
 
-func buildPaperKeywords(paper SearchPaper, query string, candidates []string) []string {
+func buildPaperKeywords(paper SearchPaper, _ string, candidates []string) []string {
 	keywords := make([]string, 0, len(candidates)+len(paper.Tags))
 	keywords = append(keywords, candidates...)
 	keywords = append(keywords, paper.Tags...)
 	keywords = append(keywords, paper.Keywords...)
 
 	if len(keywords) == 0 {
-		keywords = append(keywords, extractKeywordsFromText(strings.Join([]string{query, paper.Title, paper.Abstract}, " "))...)
+		keywords = append(keywords, extractKeywordsFromText(strings.Join([]string{paper.Title, paper.Abstract}, " "))...)
 	}
 	return uniqueStrings(trimKeywordList(keywords, 10))
 }
@@ -442,12 +442,42 @@ func trimKeywordList(values []string, limit int) []string {
 		if value == "" {
 			continue
 		}
+		if shouldSkipKeyword(value) {
+			continue
+		}
 		clean = append(clean, value)
 		if limit > 0 && len(clean) >= limit {
 			break
 		}
 	}
 	return clean
+}
+
+func shouldSkipKeyword(value string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(value))
+	if normalized == "" {
+		return true
+	}
+	if len([]rune(normalized)) > 64 {
+		return true
+	}
+	if strings.ContainsAny(normalized, "。！？!?,，；;：:") && len([]rune(normalized)) > 12 {
+		return true
+	}
+	if strings.Count(normalized, " ") >= 4 {
+		return true
+	}
+
+	intentHints := []string{
+		"我想", "希望", "梳理", "这两年", "领域", "论文", "帮我", "我要",
+		"i want", "help me", "sort out", "papers in the field", "over the past two years",
+	}
+	for _, hint := range intentHints {
+		if strings.Contains(normalized, hint) && len([]rune(normalized)) > 8 {
+			return true
+		}
+	}
+	return false
 }
 
 func extractKeywordsFromText(text string) []string {

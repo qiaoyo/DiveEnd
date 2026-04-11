@@ -49,11 +49,26 @@ export interface AppConfig {
 export interface Folder {
   id: string;
   name: string;
+  parentId?: string;
+  path: string;
+  isSystem: boolean;
   createdAt: string;
+}
+
+export interface FolderNode {
+  folder: Folder;
+  children: FolderNode[];
+}
+
+export interface CreateFolderNodeRequest {
+  parentId?: string;
+  path?: string;
+  name?: string;
 }
 
 export interface Paper {
   id: string;
+  sourcePaperId: string;
   title: string;
   authors: string;
   abstract: string;
@@ -61,6 +76,8 @@ export interface Paper {
   journal: string;
   url: string;
   pdfPath?: string;
+  downloadStatus: 'queued' | 'downloading' | 'downloaded' | 'failed' | string;
+  downloadError?: string;
   folderId: string;
   category: string;
   tags: string[];
@@ -83,6 +100,61 @@ export interface SearchPaper {
   keywords: string[];
   sourceLabel: string;
   enrichmentNote?: string;
+}
+
+export interface ImportSkippedPaper {
+  sourcePaperId: string;
+  title: string;
+  reason: string;
+}
+
+export interface ImportPapersWithAssetsResult {
+  imported: Paper[];
+  skipped: ImportSkippedPaper[];
+  queued: number;
+  message?: string;
+}
+
+export interface LocalStorageFolderOverview {
+  folderId: string;
+  folderName: string;
+  folderPath: string;
+  totalPapers: number;
+  queued: number;
+  downloading: number;
+  downloaded: number;
+  failed: number;
+  storedFileCount: number;
+}
+
+export interface LocalStorageOverview {
+  rootPath: string;
+  totalFolders: number;
+  totalFiles: number;
+  queued: number;
+  downloading: number;
+  downloaded: number;
+  failed: number;
+  folders: LocalStorageFolderOverview[];
+  generatedAt: string;
+}
+
+export interface FolderStorageTreeNode {
+  folderId: string;
+  folderName: string;
+  folderPath: string;
+  paperCount: number;
+  queued: number;
+  downloading: number;
+  downloaded: number;
+  failed: number;
+  children: FolderStorageTreeNode[];
+}
+
+export interface FolderStorageTreeOverview {
+  rootPath: string;
+  directories: FolderStorageTreeNode[];
+  generatedAt: string;
 }
 
 export interface SearchSourceStatus {
@@ -194,6 +266,7 @@ export interface DeepStartAnalysis {
   followUpQuestions: string[];
   suggestedQueries: string[];
   recommendedPaperIds: string[];
+  retainedPaperIds: string[];
   searchStats: {
     query: string;
     rawCount: number;
@@ -204,7 +277,7 @@ export interface DeepStartAnalysis {
 
 export interface DeepStartProgressEvent {
   sessionId?: string;
-  phase: 'searching' | 'enriching' | 'analyzing' | 'persisting' | 'completed';
+  phase: 'searching' | 'enriching' | 'analyzing' | 'persisting' | 'cancelling' | 'cancelled' | 'failed' | 'completed';
   message?: string;
   elapsedSeconds: number;
   estimatedRemainingSeconds: number;

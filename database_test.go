@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func TestNewDBMigratesLegacySchemaAndCreatesInbox(t *testing.T) {
+func TestNewDBMigratesLegacySchemaAndCreatesDefaultFolder(t *testing.T) {
 	dataDir := t.TempDir()
 	dbPath := filepath.Join(dataDir, "diveend.db")
 
@@ -70,8 +70,8 @@ func TestNewDBMigratesLegacySchemaAndCreatesInbox(t *testing.T) {
 		columns[name] = true
 	}
 
-	if !columns["url"] || !columns["folder_id"] {
-		t.Fatalf("expected migrated papers table to include url and folder_id columns, got %v", columns)
+	if !columns["url"] || !columns["folder_id"] || !columns["source_paper_id"] || !columns["download_status"] || !columns["download_error"] {
+		t.Fatalf("expected migrated papers table to include url/folder/source/download columns, got %v", columns)
 	}
 
 	folders, err := db.GetFolders()
@@ -79,7 +79,7 @@ func TestNewDBMigratesLegacySchemaAndCreatesInbox(t *testing.T) {
 		t.Fatalf("GetFolders() error = %v", err)
 	}
 	if len(folders) != 1 || folders[0].Name != defaultFolderName {
-		t.Fatalf("expected a single Inbox folder, got %+v", folders)
+		t.Fatalf("expected a single %s folder, got %+v", defaultFolderName, folders)
 	}
 
 	papers, err := db.GetPapers(folders[0].ID)
@@ -87,10 +87,16 @@ func TestNewDBMigratesLegacySchemaAndCreatesInbox(t *testing.T) {
 		t.Fatalf("GetPapers() error = %v", err)
 	}
 	if len(papers) != 1 {
-		t.Fatalf("expected migrated paper to be assigned to Inbox, got %d papers", len(papers))
+		t.Fatalf("expected migrated paper to be assigned to default folder, got %d papers", len(papers))
 	}
 	if papers[0].FolderID != folders[0].ID {
 		t.Fatalf("expected migrated paper folder ID %q, got %q", folders[0].ID, papers[0].FolderID)
+	}
+	if papers[0].SourcePaperID != papers[0].ID {
+		t.Fatalf("expected migrated paper source_paper_id to backfill as id, got %q", papers[0].SourcePaperID)
+	}
+	if papers[0].DownloadStatus != "queued" {
+		t.Fatalf("expected migrated paper download status queued, got %q", papers[0].DownloadStatus)
 	}
 }
 
@@ -107,18 +113,20 @@ func TestPaperAndTranslationPersistence(t *testing.T) {
 	}
 
 	paper := &Paper{
-		ID:        "paper-1",
-		Title:     "Paper 1",
-		Authors:   "Author",
-		Abstract:  "Abstract",
-		Year:      2025,
-		Journal:   "arXiv",
-		URL:       "https://example.com/paper-1",
-		FolderID:  folder.ID,
-		Category:  "agents",
-		Tags:      []string{"llm", "agent"},
-		AddedAt:   time.Now(),
-		UpdatedAt: time.Now(),
+		ID:             "paper-1",
+		SourcePaperID:  "source-paper-1",
+		Title:          "Paper 1",
+		Authors:        "Author",
+		Abstract:       "Abstract",
+		Year:           2025,
+		Journal:        "arXiv",
+		URL:            "https://example.com/paper-1",
+		FolderID:       folder.ID,
+		Category:       "agents",
+		Tags:           []string{"llm", "agent"},
+		DownloadStatus: "queued",
+		AddedAt:        time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 	if err := db.UpsertPaper(paper); err != nil {
 		t.Fatalf("UpsertPaper() error = %v", err)
@@ -133,6 +141,12 @@ func TestPaperAndTranslationPersistence(t *testing.T) {
 	}
 	if len(papers[0].Tags) != 2 {
 		t.Fatalf("expected tags to round-trip, got %+v", papers[0].Tags)
+	}
+	if papers[0].SourcePaperID != "source-paper-1" {
+		t.Fatalf("expected sourcePaperID to round-trip, got %q", papers[0].SourcePaperID)
+	}
+	if papers[0].DownloadStatus != "queued" {
+		t.Fatalf("expected download status to round-trip, got %q", papers[0].DownloadStatus)
 	}
 
 	record := &TranslationRecord{
@@ -157,6 +171,64 @@ func TestPaperAndTranslationPersistence(t *testing.T) {
 	}
 	if translations[0].Summary != "摘要" {
 		t.Fatalf("expected summary to round-trip, got %q", translations[0].Summary)
+	}
+}
+
+func TestGetPaperByFolderAndSourceAndStats(t *testing.T) {
+	db, err := NewDB(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDB() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	folder, err := db.CreateFolder("Benchmarks")
+	if err != nil {
+		t.Fatalf("CreateFolder() error = %v", err)
+	}
+
+	now := time.Now()
+	if err := db.UpsertPaper(&Paper{
+		ID:             "paper-a",
+		SourcePaperID:  "source-a",
+		Title:          "Paper A",
+		FolderID:       folder.ID,
+		DownloadStatus: "downloading",
+		AddedAt:        now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("UpsertPaper(paper-a) error = %v", err)
+	}
+	if err := db.UpsertPaper(&Paper{
+		ID:             "paper-b",
+		SourcePaperID:  "source-b",
+		Title:          "Paper B",
+		FolderID:       folder.ID,
+		DownloadStatus: "failed",
+		DownloadError:  "timeout",
+		AddedAt:        now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("UpsertPaper(paper-b) error = %v", err)
+	}
+
+	paper, err := db.GetPaperByFolderAndSource(folder.ID, "source-a")
+	if err != nil {
+		t.Fatalf("GetPaperByFolderAndSource() error = %v", err)
+	}
+	if paper.ID != "paper-a" {
+		t.Fatalf("expected paper-a, got %q", paper.ID)
+	}
+
+	if err := db.UpdatePaperDownloadState("paper-a", "downloaded", "/tmp/paper-a.pdf", ""); err != nil {
+		t.Fatalf("UpdatePaperDownloadState() error = %v", err)
+	}
+
+	stats, err := db.GetFolderPaperStats(folder.ID)
+	if err != nil {
+		t.Fatalf("GetFolderPaperStats() error = %v", err)
+	}
+	if stats.Total != 2 || stats.Downloaded != 1 || stats.Failed != 1 {
+		t.Fatalf("unexpected stats %+v", stats)
 	}
 }
 

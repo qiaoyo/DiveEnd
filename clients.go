@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -25,6 +26,7 @@ type llmService interface {
 
 type paperSearchService interface {
 	Search(query string, limit int) ([]SearchPaper, error)
+	SearchWithContext(ctx context.Context, query string, limit int) ([]SearchPaper, error)
 	EnhancedSearch(query string, limit int, offset int, yearStart int, yearEnd int, sortBy string) (*EnhancedSearchResult, error)
 	LastSearchStats() SearchRetrievalStats
 }
@@ -192,7 +194,8 @@ Return this exact JSON shape:
   ],
   "followUpQuestions": ["question 1"],
   "suggestedQueries": ["new search query"],
-  "recommendedPaperIds": ["paper-id-1"]
+  "recommendedPaperIds": ["paper-id-1"],
+  "retainedPaperIds": ["paper-id-1"]
 }
 
 Context:
@@ -212,6 +215,7 @@ Context:
 		FollowUpQuestions   []string             `json:"followUpQuestions"`
 		SuggestedQueries    []string             `json:"suggestedQueries"`
 		RecommendedPaperIDs []string             `json:"recommendedPaperIds"`
+		RetainedPaperIDs    []string             `json:"retainedPaperIds"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(response)), &parsed); err != nil {
 		return nil, fmt.Errorf("failed to parse DeepStart analysis response: %w", err)
@@ -224,6 +228,7 @@ Context:
 		FollowUpQuestions:   parsed.FollowUpQuestions,
 		SuggestedQueries:    parsed.SuggestedQueries,
 		RecommendedPaperIDs: parsed.RecommendedPaperIDs,
+		RetainedPaperIDs:    parsed.RetainedPaperIDs,
 	}, request)
 
 	return &DeepStartAIResponse{
@@ -646,6 +651,7 @@ func normalizeDeepStartAnalysis(analysis DeepStartAnalysis, request DeepStartAIR
 		FollowUpQuestions:   compactStrings(analysis.FollowUpQuestions, 4),
 		SuggestedQueries:    compactStrings(analysis.SuggestedQueries, 4),
 		RecommendedPaperIDs: filterExistingPaperIDs(analysis.RecommendedPaperIDs, validPaperIDs),
+		RetainedPaperIDs:    filterExistingPaperIDs(analysis.RetainedPaperIDs, validPaperIDs),
 	}
 }
 
@@ -892,6 +898,13 @@ func (s *SearchClient) LastSearchStats() SearchRetrievalStats {
 }
 
 func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
+	return s.SearchWithContext(context.Background(), query, limit)
+}
+
+func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limit int) ([]SearchPaper, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("query cannot be empty")
@@ -986,25 +999,25 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 		name   string
 	}
 
+	overallCtx, overallCancel := context.WithTimeout(ctx, s.overallTimeout)
+	defer overallCancel()
+
 	totalSources := len(sourceStates)
 	results := make(chan sourceResult, totalSources)
 	if s.enableSemanticScholar {
 		go func() {
-			papers, err := s.searchSemanticScholar(query, searchLimit, updateProgress)
+			papers, err := s.searchSemanticScholar(overallCtx, query, searchLimit, updateProgress)
 			results <- sourceResult{papers: papers, err: err, name: searchSourceSemantic}
 		}()
 	}
 	if s.enableArxiv {
 		go func() {
-			papers, err := s.searchArXiv(query, searchLimit, updateProgress)
+			papers, err := s.searchArXiv(overallCtx, query, searchLimit, updateProgress)
 			results <- sourceResult{papers: papers, err: err, name: searchSourceArxiv}
 		}()
 	}
 
 	// 收集结果并设置总时限，避免极端情况下卡死。
-	deadline := time.NewTimer(s.overallTimeout)
-	defer deadline.Stop()
-
 	received := 0
 	for received < totalSources {
 		select {
@@ -1018,8 +1031,12 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 				errs = append(errs, fmt.Sprintf("%s: %v", result.name, result.err))
 				continue
 			}
-		case <-deadline.C:
-			errs = append(errs, fmt.Sprintf("search timed out after %s", s.overallTimeout))
+		case <-overallCtx.Done():
+			if errorsIsDeadlineExceeded(overallCtx.Err()) {
+				errs = append(errs, fmt.Sprintf("search timed out after %s", s.overallTimeout))
+			} else {
+				errs = append(errs, "search cancelled")
+			}
 			received = totalSources
 		}
 	}
@@ -1027,6 +1044,10 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	sourceStateMu.Lock()
 	sourceSnapshot := cloneSearchSourceStates(sourceStates)
 	sourceStateMu.Unlock()
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	s.emitSearchProgress(SearchProgressEvent{
 		Query:            query,
@@ -1111,14 +1132,21 @@ func (s *SearchClient) updateLastSearchStats(stats SearchRetrievalStats) {
 }
 
 func (s *SearchClient) retrySourceSearch(
+	ctx context.Context,
 	sourceName string,
 	fn func(attempt int) ([]SearchPaper, error),
 	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
 ) ([]SearchPaper, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	startedAt := time.Now()
 	var lastErr error
 
 	for attempt := 1; attempt <= s.retryMax; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		attemptStarted := time.Now()
 		papers, err := fn(attempt)
 		if err == nil {
@@ -1136,7 +1164,9 @@ func (s *SearchClient) retrySourceSearch(
 		}
 		if attempt < s.retryMax {
 			if wait := s.retryInterval - time.Since(attemptStarted); wait > 0 {
-				time.Sleep(wait)
+				if err := sleepWithContext(ctx, wait); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -1215,18 +1245,22 @@ func (s *SearchClient) searchArxivSanityLite(query string, limit int) ([]SearchP
 }
 
 func (s *SearchClient) searchSemanticScholar(
+	ctx context.Context,
 	query string,
 	limit int,
 	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
 ) ([]SearchPaper, error) {
 	candidates := buildSearchQueryCandidates(query)
-	return s.retrySourceSearch(searchSourceSemantic, func(attempt int) ([]SearchPaper, error) {
+	return s.retrySourceSearch(ctx, searchSourceSemantic, func(attempt int) ([]SearchPaper, error) {
 		variant := searchQueryVariant(candidates, attempt)
 		papers := make([]SearchPaper, 0, limit)
 		remaining := limit
 		offset := 0
 
 		for remaining > 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			pageSize := minInt(100, remaining)
 			apiURL := fmt.Sprintf(
 				"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&offset=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf",
@@ -1235,8 +1269,8 @@ func (s *SearchClient) searchSemanticScholar(
 				offset,
 			)
 
-			ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+			reqCtx, cancel := context.WithTimeout(ctx, s.attemptTimeout)
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, apiURL, nil)
 			if err != nil {
 				cancel()
 				return nil, err
@@ -1330,7 +1364,9 @@ func (s *SearchClient) searchSemanticScholar(
 			offset += len(result.Data)
 
 			if remaining > 0 {
-				time.Sleep(s.retryInterval)
+				if err := sleepWithContext(ctx, s.retryInterval); err != nil {
+					return nil, err
+				}
 			}
 		}
 
@@ -1345,12 +1381,13 @@ func (s *SearchClient) searchSemanticScholar(
 }
 
 func (s *SearchClient) searchArXiv(
+	ctx context.Context,
 	query string,
 	limit int,
 	onAttempt func(sourceName string, attempt int, success bool, done bool, count int, err error),
 ) ([]SearchPaper, error) {
 	candidates := buildSearchQueryCandidates(query)
-	return s.retrySourceSearch(searchSourceArxiv, func(attempt int) ([]SearchPaper, error) {
+	return s.retrySourceSearch(ctx, searchSourceArxiv, func(attempt int) ([]SearchPaper, error) {
 		variant := searchQueryVariant(candidates, attempt)
 		apiURL := fmt.Sprintf(
 			"https://export.arxiv.org/api/query?search_query=all:%s&start=0&max_results=%d",
@@ -1358,10 +1395,10 @@ func (s *SearchClient) searchArXiv(
 			limit,
 		)
 
-		ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
+		reqCtx, cancel := context.WithTimeout(ctx, s.attemptTimeout)
 		defer cancel()
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, apiURL, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1438,6 +1475,25 @@ func elapsedSearchSeconds(startedAt time.Time, totalDuration time.Duration) int 
 		return total
 	}
 	return elapsed
+}
+
+func sleepWithContext(ctx context.Context, duration time.Duration) error {
+	if duration <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func errorsIsDeadlineExceeded(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 func formatSourceSummary(sources []SearchSourceProgress, sourceName string) string {

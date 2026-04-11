@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft,
   ChevronRight,
@@ -12,6 +13,7 @@ import { createFolder, deletePaper, getPapers } from '../../lib/backend';
 import { useAppStore } from '../../stores/appStore';
 
 export function PaperListPanel() {
+  const navigate = useNavigate();
   const {
     activeFolderId,
     folders,
@@ -19,7 +21,6 @@ export function PaperListPanel() {
     rightPanelCollapsed,
     selectedPaper,
     setActiveFolderId,
-    setActivePanel,
     setError,
     setFolders,
     setPapers,
@@ -61,7 +62,7 @@ export function PaperListPanel() {
 
   const handlePaperClick = (paper: typeof papers[number]) => {
     setSelectedPaper(paper);
-    setActivePanel('deepread');
+    navigate('/deepread');
   };
 
   const handleDelete = async (id: string) => {

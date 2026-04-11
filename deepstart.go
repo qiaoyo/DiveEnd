@@ -41,7 +41,17 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 	}
 
 	sessionID := uuid.NewString()
+	taskCtx, err := a.beginDeepStartTask(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer a.finishDeepStartTask(sessionID)
+
 	startedAt := time.Now()
+	abortIfCancelled := func(message string, stats *SearchRetrievalStats) error {
+		return a.abortDeepStartIfCancelled(taskCtx, sessionID, startedAt, stats, message)
+	}
+
 	a.emitDeepStartProgress(DeepStartProgressEvent{
 		SessionID:      sessionID,
 		Phase:          "searching",
@@ -52,7 +62,16 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 		OverallPercent: 3,
 	})
 
-	results, searchWarning, searchStats := a.searchDeepStartResults(prompt, a.deepStartResultLimit())
+	results, searchWarning, searchStats, searchErr := a.searchDeepStartResults(taskCtx, prompt, a.deepStartResultLimit())
+	if searchErr != nil {
+		if isDeepStartCancelledError(searchErr) {
+			return nil, abortIfCancelled("本次探索已停止，检索结果未写入历史", &searchStats)
+		}
+		return nil, searchErr
+	}
+	if err := abortIfCancelled("本次探索已停止，检索结果未写入历史", &searchStats); err != nil {
+		return nil, err
+	}
 	a.emitDeepStartProgress(DeepStartProgressEvent{
 		SessionID:                 sessionID,
 		Phase:                     "searching",
@@ -67,7 +86,7 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 
 	if len(results) > 0 {
 		enriched, enrichErr := a.enrichDeepStartResults(
-			context.Background(),
+			taskCtx,
 			sessionID,
 			startedAt,
 			prompt,
@@ -75,6 +94,9 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 			searchStats,
 		)
 		if enrichErr != nil {
+			if isDeepStartCancelledError(enrichErr) || isDeepStartCancelledError(taskCtx.Err()) {
+				return nil, abortIfCancelled("本次探索已停止，补全结果未写入历史", &searchStats)
+			}
 			if strings.TrimSpace(searchWarning) == "" {
 				searchWarning = fmt.Sprintf("机构补全阶段发生部分失败：%v", enrichErr)
 			} else {
@@ -82,6 +104,9 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 			}
 		}
 		results = enriched
+	}
+	if err := abortIfCancelled("本次探索已停止，补全结果未写入历史", &searchStats); err != nil {
+		return nil, err
 	}
 
 	summary := DeepStartSessionSummary{
@@ -105,12 +130,15 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 		Phase:                     "analyzing",
 		Message:                   "正在生成 AI 概览与分类建议",
 		ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
-		EstimatedRemainingSeconds: 2,
+		EstimatedRemainingSeconds: 0,
 		Total:                     len(results),
 		Completed:                 len(results),
 		OverallPercent:            82,
 		Stats:                     &searchStats,
 	})
+	if err := abortIfCancelled("本次探索已停止，分析结果未写入历史", &searchStats); err != nil {
+		return nil, err
+	}
 	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
 		summary,
 		[]DeepStartMessage{userMessage},
@@ -120,6 +148,9 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 		searchStats,
 	)
 	summary.Title = analysisTitle
+	if err := abortIfCancelled("本次探索已停止，分析结果未写入历史", &searchStats); err != nil {
+		return nil, err
+	}
 
 	detail := &DeepStartSessionDetail{
 		Summary:         summary,
@@ -131,12 +162,15 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 		Phase:                     "persisting",
 		Message:                   "正在保存会话并准备进入详情",
 		ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
-		EstimatedRemainingSeconds: 1,
+		EstimatedRemainingSeconds: 0,
 		Total:                     len(results),
 		Completed:                 len(results),
 		OverallPercent:            94,
 		Stats:                     &searchStats,
 	})
+	if err := abortIfCancelled("本次探索已停止，未保存本轮探索数据", &searchStats); err != nil {
+		return nil, err
+	}
 	if err := a.db.UpsertDeepStartSession(detail); err != nil {
 		return nil, err
 	}
@@ -202,9 +236,21 @@ func (a *App) ReplyDeepStartSession(sessionID, message string) (*DeepStartSessio
 		Content:   message,
 		CreatedAt: time.Now(),
 	}
-	if err := a.db.SaveDeepStartMessage(&userMessage); err != nil {
-		return nil, err
+	startedAt := time.Now()
+	total := len(detail.CurrentResults)
+	if total <= 0 {
+		total = 1
 	}
+	a.emitDeepStartProgress(DeepStartProgressEvent{
+		SessionID:                 sessionID,
+		Phase:                     "analyzing",
+		Message:                   "正在基于当前候选池生成会话内缩窄建议",
+		ElapsedSeconds:            0,
+		EstimatedRemainingSeconds: 0,
+		Total:                     total,
+		Completed:                 0,
+		OverallPercent:            35,
+	})
 
 	messages := append(append([]DeepStartMessage{}, detail.Messages...), userMessage)
 	targetFolderName, _ := a.folderNameByID(detail.Summary.TargetFolderID)
@@ -220,6 +266,23 @@ func (a *App) ReplyDeepStartSession(sessionID, message string) (*DeepStartSessio
 		"",
 		searchStats,
 	)
+	narrowedResults, retainedIDs := applyDeepStartNarrowing(detail.CurrentResults, analysis, userMessage.Content)
+	analysis.RetainedPaperIDs = retainedIDs
+
+	a.emitDeepStartProgress(DeepStartProgressEvent{
+		SessionID:                 sessionID,
+		Phase:                     "persisting",
+		Message:                   "正在保存会话内筛选结果",
+		ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
+		EstimatedRemainingSeconds: 0,
+		Total:                     len(narrowedResults),
+		Completed:                 len(narrowedResults),
+		OverallPercent:            85,
+	})
+
+	if err := a.db.SaveDeepStartMessage(&userMessage); err != nil {
+		return nil, err
+	}
 
 	assistantMessage := DeepStartMessage{
 		SessionID: sessionID,
@@ -234,9 +297,25 @@ func (a *App) ReplyDeepStartSession(sessionID, message string) (*DeepStartSessio
 	detail.Summary.Title = analysisTitle
 	detail.Summary.UpdatedAt = time.Now()
 	detail.CurrentAnalysis = analysis
+	detail.CurrentResults = narrowedResults
+	detail.SelectedPaperIDs = normalizeSelectedPaperIDs(detail.SelectedPaperIDs, detail.CurrentResults)
 	if err := a.db.UpsertDeepStartSession(detail); err != nil {
 		return nil, err
 	}
+	if err := a.db.SaveDeepStartSearchRound(sessionID, detail.Summary.CurrentQuery, detail.CurrentResults, detail.CurrentAnalysis); err != nil {
+		return nil, err
+	}
+
+	a.emitDeepStartProgress(DeepStartProgressEvent{
+		SessionID:                 sessionID,
+		Phase:                     "completed",
+		Message:                   "会话内缩窄完成",
+		ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
+		EstimatedRemainingSeconds: 0,
+		Total:                     total,
+		Completed:                 total,
+		OverallPercent:            100,
+	})
 
 	return a.db.GetDeepStartSession(sessionID)
 }
@@ -260,17 +339,23 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 		return nil, err
 	}
 
+	taskCtx, err := a.beginDeepStartTask(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer a.finishDeepStartTask(sessionID)
+
+	startedAt := time.Now()
+	abortIfCancelled := func(message string, stats *SearchRetrievalStats) error {
+		return a.abortDeepStartIfCancelled(taskCtx, sessionID, startedAt, stats, message)
+	}
+
 	userMessage := DeepStartMessage{
 		SessionID: sessionID,
 		Role:      "user",
 		Content:   "重新检索：" + query,
 		CreatedAt: time.Now(),
 	}
-	if err := a.db.SaveDeepStartMessage(&userMessage); err != nil {
-		return nil, err
-	}
-
-	startedAt := time.Now()
 	a.emitDeepStartProgress(DeepStartProgressEvent{
 		SessionID:      sessionID,
 		Phase:          "searching",
@@ -281,7 +366,16 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 		OverallPercent: 3,
 	})
 
-	results, searchWarning, searchStats := a.searchDeepStartResults(query, a.deepStartResultLimit())
+	results, searchWarning, searchStats, searchErr := a.searchDeepStartResults(taskCtx, query, a.deepStartResultLimit())
+	if searchErr != nil {
+		if isDeepStartCancelledError(searchErr) {
+			return nil, abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats)
+		}
+		return nil, searchErr
+	}
+	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
+		return nil, err
+	}
 	a.emitDeepStartProgress(DeepStartProgressEvent{
 		SessionID:                 sessionID,
 		Phase:                     "searching",
@@ -296,7 +390,7 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 
 	if len(results) > 0 {
 		enriched, enrichErr := a.enrichDeepStartResults(
-			context.Background(),
+			taskCtx,
 			sessionID,
 			startedAt,
 			query,
@@ -304,6 +398,9 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 			searchStats,
 		)
 		if enrichErr != nil {
+			if isDeepStartCancelledError(enrichErr) || isDeepStartCancelledError(taskCtx.Err()) {
+				return nil, abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats)
+			}
 			if strings.TrimSpace(searchWarning) == "" {
 				searchWarning = fmt.Sprintf("机构补全阶段发生部分失败：%v", enrichErr)
 			} else {
@@ -311,6 +408,9 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 			}
 		}
 		results = enriched
+	}
+	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
+		return nil, err
 	}
 
 	detail.Summary.CurrentQuery = query
@@ -325,12 +425,15 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 		Phase:                     "analyzing",
 		Message:                   "正在生成 AI 概览与分类建议",
 		ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
-		EstimatedRemainingSeconds: 2,
+		EstimatedRemainingSeconds: 0,
 		Total:                     len(results),
 		Completed:                 len(results),
 		OverallPercent:            82,
 		Stats:                     &searchStats,
 	})
+	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
+		return nil, err
+	}
 	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
 		detail.Summary,
 		messages,
@@ -341,12 +444,21 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 	)
 	detail.Summary.Title = analysisTitle
 	detail.CurrentAnalysis = analysis
+	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
+		return nil, err
+	}
 
 	assistantMessage := DeepStartMessage{
 		SessionID: sessionID,
 		Role:      "assistant",
 		Content:   assistantContent,
 		CreatedAt: time.Now(),
+	}
+	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
+		return nil, err
+	}
+	if err := a.db.SaveDeepStartMessage(&userMessage); err != nil {
+		return nil, err
 	}
 	if err := a.db.SaveDeepStartMessage(&assistantMessage); err != nil {
 		return nil, err
@@ -356,12 +468,15 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 		Phase:                     "persisting",
 		Message:                   "正在保存会话并准备进入详情",
 		ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
-		EstimatedRemainingSeconds: 1,
+		EstimatedRemainingSeconds: 0,
 		Total:                     len(results),
 		Completed:                 len(results),
 		OverallPercent:            94,
 		Stats:                     &searchStats,
 	})
+	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
+		return nil, err
+	}
 	if err := a.db.UpsertDeepStartSession(detail); err != nil {
 		return nil, err
 	}
@@ -420,6 +535,57 @@ func (a *App) UpdateDeepStartSelections(sessionID string, selectedPaperIDs []str
 	return a.db.GetDeepStartSession(sessionID)
 }
 
+func (a *App) UndoDeepStartNarrow(sessionID string) (*DeepStartSessionDetail, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session ID cannot be empty")
+	}
+
+	detail, err := a.db.GetDeepStartSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	rounds, err := a.db.ListDeepStartSearchRounds(sessionID, 2)
+	if err != nil {
+		return nil, err
+	}
+	if len(rounds) < 2 {
+		return nil, fmt.Errorf("没有可回退的上一轮缩窄结果")
+	}
+
+	latestRound := rounds[0]
+	previousRound := rounds[1]
+
+	detail.CurrentResults = previousRound.Results
+	detail.CurrentAnalysis = previousRound.Analysis
+	if strings.TrimSpace(previousRound.Query) != "" {
+		detail.Summary.CurrentQuery = strings.TrimSpace(previousRound.Query)
+	}
+	detail.SelectedPaperIDs = normalizeSelectedPaperIDs(detail.SelectedPaperIDs, detail.CurrentResults)
+	detail.Summary.UpdatedAt = time.Now()
+	if err := a.db.UpsertDeepStartSession(detail); err != nil {
+		return nil, err
+	}
+	if err := a.db.DeleteDeepStartSearchRound(latestRound.ID); err != nil {
+		return nil, err
+	}
+	if err := a.db.SaveDeepStartMessage(&DeepStartMessage{
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   fmt.Sprintf("已回退上一轮缩窄，当前候选池恢复到 %d 篇。", len(detail.CurrentResults)),
+		CreatedAt: time.Now(),
+	}); err != nil {
+		return nil, err
+	}
+
+	return a.db.GetDeepStartSession(sessionID)
+}
+
 func (a *App) resolveFolder(folderID string) (string, string, error) {
 	folders, err := a.db.GetFolders()
 	if err != nil {
@@ -460,13 +626,13 @@ func (a *App) folderNameByID(folderID string) (string, error) {
 	return "", fmt.Errorf("folder not found")
 }
 
-func (a *App) searchDeepStartResults(query string, limit int) ([]SearchPaper, string, SearchRetrievalStats) {
+func (a *App) searchDeepStartResults(ctx context.Context, query string, limit int) ([]SearchPaper, string, SearchRetrievalStats, error) {
 	stats := SearchRetrievalStats{Query: strings.TrimSpace(query)}
 	if a.search == nil {
-		return []SearchPaper{}, "搜索服务当前不可用。", stats
+		return []SearchPaper{}, "搜索服务当前不可用。", stats, nil
 	}
 
-	results, err := a.search.Search(query, limit)
+	results, err := a.search.SearchWithContext(ctx, query, limit)
 	stats = a.search.LastSearchStats()
 	if strings.TrimSpace(stats.Query) == "" {
 		stats.Query = strings.TrimSpace(query)
@@ -481,9 +647,12 @@ func (a *App) searchDeepStartResults(query string, limit int) ([]SearchPaper, st
 		stats.FinalCount = len(results)
 	}
 	if err != nil {
-		return []SearchPaper{}, fmt.Sprintf("本轮检索暂时失败：%v", err), stats
+		if isDeepStartCancelledError(err) {
+			return nil, "", stats, ErrDeepStartTaskCancelled
+		}
+		return []SearchPaper{}, fmt.Sprintf("本轮检索暂时失败：%v", err), stats, nil
 	}
-	return results, "", stats
+	return results, "", stats, nil
 }
 
 func (a *App) deepStartResultLimit() int {
@@ -604,7 +773,7 @@ func (a *App) generateDeepStartAnalysis(
 		analysis = buildFallbackDeepStartAnalysis(summary.RootPrompt, summary.CurrentQuery, results, aiWarning, searchWarning, searchStats)
 	}
 	analysis.SearchStats = normalizeDeepStartSearchStats(searchStats, summary.CurrentQuery, len(results))
-	if statsLine := formatDeepStartSearchStats(analysis.SearchStats); statsLine != "" {
+	if statsLine := formatDeepStartSearchStats(analysis.SearchStats, len(results)); statsLine != "" {
 		if strings.TrimSpace(analysis.Overview) == "" {
 			analysis.Overview = statsLine
 		} else {
@@ -680,6 +849,7 @@ func buildFallbackDeepStartAnalysis(
 		FollowUpQuestions:   questions,
 		SuggestedQueries:    suggestedQueries,
 		RecommendedPaperIDs: recommended,
+		RetainedPaperIDs:    recommended,
 		SearchStats:         normalizeDeepStartSearchStats(searchStats, currentQuery, len(results)),
 	}
 }
@@ -913,16 +1083,23 @@ func normalizeDeepStartSearchStats(stats SearchRetrievalStats, query string, fin
 	return stats
 }
 
-func formatDeepStartSearchStats(stats SearchRetrievalStats) string {
-	if stats.RawCount == 0 && stats.DedupCount == 0 && stats.FinalCount == 0 {
+func formatDeepStartSearchStats(stats SearchRetrievalStats, currentPool int) string {
+	if stats.RawCount == 0 && stats.DedupCount == 0 && stats.FinalCount == 0 && currentPool <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(
-		"检索统计：原始候选 %d 篇，去重后 %d 篇，本轮进入探索区 %d 篇。",
-		stats.RawCount,
-		stats.DedupCount,
-		stats.FinalCount,
-	)
+	lines := make([]string, 0, 2)
+	if stats.RawCount > 0 || stats.DedupCount > 0 || stats.FinalCount > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"首轮检索基线：原始候选 %d 篇，去重后 %d 篇，本轮进入探索区 %d 篇。",
+			stats.RawCount,
+			stats.DedupCount,
+			stats.FinalCount,
+		))
+	}
+	if currentPool > 0 {
+		lines = append(lines, fmt.Sprintf("当前候选池：%d 篇。", currentPool))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func firstNonEmpty(values ...string) string {
@@ -946,4 +1123,195 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func applyDeepStartNarrowing(results []SearchPaper, analysis *DeepStartAnalysis, userMessage string) ([]SearchPaper, []string) {
+	if len(results) == 0 {
+		return results, []string{}
+	}
+
+	validPaperIDs := make(map[string]struct{}, len(results))
+	allPaperIDs := make([]string, 0, len(results))
+	for _, paper := range results {
+		paperID := strings.TrimSpace(paper.ID)
+		if paperID == "" {
+			continue
+		}
+		validPaperIDs[paperID] = struct{}{}
+		allPaperIDs = append(allPaperIDs, paperID)
+	}
+	if len(allPaperIDs) == 0 {
+		return results, []string{}
+	}
+
+	candidateIDs := []string{}
+	if analysis != nil {
+		candidateIDs = filterExistingPaperIDs(analysis.RetainedPaperIDs, validPaperIDs)
+		if len(candidateIDs) == 0 {
+			candidateIDs = filterExistingPaperIDs(analysis.RecommendedPaperIDs, validPaperIDs)
+		}
+	}
+
+	targetCount := defaultDeepStartNarrowTarget(len(allPaperIDs))
+	messageMatchedIDs := matchPaperIDsByMessage(results, userMessage, targetCount)
+	if len(messageMatchedIDs) > 0 && len(messageMatchedIDs) < len(allPaperIDs) {
+		candidateIDs = messageMatchedIDs
+	}
+
+	if len(candidateIDs) == 0 {
+		candidateIDs = allPaperIDs
+	}
+	candidateIDs = filterExistingPaperIDs(candidateIDs, validPaperIDs)
+	if len(candidateIDs) == 0 {
+		candidateIDs = allPaperIDs
+	}
+	if len(allPaperIDs) > 1 && len(candidateIDs) >= len(allPaperIDs) {
+		limit := defaultDeepStartNarrowTarget(len(allPaperIDs))
+		if limit > 0 && limit < len(allPaperIDs) {
+			candidateIDs = append([]string{}, allPaperIDs[:limit]...)
+		}
+	}
+
+	retainedSet := make(map[string]struct{}, len(candidateIDs))
+	for _, paperID := range candidateIDs {
+		retainedSet[paperID] = struct{}{}
+	}
+
+	narrowed := make([]SearchPaper, 0, len(candidateIDs))
+	for _, paper := range results {
+		if _, keep := retainedSet[paper.ID]; keep {
+			narrowed = append(narrowed, paper)
+		}
+	}
+	if len(narrowed) == 0 {
+		narrowed = append(narrowed, results...)
+	}
+
+	retainedIDs := make([]string, 0, len(narrowed))
+	for _, paper := range narrowed {
+		if strings.TrimSpace(paper.ID) != "" {
+			retainedIDs = append(retainedIDs, paper.ID)
+		}
+	}
+	return narrowed, retainedIDs
+}
+
+func defaultDeepStartNarrowTarget(total int) int {
+	if total <= 8 {
+		return total
+	}
+	target := total / 2
+	switch {
+	case total <= 20:
+		target = (total * 3) / 4
+	case total <= 60:
+		target = (total * 2) / 3
+	default:
+		target = total / 2
+	}
+	if target < 6 {
+		target = 6
+	}
+	if target >= total {
+		target = total - 1
+	}
+	if target <= 0 {
+		target = total
+	}
+	return target
+}
+
+func matchPaperIDsByMessage(results []SearchPaper, message string, targetCount int) []string {
+	tokens := extractDeepStartMessageTokens(message)
+	if len(tokens) == 0 {
+		return []string{}
+	}
+
+	type scoredPaper struct {
+		id    string
+		score int
+	}
+	scored := make([]scoredPaper, 0, len(results))
+	for _, paper := range results {
+		score := deepStartPaperMatchScore(paper, tokens)
+		if score <= 0 {
+			continue
+		}
+		scored = append(scored, scoredPaper{id: paper.ID, score: score})
+	}
+	if len(scored) == 0 {
+		return []string{}
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].id < scored[j].id
+		}
+		return scored[i].score > scored[j].score
+	})
+
+	limit := len(scored)
+	if targetCount > 0 && targetCount < limit {
+		limit = targetCount
+	}
+	ids := make([]string, 0, limit)
+	for _, item := range scored[:limit] {
+		if strings.TrimSpace(item.id) != "" {
+			ids = append(ids, item.id)
+		}
+	}
+	return ids
+}
+
+func extractDeepStartMessageTokens(message string) []string {
+	normalized := normalizeSearchDelimiters(strings.ToLower(strings.TrimSpace(message)))
+	parts := strings.Fields(normalized)
+	tokens := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, stop := searchEnglishStopWords[part]; stop {
+			continue
+		}
+		if len([]rune(part)) < 2 {
+			continue
+		}
+		tokens = append(tokens, part)
+	}
+	return compactStrings(tokens, 16)
+}
+
+func deepStartPaperMatchScore(paper SearchPaper, tokens []string) int {
+	if len(tokens) == 0 {
+		return 0
+	}
+
+	title := strings.ToLower(strings.TrimSpace(paper.Title))
+	abstract := strings.ToLower(strings.TrimSpace(paper.Abstract))
+	haystack := strings.ToLower(strings.Join([]string{
+		paper.Title,
+		paper.Abstract,
+		paper.Authors,
+		paper.Journal,
+		paper.Category,
+		strings.Join(paper.Tags, " "),
+		strings.Join(paper.Keywords, " "),
+		strings.Join(paper.Institutions, " "),
+	}, " "))
+
+	score := 0
+	for _, token := range tokens {
+		if strings.Contains(haystack, token) {
+			score += maxInt(len([]rune(token)), 2)
+		}
+		if strings.Contains(title, token) {
+			score += 4
+		}
+		if strings.Contains(abstract, token) {
+			score += 2
+		}
+	}
+	return score
 }

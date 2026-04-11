@@ -11,6 +11,7 @@ import { Screening as ScreeningPanel } from '../../pages/Screening';
 import { Sync as SyncPanel } from '../../pages/Sync';
 import { PaperListPanel } from '../paperlist/PaperListPanel';
 import { SettingsPanel } from '../settings/SettingsPanel';
+import { GlobalNav } from './GlobalNav';
 
 export function AppLayout() {
   const location = useLocation();
@@ -41,6 +42,7 @@ export function AppLayout() {
   if (activePanel === 'main') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+        <GlobalNav />
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -63,6 +65,7 @@ export function AppLayout() {
   if (activePanel === 'history') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+        <GlobalNav />
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -85,6 +88,7 @@ export function AppLayout() {
   if (activePanel === 'session') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+        <GlobalNav />
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -107,6 +111,7 @@ export function AppLayout() {
   if (activePanel === 'deepstart') {
     return (
       <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+        <GlobalNav />
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
             {error}
@@ -128,6 +133,7 @@ export function AppLayout() {
   // For other panels, show with sidebars
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <GlobalNav />
       <div className="flex h-full min-h-0 flex-col">
         {error && (
           <div className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100">
