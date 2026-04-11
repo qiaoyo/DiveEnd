@@ -266,3 +266,39 @@ func TestDeepStartSessionPersistence(t *testing.T) {
 		t.Fatalf("expected one search round, got %d", roundCount)
 	}
 }
+
+func TestDeepStartEnrichmentCacheRoundTrip(t *testing.T) {
+	db, err := NewDB(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDB() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	entry := &DeepStartEnrichmentCache{
+		CacheKey:          "test-key|2025",
+		Institutions:      []string{"CMU", "OpenAI"},
+		Keywords:          []string{"embodied", "agent"},
+		SourceLabel:       "arXiv",
+		OpenAlexAttempted: true,
+		CrossrefAttempted: true,
+		ErrorMessage:      "",
+		UpdatedAt:         time.Now(),
+	}
+	if err := db.UpsertDeepStartEnrichmentCache(entry); err != nil {
+		t.Fatalf("UpsertDeepStartEnrichmentCache() error = %v", err)
+	}
+
+	loaded, err := db.GetDeepStartEnrichmentCache(entry.CacheKey)
+	if err != nil {
+		t.Fatalf("GetDeepStartEnrichmentCache() error = %v", err)
+	}
+	if len(loaded.Institutions) != 2 {
+		t.Fatalf("expected two institutions, got %+v", loaded.Institutions)
+	}
+	if !loaded.OpenAlexAttempted || !loaded.CrossrefAttempted {
+		t.Fatalf("expected provider attempt flags to persist, got %+v", loaded)
+	}
+	if loaded.SourceLabel != "arXiv" {
+		t.Fatalf("expected source label to round-trip, got %q", loaded.SourceLabel)
+	}
+}

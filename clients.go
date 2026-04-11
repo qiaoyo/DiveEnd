@@ -26,6 +26,7 @@ type llmService interface {
 type paperSearchService interface {
 	Search(query string, limit int) ([]SearchPaper, error)
 	EnhancedSearch(query string, limit int, offset int, yearStart int, yearEnd int, sortBy string) (*EnhancedSearchResult, error)
+	LastSearchStats() SearchRetrievalStats
 }
 
 type LLMClient struct {
@@ -797,6 +798,8 @@ type SearchClient struct {
 	httpClient            *http.Client
 	progressMu            sync.RWMutex
 	progressReporter      func(SearchProgressEvent)
+	statsMu               sync.RWMutex
+	lastSearchStats       SearchRetrievalStats
 }
 
 const (
@@ -882,6 +885,12 @@ func (s *SearchClient) SetProgressReporter(reporter func(SearchProgressEvent)) {
 	s.progressMu.Unlock()
 }
 
+func (s *SearchClient) LastSearchStats() SearchRetrievalStats {
+	s.statsMu.RLock()
+	defer s.statsMu.RUnlock()
+	return s.lastSearchStats
+}
+
 func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -893,6 +902,7 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	if limit > 200 {
 		limit = 200 // 最大限制200条
 	}
+	s.updateLastSearchStats(SearchRetrievalStats{Query: query})
 	if !s.enableSemanticScholar && !s.enableArxiv {
 		return nil, fmt.Errorf("no search source enabled; please enable Semantic Scholar and/or arXiv in config/app.yaml")
 	}
@@ -900,10 +910,10 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	var combined []SearchPaper
 	var errs []string
 
-	// 扩大检索窗口：每个源至少拉取配置中的条目，便于后续筛选。
-	searchLimit := limit
-	if searchLimit < s.perSourceResultLimit {
-		searchLimit = s.perSourceResultLimit
+	// 每源抓取上限与会话总上限解耦：DeepStart 可以总量 200，但单源默认抓取 100。
+	searchLimit := s.perSourceResultLimit
+	if searchLimit <= 0 {
+		searchLimit = 100
 	}
 
 	startedAt := time.Now()
@@ -1037,15 +1047,18 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	}
 	log.Printf("[Search] summary: %s", strings.Join(summaryParts, " | "))
 
-	// 去重（按标题）
+	// 去重（标题+年份为主，URL/ID 兜底）
+	rawCount := len(combined)
 	paperMap := make(map[string]SearchPaper)
+	fallbackCounter := 0
 	for _, paper := range combined {
-		key := strings.ToLower(strings.TrimSpace(paper.Title))
+		key := dedupeSearchPaperKey(paper)
 		if key == "" {
-			continue
+			fallbackCounter++
+			key = fmt.Sprintf("fallback-%d", fallbackCounter)
 		}
-		// 保留有URL的版本，或者更新的版本
-		if existing, ok := paperMap[key]; !ok || (strings.TrimSpace(existing.URL) == "" && strings.TrimSpace(paper.URL) != "") {
+		// 保留信息更完整的版本
+		if existing, ok := paperMap[key]; !ok || isSearchPaperPreferred(paper, existing) {
 			paperMap[key] = paper
 		}
 	}
@@ -1057,6 +1070,12 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 
 	// 只有在完全没有结果时才返回错误
 	if len(papers) == 0 && len(errs) > 0 {
+		s.updateLastSearchStats(SearchRetrievalStats{
+			Query:      query,
+			RawCount:   rawCount,
+			DedupCount: len(paperMap),
+			FinalCount: 0,
+		})
 		return nil, fmt.Errorf("all sources failed: %s", strings.Join(errs, "; "))
 	}
 
@@ -1075,7 +1094,20 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 		papers = papers[:limit]
 	}
 
+	s.updateLastSearchStats(SearchRetrievalStats{
+		Query:      query,
+		RawCount:   rawCount,
+		DedupCount: len(paperMap),
+		FinalCount: len(papers),
+	})
+
 	return papers, nil
+}
+
+func (s *SearchClient) updateLastSearchStats(stats SearchRetrievalStats) {
+	s.statsMu.Lock()
+	s.lastSearchStats = stats
+	s.statsMu.Unlock()
 }
 
 func (s *SearchClient) retrySourceSearch(
@@ -1165,16 +1197,17 @@ func (s *SearchClient) searchArxivSanityLite(query string, limit int) ([]SearchP
 		arxivURL := fmt.Sprintf("https://arxiv.org/abs/%s", strings.TrimSpace(item.ID))
 
 		papers = append(papers, SearchPaper{
-			ID:       item.ID,
-			Title:    strings.TrimSpace(item.Title),
-			Authors:  authors,
-			Abstract: strings.TrimSpace(item.Abstract),
-			Year:     item.Year,
-			Journal:  "arXiv",
-			URL:      arxivURL,
-			Category: item.Category,
-			Tags:     item.Tags,
-			Source:   "arxiv_sanity",
+			ID:          item.ID,
+			Title:       strings.TrimSpace(item.Title),
+			Authors:     authors,
+			Abstract:    strings.TrimSpace(item.Abstract),
+			Year:        item.Year,
+			Journal:     "arXiv",
+			URL:         arxivURL,
+			Category:    item.Category,
+			Tags:        item.Tags,
+			Source:      "arxiv_sanity",
+			SourceLabel: "arXiv Sanity Lite",
 		})
 	}
 
@@ -1189,99 +1222,124 @@ func (s *SearchClient) searchSemanticScholar(
 	candidates := buildSearchQueryCandidates(query)
 	return s.retrySourceSearch(searchSourceSemantic, func(attempt int) ([]SearchPaper, error) {
 		variant := searchQueryVariant(candidates, attempt)
-		apiURL := fmt.Sprintf(
-			"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf",
-			url.QueryEscape(variant),
-			limit,
-		)
+		papers := make([]SearchPaper, 0, limit)
+		remaining := limit
+		offset := 0
 
-		ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
-		defer cancel()
+		for remaining > 0 {
+			pageSize := minInt(100, remaining)
+			apiURL := fmt.Sprintf(
+				"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&offset=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf",
+				url.QueryEscape(variant),
+				pageSize,
+				offset,
+			)
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-		if err != nil {
-			return nil, err
-		}
-		if s.semanticScholarAPIKey != "" {
-			req.Header.Set("x-api-key", s.semanticScholarAPIKey)
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-
-		if resp.StatusCode >= 400 {
-			if resp.StatusCode == http.StatusTooManyRequests {
-				return nil, fmt.Errorf("rate limited (429)")
+			ctx, cancel := context.WithTimeout(context.Background(), s.attemptTimeout)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+			if err != nil {
+				cancel()
+				return nil, err
 			}
-			return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
+			if s.semanticScholarAPIKey != "" {
+				req.Header.Set("x-api-key", s.semanticScholarAPIKey)
+			}
+			req.Header.Set("Accept", "application/json")
+
+			resp, err := s.httpClient.Do(req)
+			if err != nil {
+				cancel()
+				return nil, err
+			}
+			body, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			cancel()
+			if readErr != nil {
+				return nil, readErr
+			}
+
+			if resp.StatusCode >= 400 {
+				if resp.StatusCode == http.StatusTooManyRequests {
+					return nil, fmt.Errorf("rate limited (429)")
+				}
+				return nil, fmt.Errorf("request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			}
+
+			var result struct {
+				Data []struct {
+					PaperID string `json:"paperId"`
+					Title   string `json:"title"`
+					Authors []struct {
+						Name string `json:"name"`
+					} `json:"authors"`
+					Abstract string `json:"abstract"`
+					Year     int    `json:"year"`
+					Venue    string `json:"venue"`
+					Journal  *struct {
+						Name string `json:"name"`
+					} `json:"journal"`
+					OpenAccessPDF *struct {
+						URL string `json:"url"`
+					} `json:"openAccessPdf"`
+				} `json:"data"`
+			}
+
+			if err := json.Unmarshal(body, &result); err != nil {
+				return nil, err
+			}
+			if len(result.Data) == 0 {
+				break
+			}
+
+			for _, item := range result.Data {
+				authors := make([]string, 0, len(item.Authors))
+				for _, author := range item.Authors {
+					if strings.TrimSpace(author.Name) != "" {
+						authors = append(authors, author.Name)
+					}
+				}
+
+				journal := strings.TrimSpace(item.Venue)
+				if journal == "" && item.Journal != nil {
+					journal = strings.TrimSpace(item.Journal.Name)
+				}
+
+				urlValue := ""
+				if item.OpenAccessPDF != nil {
+					urlValue = strings.TrimSpace(item.OpenAccessPDF.URL)
+				}
+
+				papers = append(papers, SearchPaper{
+					ID:          item.PaperID,
+					Title:       item.Title,
+					Authors:     strings.Join(authors, ", "),
+					Abstract:    item.Abstract,
+					Year:        item.Year,
+					Journal:     journal,
+					URL:         urlValue,
+					Tags:        []string{},
+					Source:      "semantic_scholar",
+					SourceLabel: "Semantic Scholar",
+				})
+			}
+
+			if len(result.Data) < pageSize {
+				break
+			}
+			remaining = limit - len(papers)
+			offset += len(result.Data)
+
+			if remaining > 0 {
+				time.Sleep(s.retryInterval)
+			}
 		}
 
-		var result struct {
-			Data []struct {
-				PaperID string `json:"paperId"`
-				Title   string `json:"title"`
-				Authors []struct {
-					Name string `json:"name"`
-				} `json:"authors"`
-				Abstract string `json:"abstract"`
-				Year     int    `json:"year"`
-				Venue    string `json:"venue"`
-				Journal  *struct {
-					Name string `json:"name"`
-				} `json:"journal"`
-				OpenAccessPDF *struct {
-					URL string `json:"url"`
-				} `json:"openAccessPdf"`
-			} `json:"data"`
-		}
-
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, err
-		}
-		if len(result.Data) == 0 {
+		if len(papers) == 0 {
 			return nil, fmt.Errorf("empty results for query variant %q", variant)
 		}
-
-		papers := make([]SearchPaper, 0, len(result.Data))
-		for _, item := range result.Data {
-			authors := make([]string, 0, len(item.Authors))
-			for _, author := range item.Authors {
-				if strings.TrimSpace(author.Name) != "" {
-					authors = append(authors, author.Name)
-				}
-			}
-
-			journal := strings.TrimSpace(item.Venue)
-			if journal == "" && item.Journal != nil {
-				journal = strings.TrimSpace(item.Journal.Name)
-			}
-
-			urlValue := ""
-			if item.OpenAccessPDF != nil {
-				urlValue = strings.TrimSpace(item.OpenAccessPDF.URL)
-			}
-
-			papers = append(papers, SearchPaper{
-				ID:       item.PaperID,
-				Title:    item.Title,
-				Authors:  strings.Join(authors, ", "),
-				Abstract: item.Abstract,
-				Year:     item.Year,
-				Journal:  journal,
-				URL:      urlValue,
-				Tags:     []string{},
-				Source:   "semantic_scholar",
-			})
+		if len(papers) > limit {
+			papers = papers[:limit]
 		}
-
 		return papers, nil
 	}, onAttempt)
 }
@@ -1432,19 +1490,74 @@ func parseArXivXML(data []byte) ([]SearchPaper, error) {
 		}
 
 		papers = append(papers, SearchPaper{
-			ID:       shortID,
-			Title:    title,
-			Authors:  strings.Join(entry.Authors, ", "),
-			Abstract: strings.Join(strings.Fields(entry.Summary), " "),
-			Year:     year,
-			Journal:  "arXiv",
-			URL:      id,
-			Tags:     []string{},
-			Source:   "arxiv",
+			ID:          shortID,
+			Title:       title,
+			Authors:     strings.Join(entry.Authors, ", "),
+			Abstract:    strings.Join(strings.Fields(entry.Summary), " "),
+			Year:        year,
+			Journal:     "arXiv",
+			URL:         id,
+			Tags:        []string{},
+			Source:      "arxiv",
+			SourceLabel: "arXiv",
 		})
 	}
 
 	return papers, nil
+}
+
+func dedupeSearchPaperKey(paper SearchPaper) string {
+	title := normalizedDedupeToken(paper.Title)
+	if title == "" {
+		if urlKey := normalizedDedupeToken(paper.URL); urlKey != "" {
+			return "url|" + urlKey
+		}
+		if idKey := normalizedDedupeToken(paper.ID); idKey != "" {
+			return "id|" + idKey
+		}
+		return ""
+	}
+
+	year := "unknown"
+	if paper.Year > 0 {
+		year = fmt.Sprintf("%d", paper.Year)
+	}
+
+	return "title_year|" + title + "|" + year
+}
+
+func normalizedDedupeToken(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func isSearchPaperPreferred(candidate SearchPaper, existing SearchPaper) bool {
+	return searchPaperQualityScore(candidate) > searchPaperQualityScore(existing)
+}
+
+func searchPaperQualityScore(paper SearchPaper) int {
+	score := 0
+	if strings.TrimSpace(paper.URL) != "" {
+		score += 20
+	}
+	if strings.TrimSpace(paper.Abstract) != "" {
+		score += 10
+	}
+	if strings.TrimSpace(paper.Authors) != "" {
+		score += 6
+	}
+	if strings.TrimSpace(paper.Journal) != "" {
+		score += 4
+	}
+	if strings.TrimSpace(paper.ID) != "" {
+		score += 3
+	}
+	score += len(strings.TrimSpace(paper.Abstract)) / 80
+	score += len(paper.Tags)
+	return score
 }
 
 func extractJSONObject(raw string) string {

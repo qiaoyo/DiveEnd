@@ -25,8 +25,10 @@ export namespace main {
 	    enableArxiv: boolean;
 	    semanticScholarKeyPath: string;
 	    perSourceResultLimit: number;
+	    deepStartResultLimit: number;
 	    retryDurationSeconds: number;
 	    retryIntervalSeconds: number;
+	    requestTimeoutSeconds: number;
 	    semanticScholarApiKey?: string;
 	    hasSemanticScholarApiKey: boolean;
 	    clearSemanticScholarApiKey?: boolean;
@@ -41,8 +43,10 @@ export namespace main {
 	        this.enableArxiv = source["enableArxiv"];
 	        this.semanticScholarKeyPath = source["semanticScholarKeyPath"];
 	        this.perSourceResultLimit = source["perSourceResultLimit"];
+	        this.deepStartResultLimit = source["deepStartResultLimit"];
 	        this.retryDurationSeconds = source["retryDurationSeconds"];
 	        this.retryIntervalSeconds = source["retryIntervalSeconds"];
+	        this.requestTimeoutSeconds = source["requestTimeoutSeconds"];
 	        this.semanticScholarApiKey = source["semanticScholarApiKey"];
 	        this.hasSemanticScholarApiKey = source["hasSemanticScholarApiKey"];
 	        this.clearSemanticScholarApiKey = source["clearSemanticScholarApiKey"];
@@ -161,6 +165,24 @@ export namespace main {
 	        this.hasBaiduToken = source["hasBaiduToken"];
 	    }
 	}
+	export class SearchRetrievalStats {
+	    query: string;
+	    rawCount: number;
+	    dedupCount: number;
+	    finalCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchRetrievalStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.query = source["query"];
+	        this.rawCount = source["rawCount"];
+	        this.dedupCount = source["dedupCount"];
+	        this.finalCount = source["finalCount"];
+	    }
+	}
 	export class DeepStartPaperNote {
 	    paperId: string;
 	    tier: string;
@@ -206,6 +228,7 @@ export namespace main {
 	    followUpQuestions: string[];
 	    suggestedQueries: string[];
 	    recommendedPaperIds: string[];
+	    searchStats: SearchRetrievalStats;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeepStartAnalysis(source);
@@ -219,6 +242,7 @@ export namespace main {
 	        this.followUpQuestions = source["followUpQuestions"];
 	        this.suggestedQueries = source["suggestedQueries"];
 	        this.recommendedPaperIds = source["recommendedPaperIds"];
+	        this.searchStats = this.convertValues(source["searchStats"], SearchRetrievalStats);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -291,6 +315,10 @@ export namespace main {
 	    category: string;
 	    tags: string[];
 	    source: string;
+	    institutions: string[];
+	    keywords: string[];
+	    sourceLabel: string;
+	    enrichmentNote?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SearchPaper(source);
@@ -308,6 +336,10 @@ export namespace main {
 	        this.category = source["category"];
 	        this.tags = source["tags"];
 	        this.source = source["source"];
+	        this.institutions = source["institutions"];
+	        this.keywords = source["keywords"];
+	        this.sourceLabel = source["sourceLabel"];
+	        this.enrichmentNote = source["enrichmentNote"];
 	    }
 	}
 	export class DeepStartSessionSummary {
@@ -869,6 +901,7 @@ export namespace main {
 		    return a;
 		}
 	}
+	
 	
 	
 	

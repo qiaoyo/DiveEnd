@@ -13,15 +13,16 @@ import (
 
 // App struct - Main Wails application
 type App struct {
-	ctx             context.Context
-	config          AppConfig
-	db              *DB
-	llm             llmService
-	search          paperSearchService
-	pdfService      *PDFServiceClient
-	syncManager     *SyncManager
-	stateMu         sync.RWMutex
-	extractProgress map[string]*ExtractProgress
+	ctx               context.Context
+	config            AppConfig
+	db                *DB
+	llm               llmService
+	search            paperSearchService
+	deepStartEnricher deepStartEnricher
+	pdfService        *PDFServiceClient
+	syncManager       *SyncManager
+	stateMu           sync.RWMutex
+	extractProgress   map[string]*ExtractProgress
 }
 
 // NewApp creates a new App application struct
@@ -319,9 +320,11 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	})
 	a.search = searchClient
 	a.pdfService = NewPDFServiceClient(defaultPDFServiceURL())
+	a.deepStartEnricher = NewDeepStartEnricher(a.db)
 
 	if !reloadDB {
 		if a.db != nil {
+			a.deepStartEnricher = NewDeepStartEnricher(a.db)
 			a.syncManager = NewSyncManager(a.db, a.config)
 		}
 		return nil
@@ -337,6 +340,7 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 		return err
 	}
 	a.db = db
+	a.deepStartEnricher = NewDeepStartEnricher(a.db)
 	a.syncManager = NewSyncManager(a.db, a.config)
 	return nil
 }

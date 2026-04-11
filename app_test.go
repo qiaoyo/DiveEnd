@@ -51,15 +51,25 @@ func (f fakeLLM) AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisio
 }
 
 type fakeSearch struct {
-	calls   []string
-	results map[string][]SearchPaper
+	calls     []string
+	limits    []int
+	results   map[string][]SearchPaper
+	lastStats SearchRetrievalStats
 }
 
 func (f *fakeSearch) Search(query string, limit int) ([]SearchPaper, error) {
 	f.calls = append(f.calls, query)
+	f.limits = append(f.limits, limit)
 	if results, ok := f.results[query]; ok {
+		f.lastStats = SearchRetrievalStats{
+			Query:      query,
+			RawCount:   len(results),
+			DedupCount: len(results),
+			FinalCount: len(results),
+		}
 		return results, nil
 	}
+	f.lastStats = SearchRetrievalStats{Query: query}
 	return nil, fmt.Errorf("query not found: %s", query)
 }
 
@@ -79,6 +89,10 @@ func (f *fakeSearch) EnhancedSearch(query string, limit int, offset int, yearSta
 		}, nil
 	}
 	return nil, fmt.Errorf("query not found: %s", query)
+}
+
+func (f *fakeSearch) LastSearchStats() SearchRetrievalStats {
+	return f.lastStats
 }
 
 type panicDeepStartLLM struct{}
@@ -341,6 +355,45 @@ func TestAppDeepStartSessionFlow(t *testing.T) {
 	}
 	if len(initialState.ActiveDeepStartSession.SelectedPaperIDs) != 1 {
 		t.Fatalf("expected selected paper IDs to hydrate, got %+v", initialState.ActiveDeepStartSession.SelectedPaperIDs)
+	}
+}
+
+func TestAppDeepStartUsesConfiguredResultLimitAndPersistsSearchStats(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	config.Search.DeepStartResultLimit = 200
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	search := &fakeSearch{
+		results: map[string][]SearchPaper{
+			"embodied intelligence": {
+				{ID: "paper-1", Title: "Embodied Survey", Year: 2025, Source: "arxiv"},
+				{ID: "paper-2", Title: "Embodied Benchmark", Year: 2024, Source: "semantic_scholar"},
+			},
+		},
+	}
+	app.search = search
+	app.llm = nil
+
+	session, err := app.StartDeepStartSession("embodied intelligence", "")
+	if err != nil {
+		t.Fatalf("StartDeepStartSession() error = %v", err)
+	}
+	if len(search.limits) != 1 {
+		t.Fatalf("expected one search call, got %d", len(search.limits))
+	}
+	if search.limits[0] != 200 {
+		t.Fatalf("expected deepstart search limit=200, got %d", search.limits[0])
+	}
+	if session.CurrentAnalysis == nil {
+		t.Fatal("expected current analysis to exist")
+	}
+	if session.CurrentAnalysis.SearchStats.FinalCount != 2 {
+		t.Fatalf("expected search stats final count=2, got %+v", session.CurrentAnalysis.SearchStats)
 	}
 }
 

@@ -2,6 +2,7 @@ import type {
   AppConfig,
   ConfigSecretPrefill,
   DeepStartAnalysis,
+  DeepStartProgressEvent,
   DeepStartSessionDetail,
   DeepStartSessionSummary,
   EnhancedSearchResult,
@@ -123,6 +124,25 @@ function normalizeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeSearchPaper(paper: Partial<SearchPaper> | null | undefined): SearchPaper {
+  return {
+    id: paper?.id ?? '',
+    title: paper?.title ?? '',
+    authors: paper?.authors ?? '',
+    abstract: paper?.abstract ?? '',
+    year: paper?.year ?? 0,
+    journal: paper?.journal ?? '',
+    url: paper?.url ?? '',
+    category: paper?.category ?? '',
+    tags: normalizeArray(paper?.tags),
+    source: paper?.source ?? '',
+    institutions: normalizeArray(paper?.institutions),
+    keywords: normalizeArray(paper?.keywords),
+    sourceLabel: paper?.sourceLabel ?? '',
+    enrichmentNote: paper?.enrichmentNote ?? '',
+  };
+}
+
 function normalizeAnalysis(analysis: DeepStartAnalysis | null | undefined): DeepStartAnalysis | null {
   if (!analysis) {
     return null;
@@ -135,6 +155,12 @@ function normalizeAnalysis(analysis: DeepStartAnalysis | null | undefined): Deep
     followUpQuestions: normalizeArray(analysis.followUpQuestions),
     suggestedQueries: normalizeArray(analysis.suggestedQueries),
     recommendedPaperIds: normalizeArray(analysis.recommendedPaperIds),
+    searchStats: {
+      query: analysis.searchStats?.query ?? '',
+      rawCount: analysis.searchStats?.rawCount ?? 0,
+      dedupCount: analysis.searchStats?.dedupCount ?? 0,
+      finalCount: analysis.searchStats?.finalCount ?? 0,
+    },
   };
 }
 
@@ -148,7 +174,7 @@ function normalizeSessionDetail(
   return {
     ...detail,
     messages: normalizeArray(detail.messages),
-    currentResults: normalizeArray(detail.currentResults),
+    currentResults: normalizeArray(detail.currentResults).map((paper) => normalizeSearchPaper(paper)),
     currentAnalysis: normalizeAnalysis(detail.currentAnalysis),
     selectedPaperIds: normalizeArray(detail.selectedPaperIds),
   };
@@ -342,6 +368,10 @@ const sampleSearchResults: SearchPaper[] = [
     category: 'code agent',
     tags: ['agent', 'software engineering'],
     source: 'mock',
+    institutions: ['OpenAI'],
+    keywords: ['agent', 'software engineering', 'tool use'],
+    sourceLabel: 'Mock Source',
+    enrichmentNote: '',
   },
   {
     id: '2402.20002',
@@ -355,6 +385,10 @@ const sampleSearchResults: SearchPaper[] = [
     category: 'paper reading',
     tags: ['survey', 'reading assistant'],
     source: 'mock',
+    institutions: ['CMU'],
+    keywords: ['survey', 'reading assistant'],
+    sourceLabel: 'Mock Source',
+    enrichmentNote: '',
   },
 ];
 
@@ -552,7 +586,7 @@ export async function saveConfig(config: AppConfig): Promise<SaveConfigResult> {
 export async function searchPapers(query: string, limit: number): Promise<SearchPaper[]> {
   const app = runtimeApp();
   if (app?.SearchPapers) {
-    return normalizeArray(await app.SearchPapers(query, limit));
+    return normalizeArray(await app.SearchPapers(query, limit)).map((paper) => normalizeSearchPaper(paper));
   }
 
   const normalized = query.trim().toLowerCase();
@@ -582,7 +616,7 @@ export async function searchPapersEnhanced(
       offset: result.offset,
       total: result.total,
       hasMore: result.hasMore,
-      papers: normalizeArray(result.papers),
+      papers: normalizeArray(result.papers).map((paper) => normalizeSearchPaper(paper)),
       sources: result.sources,
       yearStart: result.yearStart,
       yearEnd: result.yearEnd,
@@ -656,6 +690,12 @@ function buildMockDeepStartAnalysis(query: string, results: SearchPaper[]): Deep
     ],
     suggestedQueries: [`${query} survey`, `${query} benchmark`, `${query} recent progress`],
     recommendedPaperIds,
+    searchStats: {
+      query,
+      rawCount: results.length,
+      dedupCount: results.length,
+      finalCount: results.length,
+    },
   };
 }
 
@@ -1045,6 +1085,38 @@ function normalizeSearchProgressEvent(progress: Partial<SearchProgressEvent> | n
   };
 }
 
+function normalizeDeepStartProgressEvent(
+  progress: Partial<DeepStartProgressEvent> | null | undefined,
+): DeepStartProgressEvent {
+  const total = Number(progress?.total ?? 0) || 0;
+  const completed = Math.min(total, Math.max(0, Number(progress?.completed ?? 0) || 0));
+
+  return {
+    sessionId: progress?.sessionId ?? '',
+    phase:
+      progress?.phase === 'enriching' ||
+      progress?.phase === 'analyzing' ||
+      progress?.phase === 'persisting' ||
+      progress?.phase === 'completed'
+        ? progress.phase
+        : 'searching',
+    message: progress?.message ?? '',
+    elapsedSeconds: Math.max(0, Number(progress?.elapsedSeconds ?? 0) || 0),
+    estimatedRemainingSeconds: Math.max(0, Number(progress?.estimatedRemainingSeconds ?? 0) || 0),
+    total,
+    completed,
+    overallPercent: Math.max(0, Math.min(100, Number(progress?.overallPercent ?? 0) || 0)),
+    stats: progress?.stats
+      ? {
+          query: progress.stats.query ?? '',
+          rawCount: Number(progress.stats.rawCount ?? 0) || 0,
+          dedupCount: Number(progress.stats.dedupCount ?? 0) || 0,
+          finalCount: Number(progress.stats.finalCount ?? 0) || 0,
+        }
+      : undefined,
+  };
+}
+
 export function onSearchProgress(callback: (progress: SearchProgressEvent) => void): () => void {
   if (!hasWailsRuntime()) {
     return () => undefined;
@@ -1057,6 +1129,21 @@ export function onSearchProgress(callback: (progress: SearchProgressEvent) => vo
   return () => {
     unsubscribe?.();
     EventsOff('search-progress');
+  };
+}
+
+export function onDeepStartProgress(callback: (progress: DeepStartProgressEvent) => void): () => void {
+  if (!hasWailsRuntime()) {
+    return () => undefined;
+  }
+
+  const unsubscribe = EventsOn('deepstart-progress', (progress: DeepStartProgressEvent) => {
+    callback(normalizeDeepStartProgressEvent(progress));
+  });
+
+  return () => {
+    unsubscribe?.();
+    EventsOff('deepstart-progress');
   };
 }
 

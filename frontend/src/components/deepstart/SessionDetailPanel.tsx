@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
-  Bot,
   CheckCheck,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
   FolderPlus,
   Loader2,
   Plus,
   RefreshCw,
   Sparkles,
+  X,
 } from 'lucide-react';
 import {
   createFolder,
@@ -19,7 +22,7 @@ import {
   updateDeepStartSelections,
 } from '../../lib/backend';
 import { useAppStore } from '../../stores/appStore';
-import type { DeepStartDirection, SearchPaper } from '../../types';
+import type { DeepStartDirection, DeepStartPaperNote, SearchPaper } from '../../types';
 
 type BusyAction = 'replying' | 'rerunning' | 'selecting' | 'importing' | null;
 
@@ -32,6 +35,89 @@ function tierStyle(tier: string) {
     default:
       return 'bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-200';
   }
+}
+
+function sourceLabel(paper: SearchPaper): string {
+  return paper.sourceLabel || paper.journal || '未知来源';
+}
+
+function institutionLabel(paper: SearchPaper): string {
+  if (paper.institutions.length === 0) {
+    return '机构未提供';
+  }
+  return paper.institutions.slice(0, 3).join(' · ');
+}
+
+function paperKeywords(paper: SearchPaper): string[] {
+  const values = [...paper.keywords, ...paper.tags].map((item) => item.trim()).filter(Boolean);
+  return [...new Set(values)].slice(0, 6);
+}
+
+function splitAuthors(authors: string): string[] {
+  return authors
+    .split(/[,;，；]\s*/)
+    .map((author) => author.trim())
+    .filter(Boolean);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightTokens(query: string, note: DeepStartPaperNote | undefined, paper: SearchPaper | null): string[] {
+  const tokens = new Set<string>();
+  for (const item of query.split(/\s+/)) {
+    const normalized = item.trim();
+    if (normalized.length >= 2) {
+      tokens.add(normalized);
+    }
+  }
+  for (const item of (note?.reason ?? '').split(/[\s,，;；。]+/)) {
+    const normalized = item.trim();
+    if (normalized.length >= 2) {
+      tokens.add(normalized);
+    }
+  }
+  for (const keyword of paper ? paperKeywords(paper) : []) {
+    if (keyword.length >= 2) {
+      tokens.add(keyword);
+    }
+  }
+  return [...tokens].slice(0, 16);
+}
+
+function renderHighlightedText(text: string, tokens: string[]): ReactNode {
+  const content = text.trim();
+  if (!content) {
+    return '暂无摘要。';
+  }
+  if (tokens.length === 0) {
+    return content;
+  }
+
+  const escaped = tokens.map((token) => escapeRegExp(token)).join('|');
+  if (!escaped) {
+    return content;
+  }
+  const pattern = new RegExp(`(${escaped})`, 'ig');
+  const chunks = content.split(pattern);
+  if (chunks.length === 1) {
+    return content;
+  }
+
+  return chunks.map((chunk, index) => {
+    if (index % 2 === 1) {
+      return (
+        <mark
+          key={`${chunk}-${index}`}
+          className="rounded bg-amber-200/80 px-1 text-slate-900 dark:bg-amber-400/30 dark:text-amber-100"
+        >
+          {chunk}
+        </mark>
+      );
+    }
+    return <span key={`${chunk}-${index}`}>{chunk}</span>;
+  });
 }
 
 export function SessionDetailPanel() {
@@ -53,6 +139,8 @@ export function SessionDetailPanel() {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [replyInput, setReplyInput] = useState('');
   const [rerunQuery, setRerunQuery] = useState(activeDeepStartSession?.summary.currentQuery ?? '');
+  const [chatCollapsed, setChatCollapsed] = useState(false);
+  const [activePaperId, setActivePaperId] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeDeepStartSession) {
@@ -104,6 +192,27 @@ export function SessionDetailPanel() {
     () => new Set(currentAnalysis?.recommendedPaperIds ?? []),
     [currentAnalysis?.recommendedPaperIds]
   );
+  const activePaper = useMemo(
+    () => (activePaperId ? paperById.get(activePaperId) ?? null : null),
+    [activePaperId, paperById]
+  );
+  const activePaperNote = useMemo(
+    () => (activePaper ? noteByPaperId.get(activePaper.id) : undefined),
+    [activePaper, noteByPaperId]
+  );
+  const summaryHighlightTokens = useMemo(
+    () => highlightTokens(activeDeepStartSession?.summary.currentQuery ?? '', activePaperNote, activePaper),
+    [activeDeepStartSession?.summary.currentQuery, activePaper, activePaperNote]
+  );
+
+  useEffect(() => {
+    if (!activePaperId) {
+      return;
+    }
+    if (!paperById.has(activePaperId)) {
+      setActivePaperId(null);
+    }
+  }, [activePaperId, paperById]);
 
   const groupedDirections = useMemo(() => {
     const assigned = new Set<string>();
@@ -183,6 +292,7 @@ export function SessionDetailPanel() {
       const detail = await rerunDeepStartSearch(activeDeepStartSession.summary.id, nextQuery);
       persistSession(detail);
       setRerunQuery(nextQuery);
+      setActivePaperId(null);
     } catch (error) {
       setError(error instanceof Error ? error.message : '重新检索失败');
     } finally {
@@ -300,24 +410,32 @@ export function SessionDetailPanel() {
     const note = noteByPaperId.get(paper.id);
     const isSelected = selectedPaperIds.has(paper.id);
     const isRecommended = recommendedPaperIds.has(paper.id);
+    const keywords = paperKeywords(paper);
 
     return (
-      <button
+      <article
         key={paper.id}
-        type="button"
-        onClick={() => void toggleSelect(paper.id)}
-        className={`rounded-2xl border p-4 text-left transition ${
+        role="button"
+        tabIndex={0}
+        onClick={() => setActivePaperId(paper.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setActivePaperId(paper.id);
+          }
+        }}
+        className={`cursor-pointer rounded-2xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
           isSelected
             ? 'border-indigo-400 bg-indigo-50/90 dark:border-indigo-500/60 dark:bg-indigo-500/15'
             : isRecommended
-              ? 'border-violet-300 bg-violet-50/70 hover:border-violet-400 dark:border-violet-500/60 dark:bg-violet-500/15'
+              ? 'border-violet-300 bg-violet-50/80 hover:border-violet-400 dark:border-violet-500/60 dark:bg-violet-500/15'
               : 'border-slate-200 bg-white/85 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/80'
         }`}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold leading-6">{paper.title}</h3>
+              <h3 className="line-clamp-2 text-sm font-semibold leading-6">{paper.title}</h3>
               {note && (
                 <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tierStyle(note.tier)}`}>
                   {note.tier}
@@ -325,25 +443,45 @@ export function SessionDetailPanel() {
               )}
             </div>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
-              {paper.journal || '未知来源'} · {paper.year || '年份未知'}
+              {sourceLabel(paper)} · {paper.year || '年份未知'}
             </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">{institutionLabel(paper)}</p>
           </div>
-          <div
-            className={`mt-1 h-5 w-5 shrink-0 rounded-full border ${
-              isSelected ? 'border-indigo-500 bg-indigo-500' : 'border-slate-300 dark:border-slate-500'
+          <button
+            type="button"
+            disabled={busyAction !== null}
+            onClick={(event) => {
+              event.stopPropagation();
+              void toggleSelect(paper.id);
+            }}
+            className={`mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs ${
+              isSelected
+                ? 'border-indigo-500 bg-indigo-500 text-white'
+                : 'border-slate-300 text-slate-500 dark:border-slate-500 dark:text-slate-200'
             }`}
-          />
+          >
+            {isSelected ? '✓' : ''}
+          </button>
         </div>
-        <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-300">{paper.authors || '作者信息缺失'}</p>
-        {note?.reason && (
-          <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
-            {note.reason}
-          </p>
+        {keywords.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {keywords.slice(0, 4).map((keyword) => (
+              <span
+                key={`${paper.id}-${keyword}`}
+                className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-700/70 dark:text-slate-200"
+              >
+                {keyword}
+              </span>
+            ))}
+          </div>
+        )}
+        {paper.enrichmentNote && (
+          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{paper.enrichmentNote}</p>
         )}
         <p className="mt-3 line-clamp-4 text-sm leading-6 text-slate-600 dark:text-slate-200">
           {paper.abstract || '暂无摘要。'}
         </p>
-      </button>
+      </article>
     );
   };
 
@@ -365,6 +503,7 @@ export function SessionDetailPanel() {
 
   const activeTargetFolderId =
     activeDeepStartSession.summary.targetFolderId || activeFolderId || folders[0]?.id || '';
+  const searchStats = currentAnalysis?.searchStats;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -428,144 +567,282 @@ export function SessionDetailPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28 pt-6">
-        <div className="mx-auto grid max-w-7xl gap-6 xl:grid-cols-[330px_1fr]">
-          <aside className="space-y-4">
-            <section className="de-glass rounded-2xl p-4">
-              <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Overview</h3>
-              <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-200">
-                {currentAnalysis?.overview || 'AI 正在构建这轮检索的分组策略。'}
-              </p>
-            </section>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28 pt-5">
+        <div className="mx-auto max-w-7xl">
+          <section className="de-glass sticky top-4 z-20 rounded-2xl border border-indigo-200/70 p-4 dark:border-indigo-500/30">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Chat</h3>
+              <button
+                type="button"
+                onClick={() => setChatCollapsed((value) => !value)}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white/80 px-2.5 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200"
+              >
+                {chatCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+                {chatCollapsed ? '展开' : '收起'}
+              </button>
+            </div>
 
-            {(currentAnalysis?.suggestedQueries ?? []).length > 0 && (
-              <section className="de-glass rounded-2xl p-4">
-                <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Suggested Queries</h3>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(currentAnalysis?.suggestedQueries ?? []).map((query) => (
-                    <button
-                      key={query}
-                      onClick={() => void handleRerun(query)}
-                      disabled={busyAction !== null}
-                      className="rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+            {!chatCollapsed && (
+              <div className="mt-3 space-y-3">
+                {(currentAnalysis?.suggestedQueries ?? []).length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {(currentAnalysis?.suggestedQueries ?? []).map((query) => (
+                      <button
+                        key={query}
+                        onClick={() => void handleRerun(query)}
+                        disabled={busyAction !== null}
+                        className="rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                      >
+                        {query}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="max-h-48 space-y-2 overflow-y-auto">
+                  {activeDeepStartSession.messages.slice(-8).map((message) => (
+                    <div
+                      key={message.id}
+                      className={`rounded-xl px-3 py-2 text-xs leading-6 ${
+                        message.role === 'assistant'
+                          ? 'bg-white/80 text-slate-600 dark:bg-slate-900/80 dark:text-slate-200'
+                          : 'ml-4 bg-indigo-600 text-white'
+                      }`}
                     >
-                      {query}
-                    </button>
+                      {message.content}
+                    </div>
                   ))}
                 </div>
-              </section>
-            )}
 
-            <section className="de-glass rounded-2xl p-4">
-              <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Category Tree</h3>
-              <div className="mt-3 space-y-2">
-                {groupedDirections.map((direction, index) => {
-                  const selectedCount = direction.paperIds.filter((paperId) => selectedPaperIds.has(paperId)).length;
-                  return (
-                    <div key={direction.id} className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/80">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-medium">{direction.name}</div>
-                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
-                          {direction.paperIds.length}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-300">{direction.summary}</p>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          onClick={() => void toggleDirection(direction, true)}
-                          disabled={busyAction !== null}
-                          className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                        >
-                          全选 {selectedCount}/{direction.paperIds.length}
-                        </button>
-                        <button
-                          onClick={() => void toggleDirection(direction, false)}
-                          disabled={busyAction !== null}
-                          className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                        >
-                          清空
-                        </button>
-                      </div>
-                      {index < groupedDirections.length - 1 && (
-                        <div className="mx-auto mt-2 h-3 w-px border-l border-dashed border-indigo-300 dark:border-indigo-500/40" />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="de-glass rounded-2xl p-4">
-              <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">
-                <Bot className="h-3.5 w-3.5" />
-                AI Chat
-              </h3>
-              <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
-                {activeDeepStartSession.messages.slice(-8).map((message) => (
-                  <div
-                    key={message.id}
-                    className={`rounded-xl px-3 py-2 text-xs leading-6 ${
-                      message.role === 'assistant'
-                        ? 'bg-white/80 text-slate-600 dark:bg-slate-900/80 dark:text-slate-200'
-                        : 'ml-4 bg-indigo-600 text-white'
-                    }`}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={replyInput}
+                    onChange={(event) => setReplyInput(event.target.value)}
+                    onKeyDown={(event) => event.key === 'Enter' && void handleReply(replyInput)}
+                    placeholder="补充你的筛选偏好"
+                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
+                  />
+                  <button
+                    onClick={() => void handleReply(replyInput)}
+                    disabled={busyAction !== null || !replyInput.trim()}
+                    className="rounded-xl bg-violet-600 px-3 py-2 text-xs text-white transition hover:bg-violet-500 disabled:opacity-60"
                   >
-                    {message.content}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 flex gap-2">
-                <input
-                  type="text"
-                  value={replyInput}
-                  onChange={(event) => setReplyInput(event.target.value)}
-                  onKeyDown={(event) => event.key === 'Enter' && void handleReply(replyInput)}
-                  placeholder="补充你的筛选偏好"
-                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
-                />
-                <button
-                  onClick={() => void handleReply(replyInput)}
-                  disabled={busyAction !== null || !replyInput.trim()}
-                  className="rounded-xl bg-violet-600 px-3 py-2 text-xs text-white transition hover:bg-violet-500 disabled:opacity-60"
-                >
-                  {busyAction === 'replying' ? '发送中' : '发送'}
-                </button>
-              </div>
-            </section>
-          </aside>
-
-          <section className="space-y-4">
-            {currentResults.length > 0 ? (
-              groupedDirections.map((direction) => (
-                <div key={direction.id} className="de-glass rounded-2xl p-4">
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-base font-semibold">{direction.name}</h3>
-                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{direction.why}</p>
-                    </div>
-                    <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200">
-                      {direction.paperIds.length} papers
-                    </span>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {direction.paperIds
-                      .map((paperId) => paperById.get(paperId))
-                      .filter((paper): paper is SearchPaper => Boolean(paper))
-                      .map((paper) => renderPaperCard(paper))}
-                  </div>
+                    {busyAction === 'replying' ? '发送中' : '发送'}
+                  </button>
                 </div>
-              ))
-            ) : (
-              <div className="de-glass rounded-2xl p-10 text-center">
-                <p className="text-slate-600 dark:text-slate-200">这一轮还没有拿到候选论文</p>
-                <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
-                  可以点击左侧建议 query 重跑，或告诉 AI 你更偏好的论文类型。
-                </p>
               </div>
             )}
           </section>
+
+          <div className="mt-5 grid gap-6 xl:grid-cols-[320px_1px_1fr]">
+            <aside className="space-y-4">
+              <section className="de-glass rounded-2xl p-4">
+                <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Overview</h3>
+                <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-200">
+                  {currentAnalysis?.overview || 'AI 正在构建这轮检索的分组策略。'}
+                </p>
+                {searchStats && (
+                  <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-slate-200">
+                    <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                      检索统计：原始 {searchStats.rawCount} · 去重后 {searchStats.dedupCount} · 入池 {searchStats.finalCount}
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="de-glass rounded-2xl p-4">
+                <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Category Tree</h3>
+                <div className="mt-3 space-y-2">
+                  {groupedDirections.map((direction, index) => {
+                    const selectedCount = direction.paperIds.filter((paperId) => selectedPaperIds.has(paperId)).length;
+                    return (
+                      <div key={direction.id} className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/80">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-medium">{direction.name}</div>
+                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
+                            {direction.paperIds.length}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-300">{direction.summary}</p>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() => void toggleDirection(direction, true)}
+                            disabled={busyAction !== null}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                          >
+                            全选 {selectedCount}/{direction.paperIds.length}
+                          </button>
+                          <button
+                            onClick={() => void toggleDirection(direction, false)}
+                            disabled={busyAction !== null}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                          >
+                            清空
+                          </button>
+                        </div>
+                        {index < groupedDirections.length - 1 && (
+                          <div className="mx-auto mt-2 h-3 w-px border-l border-dashed border-indigo-300 dark:border-indigo-500/40" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            </aside>
+
+            <div className="hidden border-l border-dashed border-slate-300 xl:block dark:border-slate-600/60" />
+
+            <section className="space-y-4">
+              {currentResults.length > 0 ? (
+                groupedDirections.map((direction) => (
+                  <div key={direction.id} className="de-glass rounded-2xl p-4">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-semibold">{direction.name}</h3>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{direction.why}</p>
+                      </div>
+                      <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200">
+                        {direction.paperIds.length} papers
+                      </span>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {direction.paperIds
+                        .map((paperId) => paperById.get(paperId))
+                        .filter((paper): paper is SearchPaper => Boolean(paper))
+                        .map((paper) => renderPaperCard(paper))}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="de-glass rounded-2xl p-10 text-center">
+                  <p className="text-slate-600 dark:text-slate-200">这一轮还没有拿到候选论文</p>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
+                    可以点击顶部建议 query 重跑，或告诉 AI 你更偏好的论文类型。
+                  </p>
+                </div>
+              )}
+            </section>
+          </div>
         </div>
       </div>
+
+      {activePaper && (
+        <>
+          <button
+            type="button"
+            onClick={() => setActivePaperId(null)}
+            className="fixed inset-0 z-30 bg-slate-950/35 backdrop-blur-[1px]"
+            aria-label="关闭详情抽屉"
+          />
+          <aside className="fixed right-0 top-0 z-40 flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white/98 p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-950/98">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Paper Detail</p>
+                <h3 className="mt-2 text-lg font-semibold leading-7">{activePaper.title}</h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+                  {sourceLabel(activePaper)} · {activePaper.year || '年份未知'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePaperId(null)}
+                className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void toggleSelect(activePaper.id)}
+                disabled={busyAction !== null}
+                className={`rounded-xl px-3 py-1.5 text-xs font-medium ${
+                  selectedPaperIds.has(activePaper.id)
+                    ? 'bg-indigo-600 text-white'
+                    : 'border border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                }`}
+              >
+                {selectedPaperIds.has(activePaper.id) ? '已选中' : '加入选中'}
+              </button>
+              {activePaper.url && (
+                <a
+                  href={activePaper.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  打开链接
+                </a>
+              )}
+            </div>
+
+            <div className="mt-4 grid gap-3 overflow-y-auto pr-1">
+              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">机构 / 学校</h4>
+                <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{institutionLabel(activePaper)}</p>
+                {activePaper.enrichmentNote && (
+                  <p className="mt-2 text-xs leading-5 text-amber-700 dark:text-amber-300">{activePaper.enrichmentNote}</p>
+                )}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">关键词</h4>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {paperKeywords(activePaper).length > 0 ? (
+                    paperKeywords(activePaper).map((keyword) => (
+                      <span
+                        key={`drawer-${activePaper.id}-${keyword}`}
+                        className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        {keyword}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-slate-500 dark:text-slate-300">未提取到关键词</span>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">作者列表</h4>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {splitAuthors(activePaper.authors).length > 0 ? (
+                    splitAuthors(activePaper.authors).map((author) => (
+                      <span
+                        key={`author-${activePaper.id}-${author}`}
+                        className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        {author}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-slate-500 dark:text-slate-300">作者信息缺失</span>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">完整摘要（规则高亮）</h4>
+                  <button
+                    type="button"
+                    onClick={() => void navigator.clipboard.writeText(activePaper.abstract || '')}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  >
+                    复制摘要
+                  </button>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
+                  {renderHighlightedText(activePaper.abstract || '', summaryHighlightTokens)}
+                </p>
+              </section>
+            </div>
+          </aside>
+        </>
+      )}
 
       <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-7xl -translate-x-1/2 px-6">
         <div className="pointer-events-auto mx-auto flex max-w-xl items-center justify-between rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/90">

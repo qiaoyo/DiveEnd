@@ -24,6 +24,7 @@ type SearchAPIConfig struct {
 	EnableArxiv                bool   `json:"enableArxiv"`
 	SemanticScholarKeyPath     string `json:"semanticScholarKeyPath"`
 	PerSourceResultLimit       int    `json:"perSourceResultLimit"`
+	DeepStartResultLimit       int    `json:"deepStartResultLimit"`
 	RetryDurationSeconds       int    `json:"retryDurationSeconds"`
 	RetryIntervalSeconds       int    `json:"retryIntervalSeconds"`
 	RequestTimeoutSeconds      int    `json:"requestTimeoutSeconds"`
@@ -173,16 +174,27 @@ type Paper struct {
 }
 
 type SearchPaper struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Authors  string   `json:"authors"`
-	Abstract string   `json:"abstract"`
-	Year     int      `json:"year"`
-	Journal  string   `json:"journal"`
-	URL      string   `json:"url"`
-	Category string   `json:"category"`
-	Tags     []string `json:"tags"`
-	Source   string   `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
+	ID             string   `json:"id"`
+	Title          string   `json:"title"`
+	Authors        string   `json:"authors"`
+	Abstract       string   `json:"abstract"`
+	Year           int      `json:"year"`
+	Journal        string   `json:"journal"`
+	URL            string   `json:"url"`
+	Category       string   `json:"category"`
+	Tags           []string `json:"tags"`
+	Source         string   `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
+	Institutions   []string `json:"institutions"`
+	Keywords       []string `json:"keywords"`
+	SourceLabel    string   `json:"sourceLabel"`
+	EnrichmentNote string   `json:"enrichmentNote,omitempty"`
+}
+
+type SearchRetrievalStats struct {
+	Query      string `json:"query"`
+	RawCount   int    `json:"rawCount"`
+	DedupCount int    `json:"dedupCount"`
+	FinalCount int    `json:"finalCount"`
 }
 
 type SearchSourceStatus struct {
@@ -245,6 +257,7 @@ type DeepStartAnalysis struct {
 	FollowUpQuestions   []string             `json:"followUpQuestions"`
 	SuggestedQueries    []string             `json:"suggestedQueries"`
 	RecommendedPaperIDs []string             `json:"recommendedPaperIds"`
+	SearchStats         SearchRetrievalStats `json:"searchStats"`
 }
 
 type DeepStartSessionDetail struct {
@@ -253,6 +266,29 @@ type DeepStartSessionDetail struct {
 	CurrentResults   []SearchPaper           `json:"currentResults"`
 	CurrentAnalysis  *DeepStartAnalysis      `json:"currentAnalysis,omitempty"`
 	SelectedPaperIDs []string                `json:"selectedPaperIds"`
+}
+
+type DeepStartProgressEvent struct {
+	SessionID                 string                `json:"sessionId,omitempty"`
+	Phase                     string                `json:"phase"` // searching | enriching | analyzing | persisting | completed
+	Message                   string                `json:"message,omitempty"`
+	ElapsedSeconds            int                   `json:"elapsedSeconds"`
+	EstimatedRemainingSeconds int                   `json:"estimatedRemainingSeconds"`
+	Total                     int                   `json:"total"`
+	Completed                 int                   `json:"completed"`
+	OverallPercent            int                   `json:"overallPercent"`
+	Stats                     *SearchRetrievalStats `json:"stats,omitempty"`
+}
+
+type DeepStartEnrichmentCache struct {
+	CacheKey          string
+	Institutions      []string
+	Keywords          []string
+	SourceLabel       string
+	OpenAlexAttempted bool
+	CrossrefAttempted bool
+	ErrorMessage      string
+	UpdatedAt         time.Time
 }
 
 type TranslationRecord struct {

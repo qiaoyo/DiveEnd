@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { canResolveFilePaths, onExtractProgress, onSearchProgress, resolveFilePaths } from './backend';
+import { canResolveFilePaths, onDeepStartProgress, onExtractProgress, onSearchProgress, resolveFilePaths } from './backend';
 
 describe('backend runtime helpers', () => {
   afterEach(() => {
@@ -119,5 +119,61 @@ describe('backend runtime helpers', () => {
 
     unsubscribe();
     expect(offSpy).toHaveBeenCalledWith('search-progress');
+  });
+
+  it('subscribes to deepstart progress events in Wails runtime', () => {
+    const listeners = new Map<string, (...args: any[]) => void>();
+    const offSpy = vi.fn();
+
+    (window as any).go = { main: { App: {} } };
+    (window as any).runtime = {
+      CanResolveFilePaths: vi.fn(() => true),
+      ResolveFilePaths: vi.fn(() => []),
+      EventsOnMultiple: vi.fn((eventName: string, callback: (...args: any[]) => void) => {
+        listeners.set(eventName, callback);
+        return vi.fn(() => listeners.delete(eventName));
+      }),
+      EventsOff: offSpy,
+    };
+
+    const callback = vi.fn();
+    const unsubscribe = onDeepStartProgress(callback);
+
+    listeners.get('deepstart-progress')?.({
+      sessionId: 'deepstart-1',
+      phase: 'enriching',
+      message: '正在导入 200 篇论文',
+      elapsedSeconds: 12,
+      estimatedRemainingSeconds: 8,
+      total: 200,
+      completed: 40,
+      overallPercent: 32,
+      stats: {
+        query: 'embodied',
+        rawCount: 220,
+        dedupCount: 200,
+        finalCount: 200,
+      },
+    });
+
+    expect(callback).toHaveBeenCalledWith({
+      sessionId: 'deepstart-1',
+      phase: 'enriching',
+      message: '正在导入 200 篇论文',
+      elapsedSeconds: 12,
+      estimatedRemainingSeconds: 8,
+      total: 200,
+      completed: 40,
+      overallPercent: 32,
+      stats: {
+        query: 'embodied',
+        rawCount: 220,
+        dedupCount: 200,
+        finalCount: 200,
+      },
+    });
+
+    unsubscribe();
+    expect(offSpy).toHaveBeenCalledWith('deepstart-progress');
   });
 });

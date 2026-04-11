@@ -58,6 +58,7 @@ type AppConfig struct {
 		EnableArxiv            bool   `yaml:"enable_arxiv"`
 		SemanticScholarKeyPath string `yaml:"semantic_scholar_key_path"`
 		PerSourceResultLimit   int    `yaml:"per_source_result_limit"`
+		DeepStartResultLimit   int    `yaml:"deepstart_result_limit"`
 		RetryDurationSeconds   int    `yaml:"retry_duration_seconds"`
 		RetryIntervalSeconds   int    `yaml:"retry_interval_seconds"`
 		RequestTimeoutSeconds  int    `yaml:"request_timeout_seconds"`

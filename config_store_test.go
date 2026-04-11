@@ -244,6 +244,7 @@ func TestLoadAppConfigBootstrapsSearchFromAppYAMLAndSemanticKeyFile(t *testing.T
   enable_arxiv: false
   semantic_scholar_key_path: "config/semantic_scholar.private.json"
   per_source_result_limit: 120
+  deepstart_result_limit: 200
   retry_duration_seconds: 45
   retry_interval_seconds: 1
 `
@@ -273,6 +274,9 @@ func TestLoadAppConfigBootstrapsSearchFromAppYAMLAndSemanticKeyFile(t *testing.T
 	}
 	if config.Search.PerSourceResultLimit != 120 {
 		t.Fatalf("expected per source result limit 120, got %d", config.Search.PerSourceResultLimit)
+	}
+	if config.Search.DeepStartResultLimit != 200 {
+		t.Fatalf("expected deepstart result limit 200, got %d", config.Search.DeepStartResultLimit)
 	}
 	if config.Search.RetryDurationSeconds != 45 {
 		t.Fatalf("expected retry duration 45s, got %d", config.Search.RetryDurationSeconds)

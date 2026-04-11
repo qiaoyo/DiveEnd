@@ -30,6 +30,7 @@ type appYAMLSearchConfig struct {
 		EnableArxiv            *bool  `yaml:"enable_arxiv"`
 		SemanticScholarKeyPath string `yaml:"semantic_scholar_key_path"`
 		PerSourceResultLimit   int    `yaml:"per_source_result_limit"`
+		DeepStartResultLimit   int    `yaml:"deepstart_result_limit"`
 		RetryDurationSeconds   int    `yaml:"retry_duration_seconds"`
 		RetryIntervalSeconds   int    `yaml:"retry_interval_seconds"`
 		RequestTimeoutSeconds  int    `yaml:"request_timeout_seconds"`
@@ -41,6 +42,7 @@ type appYAMLSearchSettings struct {
 	EnableArxiv            *bool
 	SemanticScholarKeyPath string
 	PerSourceResultLimit   int
+	DeepStartResultLimit   int
 	RetryDurationSeconds   int
 	RetryIntervalSeconds   int
 	RequestTimeoutSeconds  int
@@ -89,6 +91,7 @@ func defaultSearchAPIConfig() SearchAPIConfig {
 		EnableArxiv:            true,
 		SemanticScholarKeyPath: filepath.Join("config", "semantic_scholar.json"),
 		PerSourceResultLimit:   100,
+		DeepStartResultLimit:   200,
 		RetryDurationSeconds:   60,
 		RetryIntervalSeconds:   1,
 		RequestTimeoutSeconds:  5,
@@ -242,6 +245,9 @@ func normalizeSearchAPIConfig(config SearchAPIConfig) SearchAPIConfig {
 	}
 	if config.PerSourceResultLimit < 100 {
 		config.PerSourceResultLimit = defaults.PerSourceResultLimit
+	}
+	if config.DeepStartResultLimit < 100 {
+		config.DeepStartResultLimit = defaults.DeepStartResultLimit
 	}
 	if config.RetryIntervalSeconds <= 0 {
 		config.RetryIntervalSeconds = defaults.RetryIntervalSeconds
@@ -426,6 +432,9 @@ func mergeSearchConfigWithAppYAML(searchConfig SearchAPIConfig) SearchAPIConfig 
 	if yamlConfig.PerSourceResultLimit > 0 {
 		searchConfig.PerSourceResultLimit = yamlConfig.PerSourceResultLimit
 	}
+	if yamlConfig.DeepStartResultLimit > 0 {
+		searchConfig.DeepStartResultLimit = yamlConfig.DeepStartResultLimit
+	}
 	if yamlConfig.RetryDurationSeconds > 0 {
 		searchConfig.RetryDurationSeconds = yamlConfig.RetryDurationSeconds
 	}
@@ -454,6 +463,7 @@ func readAppYAMLSearchConfig() (appYAMLSearchSettings, bool) {
 		EnableArxiv:            raw.Search.EnableArxiv,
 		SemanticScholarKeyPath: strings.TrimSpace(raw.Search.SemanticScholarKeyPath),
 		PerSourceResultLimit:   raw.Search.PerSourceResultLimit,
+		DeepStartResultLimit:   raw.Search.DeepStartResultLimit,
 		RetryDurationSeconds:   raw.Search.RetryDurationSeconds,
 		RetryIntervalSeconds:   raw.Search.RetryIntervalSeconds,
 		RequestTimeoutSeconds:  raw.Search.RequestTimeoutSeconds,

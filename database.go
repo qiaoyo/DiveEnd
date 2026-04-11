@@ -112,6 +112,16 @@ func (db *DB) migrate() error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY(session_id) REFERENCES deepstart_sessions(id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS deepstart_enrichment_cache (
+			cache_key TEXT PRIMARY KEY,
+			institutions_json TEXT NOT NULL DEFAULT '[]',
+			keywords_json TEXT NOT NULL DEFAULT '[]',
+			source_label TEXT NOT NULL DEFAULT '',
+			openalex_attempted INTEGER NOT NULL DEFAULT 0,
+			crossref_attempted INTEGER NOT NULL DEFAULT 0,
+			error_message TEXT,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 
 	for _, stmt := range statements {
@@ -138,6 +148,7 @@ func (db *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_sessions_updated_at ON deepstart_sessions(updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_messages_session_id ON deepstart_messages(session_id, created_at ASC)`,
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_search_rounds_session_id ON deepstart_search_rounds(session_id, created_at ASC)`,
+		`CREATE INDEX IF NOT EXISTS idx_deepstart_enrichment_cache_updated_at ON deepstart_enrichment_cache(updated_at DESC)`,
 	} {
 		if _, err := db.conn.Exec(stmt); err != nil {
 			return err
@@ -566,6 +577,95 @@ func (db *DB) SaveDeepStartSearchRound(sessionID, query string, results []Search
 	return err
 }
 
+func (db *DB) GetDeepStartEnrichmentCache(cacheKey string) (*DeepStartEnrichmentCache, error) {
+	cacheKey = strings.TrimSpace(cacheKey)
+	if cacheKey == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	var (
+		entry            DeepStartEnrichmentCache
+		institutionsJSON string
+		keywordsJSON     string
+		errorMessage     sql.NullString
+		openAlexAttempt  int
+		crossrefAttempt  int
+	)
+	err := db.conn.QueryRow(`
+		SELECT cache_key, institutions_json, keywords_json, source_label,
+		       openalex_attempted, crossref_attempted, error_message, updated_at
+		FROM deepstart_enrichment_cache
+		WHERE cache_key = ?
+	`, cacheKey).Scan(
+		&entry.CacheKey,
+		&institutionsJSON,
+		&keywordsJSON,
+		&entry.SourceLabel,
+		&openAlexAttempt,
+		&crossrefAttempt,
+		&errorMessage,
+		&entry.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	entry.Institutions = decodeStringSlice(institutionsJSON)
+	entry.Keywords = decodeStringSlice(keywordsJSON)
+	entry.OpenAlexAttempted = openAlexAttempt > 0
+	entry.CrossrefAttempted = crossrefAttempt > 0
+	entry.ErrorMessage = strings.TrimSpace(errorMessage.String)
+	return &entry, nil
+}
+
+func (db *DB) UpsertDeepStartEnrichmentCache(entry *DeepStartEnrichmentCache) error {
+	if entry == nil {
+		return fmt.Errorf("deepstart enrichment cache cannot be nil")
+	}
+	cacheKey := strings.TrimSpace(entry.CacheKey)
+	if cacheKey == "" {
+		return fmt.Errorf("deepstart enrichment cache key cannot be empty")
+	}
+
+	institutionsJSON, err := json.Marshal(entry.Institutions)
+	if err != nil {
+		return err
+	}
+	keywordsJSON, err := json.Marshal(entry.Keywords)
+	if err != nil {
+		return err
+	}
+
+	if entry.UpdatedAt.IsZero() {
+		entry.UpdatedAt = time.Now()
+	}
+
+	_, err = db.conn.Exec(`
+		INSERT INTO deepstart_enrichment_cache (
+			cache_key, institutions_json, keywords_json, source_label,
+			openalex_attempted, crossref_attempted, error_message, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(cache_key) DO UPDATE SET
+			institutions_json = excluded.institutions_json,
+			keywords_json = excluded.keywords_json,
+			source_label = excluded.source_label,
+			openalex_attempted = excluded.openalex_attempted,
+			crossref_attempted = excluded.crossref_attempted,
+			error_message = excluded.error_message,
+			updated_at = excluded.updated_at
+	`,
+		cacheKey,
+		string(institutionsJSON),
+		string(keywordsJSON),
+		strings.TrimSpace(entry.SourceLabel),
+		boolToInt(entry.OpenAlexAttempted),
+		boolToInt(entry.CrossrefAttempted),
+		nullIfBlank(entry.ErrorMessage),
+		entry.UpdatedAt,
+	)
+	return err
+}
+
 func (db *DB) ListDeepStartSessions() ([]DeepStartSessionSummary, error) {
 	rows, err := db.conn.Query(`
 		SELECT id, title, root_prompt, current_query, target_folder_id, created_at, updated_at
@@ -773,4 +873,11 @@ func nullIfTimePtr(t *time.Time) sql.NullTime {
 		return sql.NullTime{}
 	}
 	return sql.NullTime{Time: *t, Valid: true}
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

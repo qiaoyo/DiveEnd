@@ -18,6 +18,7 @@ export interface SearchAPIConfig {
   enableArxiv: boolean;
   semanticScholarKeyPath: string;
   perSourceResultLimit: number;
+  deepStartResultLimit: number;
   retryDurationSeconds: number;
   retryIntervalSeconds: number;
   requestTimeoutSeconds: number;
@@ -78,6 +79,10 @@ export interface SearchPaper {
   category: string;
   tags: string[];
   source: string; // 'semantic_scholar' | 'arxiv' | 'arxiv_sanity'
+  institutions: string[];
+  keywords: string[];
+  sourceLabel: string;
+  enrichmentNote?: string;
 }
 
 export interface SearchSourceStatus {
@@ -189,6 +194,29 @@ export interface DeepStartAnalysis {
   followUpQuestions: string[];
   suggestedQueries: string[];
   recommendedPaperIds: string[];
+  searchStats: {
+    query: string;
+    rawCount: number;
+    dedupCount: number;
+    finalCount: number;
+  };
+}
+
+export interface DeepStartProgressEvent {
+  sessionId?: string;
+  phase: 'searching' | 'enriching' | 'analyzing' | 'persisting' | 'completed';
+  message?: string;
+  elapsedSeconds: number;
+  estimatedRemainingSeconds: number;
+  total: number;
+  completed: number;
+  overallPercent: number;
+  stats?: {
+    query: string;
+    rawCount: number;
+    dedupCount: number;
+    finalCount: number;
+  };
 }
 
 export interface DeepStartSessionDetail {
@@ -405,6 +433,7 @@ export const defaultConfig: AppConfig = {
     enableArxiv: true,
     semanticScholarKeyPath: 'config/semantic_scholar.json',
     perSourceResultLimit: 100,
+    deepStartResultLimit: 200,
     retryDurationSeconds: 60,
     retryIntervalSeconds: 1,
     requestTimeoutSeconds: 5,

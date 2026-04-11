@@ -303,6 +303,76 @@ func TestSearchClientSearchRequestsAtLeast100FromSemanticAndArxiv(t *testing.T) 
 	}
 }
 
+func TestSearchClientUsesPerSourceLimitWhenOverallLimitIs200(t *testing.T) {
+	config := defaultAppConfig()
+	config.Search.PerSourceResultLimit = 100
+	client := NewSearchClient(config)
+
+	var semanticLimit string
+	var arxivLimit string
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch {
+			case strings.Contains(r.URL.Host, "api.semanticscholar.org"):
+				semanticLimit = r.URL.Query().Get("limit")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(bytes.NewBufferString(`{
+  "data": [
+    {
+      "paperId": "sem-100",
+      "title": "Semantic Paper",
+      "authors": [{"name":"Author"}],
+      "abstract": "Abstract",
+      "year": 2025,
+      "venue": "ICLR",
+      "journal": {"name":"ICLR"},
+      "openAccessPdf": {"url":"https://example.com/sem-100.pdf"}
+    }
+  ]
+}`)),
+					Request: r,
+				}, nil
+			case strings.Contains(r.URL.Host, "export.arxiv.org"):
+				arxivLimit = r.URL.Query().Get("max_results")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(bytes.NewBufferString(`
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.00011v1</id>
+    <title>ArXiv Paper</title>
+    <summary>Arxiv abstract</summary>
+    <published>2025-01-01T00:00:00Z</published>
+    <author><name>Author B</name></author>
+  </entry>
+</feed>
+`)),
+					Request: r,
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected host: %s", r.URL.Host)
+			}
+		}),
+	}
+
+	papers, err := client.Search("vla", 200)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(papers) != 2 {
+		t.Fatalf("expected 2 papers, got %d", len(papers))
+	}
+	if semanticLimit != "100" {
+		t.Fatalf("expected semantic per-source limit=100, got %q", semanticLimit)
+	}
+	if arxivLimit != "100" {
+		t.Fatalf("expected arxiv per-source limit=100, got %q", arxivLimit)
+	}
+}
+
 func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.T) {
 	config := defaultAppConfig()
 	client := NewSearchClient(config)
@@ -402,6 +472,83 @@ func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.
 	}
 	if len(finalEvent.Sources) != 2 {
 		t.Fatalf("expected two source entries, got %d", len(finalEvent.Sources))
+	}
+}
+
+func TestSearchClientDedupeUsesTitleAndYearAndTracksStats(t *testing.T) {
+	config := defaultAppConfig()
+	client := NewSearchClient(config)
+
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch {
+			case strings.Contains(r.URL.Host, "api.semanticscholar.org"):
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(bytes.NewBufferString(`{
+  "data": [
+    {
+      "paperId": "sem-dup-1",
+      "title": "Unified Embodied Agent",
+      "authors": [{"name":"Author S"}],
+      "abstract": "Semantic variant",
+      "year": 2025,
+      "venue": "ICRA",
+      "journal": {"name":"ICRA"},
+      "openAccessPdf": {"url":"https://example.com/sem-dup-1.pdf"}
+    }
+  ]
+}`)),
+					Request: r,
+				}, nil
+			case strings.Contains(r.URL.Host, "export.arxiv.org"):
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(bytes.NewBufferString(`
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.10001v1</id>
+    <title>Unified Embodied Agent</title>
+    <summary>Arxiv duplicate same year</summary>
+    <published>2025-01-01T00:00:00Z</published>
+    <author><name>Author A</name></author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2401.10002v1</id>
+    <title>Unified Embodied Agent</title>
+    <summary>Arxiv prior year</summary>
+    <published>2024-01-01T00:00:00Z</published>
+    <author><name>Author B</name></author>
+  </entry>
+</feed>
+`)),
+					Request: r,
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected host: %s", r.URL.Host)
+			}
+		}),
+	}
+
+	papers, err := client.Search("embodied", 200)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(papers) != 2 {
+		t.Fatalf("expected 2 papers after title+year dedupe, got %d", len(papers))
+	}
+
+	stats := client.LastSearchStats()
+	if stats.RawCount != 3 {
+		t.Fatalf("expected raw count 3, got %+v", stats)
+	}
+	if stats.DedupCount != 2 {
+		t.Fatalf("expected dedup count 2, got %+v", stats)
+	}
+	if stats.FinalCount != 2 {
+		t.Fatalf("expected final count 2, got %+v", stats)
 	}
 }
 

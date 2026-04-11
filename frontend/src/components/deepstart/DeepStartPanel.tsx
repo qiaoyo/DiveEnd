@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BrainCircuit, Loader2, Search, Sparkles } from 'lucide-react';
-import { onSearchProgress, startDeepStartSession } from '../../lib/backend';
-import type { SearchProgressEvent } from '../../types';
+import { onDeepStartProgress, onSearchProgress, startDeepStartSession } from '../../lib/backend';
+import type { DeepStartProgressEvent, SearchProgressEvent } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 
 export function DeepStartPanel() {
@@ -12,6 +12,7 @@ export function DeepStartPanel() {
   const [isStarting, setIsStarting] = useState(false);
   const [newPrompt, setNewPrompt] = useState('');
   const [searchProgress, setSearchProgress] = useState<SearchProgressEvent | null>(null);
+  const [deepStartProgress, setDeepStartProgress] = useState<DeepStartProgressEvent | null>(null);
 
   const examplePrompts = [
     '我想梳理这两年具身智能领域的论文',
@@ -39,7 +40,16 @@ export function DeepStartPanel() {
     });
   }, []);
 
+  useEffect(() => {
+    return onDeepStartProgress((progress) => {
+      setDeepStartProgress(progress);
+    });
+  }, []);
+
   const progressPercent = useMemo(() => {
+    if (deepStartProgress) {
+      return deepStartProgress.overallPercent;
+    }
     if (!searchProgress) {
       return 0;
     }
@@ -50,7 +60,22 @@ export function DeepStartPanel() {
       return 0;
     }
     return Math.min(100, Math.round((searchProgress.elapsedSeconds / searchProgress.totalSeconds) * 100));
-  }, [searchProgress]);
+  }, [deepStartProgress, searchProgress]);
+
+  const phaseLabel = useMemo(() => {
+    switch (deepStartProgress?.phase) {
+      case 'enriching':
+        return '补全机构与关键词';
+      case 'analyzing':
+        return '生成 AI 分析';
+      case 'persisting':
+        return '保存会话';
+      case 'completed':
+        return '准备完成';
+      default:
+        return '检索中';
+    }
+  }, [deepStartProgress?.phase]);
 
   const handleStartSession = async () => {
     const prompt = newPrompt.trim();
@@ -60,6 +85,16 @@ export function DeepStartPanel() {
     }
 
     setIsStarting(true);
+    setDeepStartProgress({
+      phase: 'searching',
+      sessionId: '',
+      message: '正在检索论文候选',
+      elapsedSeconds: 0,
+      estimatedRemainingSeconds: 60,
+      total: 0,
+      completed: 0,
+      overallPercent: 3,
+    });
     setSearchProgress({
       query: prompt,
       elapsedSeconds: 0,
@@ -165,12 +200,26 @@ export function DeepStartPanel() {
             {isStarting && searchProgress && (
               <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-500/35 dark:bg-indigo-500/10">
                 <div className="flex items-center justify-between text-xs text-indigo-700 dark:text-indigo-200">
-                  <span>正在搜索并重试（最多 1 分钟）</span>
-                  <span>{searchProgress.elapsedSeconds}s / {searchProgress.totalSeconds}s</span>
+                  <span>{deepStartProgress?.message || '正在搜索并重试（最多 1 分钟）'}</span>
+                  <span>
+                    {deepStartProgress
+                      ? `阶段：${phaseLabel} · 预计剩余 ${deepStartProgress.estimatedRemainingSeconds}s`
+                      : `${searchProgress.elapsedSeconds}s / ${searchProgress.totalSeconds}s`}
+                  </span>
                 </div>
                 <div className="mt-2 h-2 rounded-full bg-indigo-100 dark:bg-indigo-500/20">
                   <div className="h-2 rounded-full bg-indigo-600 transition-all" style={{ width: `${progressPercent}%` }} />
                 </div>
+                {deepStartProgress?.phase === 'enriching' && (
+                  <div className="mt-2 text-xs text-indigo-700 dark:text-indigo-200">
+                    正在导入 {deepStartProgress.total} 篇论文，已完成 {deepStartProgress.completed} 篇，预计剩余 {deepStartProgress.estimatedRemainingSeconds} 秒
+                  </div>
+                )}
+                {deepStartProgress?.stats && (
+                  <div className="mt-2 text-xs text-indigo-700 dark:text-indigo-200">
+                    检索统计：原始 {deepStartProgress.stats.rawCount} · 去重后 {deepStartProgress.stats.dedupCount} · 入池 {deepStartProgress.stats.finalCount}
+                  </div>
+                )}
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {searchProgress.sources.map((source) => (
                     <div key={source.name} className="rounded-xl border border-indigo-200 bg-white/70 px-3 py-2 text-xs dark:border-indigo-500/30 dark:bg-slate-900/60">
