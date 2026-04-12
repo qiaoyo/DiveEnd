@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -148,5 +149,27 @@ func TestParsePDFSendsMultipartFile(t *testing.T) {
 	client := NewPDFServiceClient(server.URL)
 	if _, err := client.ParsePDF(pdfPath); err != nil {
 		t.Fatalf("ParsePDF() error = %v", err)
+	}
+}
+
+func TestParsePDFFriendlyErrorWhenServiceUnavailable(t *testing.T) {
+	tempDir := t.TempDir()
+	pdfPath := filepath.Join(tempDir, "sample.pdf")
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.4 mock"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	client := NewPDFServiceClient("http://127.0.0.1:1")
+	_, err := client.ParsePDF(pdfPath)
+	if err == nil {
+		t.Fatal("expected ParsePDF() to fail when service is unavailable")
+	}
+
+	message := err.Error()
+	if !strings.Contains(message, "services/pdf_service") {
+		t.Fatalf("expected start hint in error message, got %q", message)
+	}
+	if !strings.Contains(message, "uvicorn app.main:app") {
+		t.Fatalf("expected uvicorn start command in error message, got %q", message)
 	}
 }

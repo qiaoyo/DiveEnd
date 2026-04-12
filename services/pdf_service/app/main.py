@@ -29,12 +29,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     config = get_config()
     logger.info(f"Configuration loaded: host={config.host}, port={config.port}")
 
-    # Verify marker is available
-    try:
-        from marker.convert import convert_single_pdf
-        logger.info("Marker PDF parser is available")
-    except ImportError as e:
-        logger.error(f"Marker PDF parser not available: {e}")
+    # Verify parser backend is available
+    available, backend = parse.parser_runtime_status()
+    if available:
+        logger.info(f"PDF parser is available (backend={backend})")
+    else:
+        logger.error("PDF parser backend not available")
         logger.warning("PDF parsing functionality will not work!")
 
     yield

@@ -107,6 +107,10 @@ func (db *DB) migrate() error {
 			current_results_json TEXT NOT NULL DEFAULT '[]',
 			current_analysis_json TEXT,
 			selected_paper_ids_json TEXT NOT NULL DEFAULT '[]',
+			processing_status TEXT NOT NULL DEFAULT 'completed',
+			initial_ready_count INTEGER NOT NULL DEFAULT 0,
+			total_planned_count INTEGER NOT NULL DEFAULT 0,
+			background_remaining INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY(target_folder_id) REFERENCES folders(id)
@@ -133,10 +137,32 @@ func (db *DB) migrate() error {
 			institutions_json TEXT NOT NULL DEFAULT '[]',
 			keywords_json TEXT NOT NULL DEFAULT '[]',
 			source_label TEXT NOT NULL DEFAULT '',
+			publication_venue TEXT NOT NULL DEFAULT '',
+			publication_year INTEGER NOT NULL DEFAULT 0,
+			citation_count INTEGER NOT NULL DEFAULT 0,
 			openalex_attempted INTEGER NOT NULL DEFAULT 0,
 			crossref_attempted INTEGER NOT NULL DEFAULT 0,
 			error_message TEXT,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS deepread_parse_cache (
+			paper_id TEXT PRIMARY KEY,
+			pdf_path TEXT,
+			status TEXT NOT NULL DEFAULT 'idle',
+			error_message TEXT,
+			markdown TEXT,
+			sections_json TEXT NOT NULL DEFAULT '[]',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY(paper_id) REFERENCES papers(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS deepread_notes (
+			id TEXT PRIMARY KEY,
+			paper_id TEXT NOT NULL,
+			section TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY(paper_id) REFERENCES papers(id)
 		)`,
 	}
 
@@ -174,6 +200,33 @@ func (db *DB) migrate() error {
 		}
 	}
 
+	for _, column := range []struct {
+		name string
+		typ  string
+	}{
+		{name: "processing_status", typ: "TEXT NOT NULL DEFAULT 'completed'"},
+		{name: "initial_ready_count", typ: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "total_planned_count", typ: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "background_remaining", typ: "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := db.ensureDeepStartSessionColumn(column.name, column.typ); err != nil {
+			return err
+		}
+	}
+
+	for _, column := range []struct {
+		name string
+		typ  string
+	}{
+		{name: "publication_venue", typ: "TEXT NOT NULL DEFAULT ''"},
+		{name: "publication_year", typ: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "citation_count", typ: "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := db.ensureDeepStartEnrichmentCacheColumn(column.name, column.typ); err != nil {
+			return err
+		}
+	}
+
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_papers_folder_id ON papers(folder_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_papers_download_status ON papers(download_status)`,
@@ -186,6 +239,7 @@ func (db *DB) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_messages_session_id ON deepstart_messages(session_id, created_at ASC)`,
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_search_rounds_session_id ON deepstart_search_rounds(session_id, created_at ASC)`,
 		`CREATE INDEX IF NOT EXISTS idx_deepstart_enrichment_cache_updated_at ON deepstart_enrichment_cache(updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_deepread_notes_paper_id ON deepread_notes(paper_id, created_at DESC)`,
 	} {
 		if _, err := db.conn.Exec(stmt); err != nil {
 			return err
@@ -280,6 +334,54 @@ func (db *DB) ensureFolderColumn(columnName, columnType string) error {
 	return err
 }
 
+func (db *DB) ensureDeepStartEnrichmentCacheColumn(columnName, columnType string) error {
+	rows, err := db.conn.Query(`PRAGMA table_info(deepstart_enrichment_cache)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+
+	_, err = db.conn.Exec(fmt.Sprintf(`ALTER TABLE deepstart_enrichment_cache ADD COLUMN %s %s`, columnName, columnType))
+	return err
+}
+
+func (db *DB) ensureDeepStartSessionColumn(columnName, columnType string) error {
+	rows, err := db.conn.Query(`PRAGMA table_info(deepstart_sessions)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+
+	_, err = db.conn.Exec(fmt.Sprintf(`ALTER TABLE deepstart_sessions ADD COLUMN %s %s`, columnName, columnType))
+	return err
+}
+
 func (db *DB) ensureDefaultFolder() (Folder, error) {
 	if folder, err := db.getRootFolderByName(defaultFolderName); err == nil {
 		if !folder.IsSystem || strings.TrimSpace(folder.Path) != defaultFolderName {
@@ -339,8 +441,8 @@ func (db *DB) CreateFolder(name string) (Folder, error) {
 
 func (db *DB) CreateFolderNode(parentID, name string) (Folder, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." {
-		return Folder{}, fmt.Errorf("folder name cannot be empty")
+	if err := validateFolderSegmentStrict(name); err != nil {
+		return Folder{}, err
 	}
 	name = normalizeFolderSegment(name)
 
@@ -716,6 +818,71 @@ func (db *DB) GetPaperByFolderAndSource(folderID, sourcePaperID string) (*Paper,
 	return &paper, nil
 }
 
+func (db *DB) GetPaperByID(paperID string) (*Paper, error) {
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	var (
+		paper          Paper
+		authors        sql.NullString
+		abstract       sql.NullString
+		journal        sql.NullString
+		urlValue       sql.NullString
+		pdfPath        sql.NullString
+		downloadStatus sql.NullString
+		downloadError  sql.NullString
+		category       sql.NullString
+		tagsRaw        sql.NullString
+	)
+	err := db.conn.QueryRow(`
+		SELECT id, source_paper_id, title, authors, abstract, year, journal, url, pdf_path, download_status, download_error, folder_id, category, tags, added_at, updated_at
+		FROM papers
+		WHERE id = ?
+		LIMIT 1
+	`, paperID).Scan(
+		&paper.ID,
+		&paper.SourcePaperID,
+		&paper.Title,
+		&authors,
+		&abstract,
+		&paper.Year,
+		&journal,
+		&urlValue,
+		&pdfPath,
+		&downloadStatus,
+		&downloadError,
+		&paper.FolderID,
+		&category,
+		&tagsRaw,
+		&paper.AddedAt,
+		&paper.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	paper.Authors = authors.String
+	paper.Abstract = abstract.String
+	paper.Journal = journal.String
+	paper.URL = urlValue.String
+	paper.PDFPath = pdfPath.String
+	paper.DownloadStatus = strings.TrimSpace(downloadStatus.String)
+	if paper.DownloadStatus == "" {
+		if strings.TrimSpace(paper.PDFPath) != "" {
+			paper.DownloadStatus = "downloaded"
+		} else {
+			paper.DownloadStatus = "queued"
+		}
+	}
+	paper.DownloadError = strings.TrimSpace(downloadError.String)
+	paper.Category = category.String
+	paper.Tags = decodeTags(tagsRaw.String)
+
+	return &paper, nil
+}
+
 func (db *DB) UpdatePaperDownloadState(paperID, status, pdfPath, downloadError string) error {
 	paperID = strings.TrimSpace(paperID)
 	if paperID == "" {
@@ -797,6 +964,12 @@ func (db *DB) DeletePaper(id string) error {
 	if _, err := tx.Exec(`DELETE FROM translations WHERE paper_id = ?`, id); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM deepread_notes WHERE paper_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM deepread_parse_cache WHERE paper_id = ?`, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM papers WHERE id = ?`, id); err != nil {
 		return err
 	}
@@ -866,6 +1039,165 @@ func (db *DB) GetTranslations(paperID string) ([]TranslationRecord, error) {
 	return records, rows.Err()
 }
 
+func (db *DB) GetDeepReadParseCache(paperID string) (*DeepReadParseCache, error) {
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	var (
+		cache       DeepReadParseCache
+		pdfPath     sql.NullString
+		errorRaw    sql.NullString
+		markdownRaw sql.NullString
+		sectionsRaw string
+	)
+	err := db.conn.QueryRow(`
+		SELECT paper_id, pdf_path, status, error_message, markdown, sections_json, updated_at
+		FROM deepread_parse_cache
+		WHERE paper_id = ?
+		LIMIT 1
+	`, paperID).Scan(
+		&cache.PaperID,
+		&pdfPath,
+		&cache.Status,
+		&errorRaw,
+		&markdownRaw,
+		&sectionsRaw,
+		&cache.LastPreparedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	cache.PDFPath = strings.TrimSpace(pdfPath.String)
+	cache.ErrorMessage = strings.TrimSpace(errorRaw.String)
+	cache.Markdown = markdownRaw.String
+	cache.Sections = decodeDeepReadSections(sectionsRaw)
+	return &cache, nil
+}
+
+func (db *DB) UpsertDeepReadParseCache(cache *DeepReadParseCache) error {
+	if cache == nil {
+		return fmt.Errorf("deepread parse cache cannot be nil")
+	}
+	cache.PaperID = strings.TrimSpace(cache.PaperID)
+	if cache.PaperID == "" {
+		return fmt.Errorf("paper id cannot be empty")
+	}
+	cache.Status = strings.TrimSpace(cache.Status)
+	if cache.Status == "" {
+		cache.Status = "idle"
+	}
+	if cache.LastPreparedAt.IsZero() {
+		cache.LastPreparedAt = time.Now()
+	}
+
+	sectionsJSON, err := json.Marshal(cache.Sections)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.conn.Exec(`
+		INSERT INTO deepread_parse_cache (
+			paper_id, pdf_path, status, error_message, markdown, sections_json, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(paper_id) DO UPDATE SET
+			pdf_path = excluded.pdf_path,
+			status = excluded.status,
+			error_message = excluded.error_message,
+			markdown = excluded.markdown,
+			sections_json = excluded.sections_json,
+			updated_at = excluded.updated_at
+	`,
+		cache.PaperID,
+		nullIfBlank(cache.PDFPath),
+		cache.Status,
+		nullIfBlank(cache.ErrorMessage),
+		nullIfBlank(cache.Markdown),
+		string(sectionsJSON),
+		cache.LastPreparedAt,
+	)
+	return err
+}
+
+func (db *DB) SaveDeepReadNote(note *DeepReadNote) error {
+	if note == nil {
+		return fmt.Errorf("deepread note cannot be nil")
+	}
+	note.PaperID = strings.TrimSpace(note.PaperID)
+	note.Section = strings.TrimSpace(note.Section)
+	note.Content = strings.TrimSpace(note.Content)
+	if note.PaperID == "" {
+		return fmt.Errorf("paper id cannot be empty")
+	}
+	if note.Section == "" {
+		note.Section = "General"
+	}
+	if note.Content == "" {
+		return fmt.Errorf("note content cannot be empty")
+	}
+	if note.ID == "" {
+		note.ID = uuid.NewString()
+	}
+	now := time.Now()
+	if note.CreatedAt.IsZero() {
+		note.CreatedAt = now
+	}
+	if note.UpdatedAt.IsZero() {
+		note.UpdatedAt = note.CreatedAt
+	}
+
+	_, err := db.conn.Exec(`
+		INSERT INTO deepread_notes (
+			id, paper_id, section, content, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`,
+		note.ID,
+		note.PaperID,
+		note.Section,
+		note.Content,
+		note.CreatedAt,
+		note.UpdatedAt,
+	)
+	return err
+}
+
+func (db *DB) GetDeepReadNotes(paperID string) ([]DeepReadNote, error) {
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return []DeepReadNote{}, nil
+	}
+
+	rows, err := db.conn.Query(`
+		SELECT id, paper_id, section, content, created_at, updated_at
+		FROM deepread_notes
+		WHERE paper_id = ?
+		ORDER BY created_at DESC
+	`, paperID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	notes := make([]DeepReadNote, 0, 8)
+	for rows.Next() {
+		var note DeepReadNote
+		if err := rows.Scan(
+			&note.ID,
+			&note.PaperID,
+			&note.Section,
+			&note.Content,
+			&note.CreatedAt,
+			&note.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		notes = append(notes, note)
+	}
+	return notes, rows.Err()
+}
+
 func (db *DB) UpsertDeepStartSession(detail *DeepStartSessionDetail) error {
 	if detail == nil {
 		return fmt.Errorf("deepstart session detail cannot be nil")
@@ -881,6 +1213,24 @@ func (db *DB) UpsertDeepStartSession(detail *DeepStartSessionDetail) error {
 	if detail.Summary.UpdatedAt.IsZero() {
 		detail.Summary.UpdatedAt = now
 	}
+	if detail.Summary.InitialReadyCount < 0 {
+		detail.Summary.InitialReadyCount = 0
+	}
+	if detail.Summary.TotalPlannedCount < detail.Summary.InitialReadyCount {
+		detail.Summary.TotalPlannedCount = detail.Summary.InitialReadyCount
+	}
+	if detail.Summary.BackgroundRemaining < 0 {
+		detail.Summary.BackgroundRemaining = 0
+	}
+	status := strings.TrimSpace(detail.Summary.ProcessingStatus)
+	if status == "" {
+		if detail.Summary.BackgroundRemaining > 0 {
+			status = "background_processing"
+		} else {
+			status = "completed"
+		}
+	}
+	detail.Summary.ProcessingStatus = status
 
 	resultsJSON, err := json.Marshal(detail.CurrentResults)
 	if err != nil {
@@ -903,8 +1253,9 @@ func (db *DB) UpsertDeepStartSession(detail *DeepStartSessionDetail) error {
 	_, err = db.conn.Exec(`
 		INSERT INTO deepstart_sessions (
 			id, title, root_prompt, current_query, target_folder_id, current_results_json,
-			current_analysis_json, selected_paper_ids_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			current_analysis_json, selected_paper_ids_json, processing_status, initial_ready_count,
+			total_planned_count, background_remaining, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			root_prompt = excluded.root_prompt,
@@ -913,6 +1264,10 @@ func (db *DB) UpsertDeepStartSession(detail *DeepStartSessionDetail) error {
 			current_results_json = excluded.current_results_json,
 			current_analysis_json = excluded.current_analysis_json,
 			selected_paper_ids_json = excluded.selected_paper_ids_json,
+			processing_status = excluded.processing_status,
+			initial_ready_count = excluded.initial_ready_count,
+			total_planned_count = excluded.total_planned_count,
+			background_remaining = excluded.background_remaining,
 			updated_at = excluded.updated_at
 	`,
 		detail.Summary.ID,
@@ -923,6 +1278,10 @@ func (db *DB) UpsertDeepStartSession(detail *DeepStartSessionDetail) error {
 		string(resultsJSON),
 		analysisJSON,
 		string(selectedJSON),
+		detail.Summary.ProcessingStatus,
+		detail.Summary.InitialReadyCount,
+		detail.Summary.TotalPlannedCount,
+		detail.Summary.BackgroundRemaining,
 		detail.Summary.CreatedAt,
 		detail.Summary.UpdatedAt,
 	)
@@ -1054,6 +1413,7 @@ func (db *DB) GetDeepStartEnrichmentCache(cacheKey string) (*DeepStartEnrichment
 	)
 	err := db.conn.QueryRow(`
 		SELECT cache_key, institutions_json, keywords_json, source_label,
+		       publication_venue, publication_year, citation_count,
 		       openalex_attempted, crossref_attempted, error_message, updated_at
 		FROM deepstart_enrichment_cache
 		WHERE cache_key = ?
@@ -1062,6 +1422,9 @@ func (db *DB) GetDeepStartEnrichmentCache(cacheKey string) (*DeepStartEnrichment
 		&institutionsJSON,
 		&keywordsJSON,
 		&entry.SourceLabel,
+		&entry.PublicationVenue,
+		&entry.PublicationYear,
+		&entry.CitationCount,
 		&openAlexAttempt,
 		&crossrefAttempt,
 		&errorMessage,
@@ -1104,12 +1467,16 @@ func (db *DB) UpsertDeepStartEnrichmentCache(entry *DeepStartEnrichmentCache) er
 	_, err = db.conn.Exec(`
 		INSERT INTO deepstart_enrichment_cache (
 			cache_key, institutions_json, keywords_json, source_label,
+			publication_venue, publication_year, citation_count,
 			openalex_attempted, crossref_attempted, error_message, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(cache_key) DO UPDATE SET
 			institutions_json = excluded.institutions_json,
 			keywords_json = excluded.keywords_json,
 			source_label = excluded.source_label,
+			publication_venue = excluded.publication_venue,
+			publication_year = excluded.publication_year,
+			citation_count = excluded.citation_count,
 			openalex_attempted = excluded.openalex_attempted,
 			crossref_attempted = excluded.crossref_attempted,
 			error_message = excluded.error_message,
@@ -1119,6 +1486,9 @@ func (db *DB) UpsertDeepStartEnrichmentCache(entry *DeepStartEnrichmentCache) er
 		string(institutionsJSON),
 		string(keywordsJSON),
 		strings.TrimSpace(entry.SourceLabel),
+		strings.TrimSpace(entry.PublicationVenue),
+		entry.PublicationYear,
+		entry.CitationCount,
 		boolToInt(entry.OpenAlexAttempted),
 		boolToInt(entry.CrossrefAttempted),
 		nullIfBlank(entry.ErrorMessage),
@@ -1129,7 +1499,9 @@ func (db *DB) UpsertDeepStartEnrichmentCache(entry *DeepStartEnrichmentCache) er
 
 func (db *DB) ListDeepStartSessions() ([]DeepStartSessionSummary, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, title, root_prompt, current_query, target_folder_id, created_at, updated_at
+		SELECT id, title, root_prompt, current_query, target_folder_id,
+		       processing_status, initial_ready_count, total_planned_count, background_remaining,
+		       created_at, updated_at
 		FROM deepstart_sessions
 		ORDER BY updated_at DESC, created_at DESC
 	`)
@@ -1148,12 +1520,25 @@ func (db *DB) ListDeepStartSessions() ([]DeepStartSessionSummary, error) {
 			&session.RootPrompt,
 			&session.CurrentQuery,
 			&targetFolderID,
+			&session.ProcessingStatus,
+			&session.InitialReadyCount,
+			&session.TotalPlannedCount,
+			&session.BackgroundRemaining,
 			&session.CreatedAt,
 			&session.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		session.TargetFolderID = targetFolderID.String
+		if strings.TrimSpace(session.ProcessingStatus) == "" {
+			session.ProcessingStatus = "completed"
+		}
+		if session.BackgroundRemaining < 0 {
+			session.BackgroundRemaining = 0
+		}
+		if session.TotalPlannedCount < session.InitialReadyCount {
+			session.TotalPlannedCount = session.InitialReadyCount
+		}
 		sessions = append(sessions, session)
 	}
 
@@ -1169,7 +1554,8 @@ func (db *DB) GetDeepStartSession(sessionID string) (*DeepStartSessionDetail, er
 
 	err := db.conn.QueryRow(`
 		SELECT id, title, root_prompt, current_query, target_folder_id, current_results_json,
-		       current_analysis_json, selected_paper_ids_json, created_at, updated_at
+		       current_analysis_json, selected_paper_ids_json, processing_status, initial_ready_count,
+		       total_planned_count, background_remaining, created_at, updated_at
 		FROM deepstart_sessions
 		WHERE id = ?
 	`, sessionID).Scan(
@@ -1181,6 +1567,10 @@ func (db *DB) GetDeepStartSession(sessionID string) (*DeepStartSessionDetail, er
 		&resultsRaw,
 		&analysisRaw,
 		&selectedRaw,
+		&detail.Summary.ProcessingStatus,
+		&detail.Summary.InitialReadyCount,
+		&detail.Summary.TotalPlannedCount,
+		&detail.Summary.BackgroundRemaining,
 		&detail.Summary.CreatedAt,
 		&detail.Summary.UpdatedAt,
 	)
@@ -1191,6 +1581,25 @@ func (db *DB) GetDeepStartSession(sessionID string) (*DeepStartSessionDetail, er
 	detail.CurrentResults = decodeSearchPapers(resultsRaw)
 	detail.CurrentAnalysis = decodeDeepStartAnalysis(analysisRaw.String)
 	detail.SelectedPaperIDs = decodeStringSlice(selectedRaw)
+	if detail.Summary.InitialReadyCount <= 0 {
+		detail.Summary.InitialReadyCount = len(detail.CurrentResults)
+	}
+	if detail.Summary.BackgroundRemaining < 0 {
+		detail.Summary.BackgroundRemaining = 0
+	}
+	if detail.Summary.TotalPlannedCount <= 0 {
+		detail.Summary.TotalPlannedCount = detail.Summary.InitialReadyCount + detail.Summary.BackgroundRemaining
+	}
+	if detail.Summary.TotalPlannedCount < detail.Summary.InitialReadyCount {
+		detail.Summary.TotalPlannedCount = detail.Summary.InitialReadyCount
+	}
+	if strings.TrimSpace(detail.Summary.ProcessingStatus) == "" {
+		if detail.Summary.BackgroundRemaining > 0 {
+			detail.Summary.ProcessingStatus = "background_processing"
+		} else {
+			detail.Summary.ProcessingStatus = "completed"
+		}
+	}
 
 	messages, err := db.getDeepStartMessages(sessionID)
 	if err != nil {
@@ -1287,6 +1696,19 @@ func decodeStringSlice(raw string) []string {
 		return []string{}
 	}
 	return values
+}
+
+func decodeDeepReadSections(raw string) []DeepReadSection {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []DeepReadSection{}
+	}
+
+	var sections []DeepReadSection
+	if err := json.Unmarshal([]byte(raw), &sections); err != nil {
+		return []DeepReadSection{}
+	}
+	return sections
 }
 
 func nullIfBlank(value string) interface{} {

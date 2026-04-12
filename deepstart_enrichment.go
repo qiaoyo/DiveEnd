@@ -28,6 +28,13 @@ type DeepStartEnricher struct {
 	crossrefBaseURL string
 }
 
+type deepStartPublicationMetadata struct {
+	Venue         string
+	Year          int
+	CitationCount int
+	PDFURLs       []string
+}
+
 func NewDeepStartEnricher(db *DB) *DeepStartEnricher {
 	return &DeepStartEnricher{
 		db:              db,
@@ -82,6 +89,15 @@ func (e *DeepStartEnricher) EnrichPapers(
 
 func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string, paper SearchPaper) (SearchPaper, string) {
 	paper.SourceLabel = resolveSearchSourceLabel(paper)
+	if paper.PublicationYear <= 0 {
+		paper.PublicationYear = paper.Year
+	}
+	if strings.TrimSpace(paper.PublicationVenue) == "" {
+		paper.PublicationVenue = strings.TrimSpace(paper.Journal)
+	}
+	if strings.TrimSpace(paper.Journal) == "" && strings.TrimSpace(paper.PublicationVenue) != "" {
+		paper.Journal = strings.TrimSpace(paper.PublicationVenue)
+	}
 	if shouldSkipExternalEnrichment(paper) {
 		paper.Keywords = buildPaperKeywords(paper, query, paper.Keywords)
 		paper.EnrichmentNote = ""
@@ -96,6 +112,21 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 			if strings.TrimSpace(cached.SourceLabel) != "" {
 				paper.SourceLabel = strings.TrimSpace(cached.SourceLabel)
 			}
+			if strings.TrimSpace(cached.PublicationVenue) != "" {
+				paper.PublicationVenue = strings.TrimSpace(cached.PublicationVenue)
+				if strings.TrimSpace(paper.Journal) == "" {
+					paper.Journal = paper.PublicationVenue
+				}
+			}
+			if cached.PublicationYear > 0 {
+				paper.PublicationYear = cached.PublicationYear
+				if paper.Year <= 0 {
+					paper.Year = cached.PublicationYear
+				}
+			}
+			if cached.CitationCount > 0 {
+				paper.CitationCount = cached.CitationCount
+			}
 			paper.EnrichmentNote = strings.TrimSpace(cached.ErrorMessage)
 			return paper, "使用缓存补全"
 		}
@@ -107,7 +138,13 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 	crossrefAttempted := false
 	var errorParts []string
 
-	openAlexInstitutions, openAlexKeywords, openAlexErr := e.fetchOpenAlexMetadata(ctx, paper)
+	publication := deepStartPublicationMetadata{
+		Venue:         strings.TrimSpace(paper.PublicationVenue),
+		Year:          paper.PublicationYear,
+		CitationCount: paper.CitationCount,
+	}
+
+	openAlexInstitutions, openAlexKeywords, openAlexPublication, openAlexErr := e.fetchOpenAlexMetadata(ctx, paper)
 	openAlexAttempted = true
 	if openAlexErr != nil {
 		errorParts = append(errorParts, "OpenAlex: "+openAlexErr.Error())
@@ -116,18 +153,18 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 		institutions = normalizeInstitutionList(openAlexInstitutions)
 	}
 	keywords = buildPaperKeywords(paper, query, append(keywords, openAlexKeywords...))
+	publication = mergePublicationMetadata(publication, openAlexPublication)
 
-	if len(institutions) == 0 {
-		crossrefInstitutions, crossrefKeywords, crossrefErr := e.fetchCrossrefMetadata(ctx, paper)
-		crossrefAttempted = true
-		if crossrefErr != nil {
-			errorParts = append(errorParts, "Crossref: "+crossrefErr.Error())
-		}
-		if len(institutions) == 0 {
-			institutions = normalizeInstitutionList(crossrefInstitutions)
-		}
-		keywords = buildPaperKeywords(paper, query, append(keywords, crossrefKeywords...))
+	crossrefInstitutions, crossrefKeywords, crossrefPublication, crossrefErr := e.fetchCrossrefMetadata(ctx, paper)
+	crossrefAttempted = true
+	if crossrefErr != nil {
+		errorParts = append(errorParts, "Crossref: "+crossrefErr.Error())
 	}
+	if len(institutions) == 0 {
+		institutions = normalizeInstitutionList(crossrefInstitutions)
+	}
+	keywords = buildPaperKeywords(paper, query, append(keywords, crossrefKeywords...))
+	publication = mergePublicationMetadata(publication, crossrefPublication)
 
 	errorMessage := strings.Join(errorParts, "; ")
 	if len(institutions) == 0 {
@@ -136,6 +173,20 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 
 	paper.Institutions = institutions
 	paper.Keywords = keywords
+	if len(publication.PDFURLs) > 0 {
+		paper.PDFCandidates = uniqueStrings(append(paper.PDFCandidates, publication.PDFURLs...))
+	}
+	paper.PublicationVenue = strings.TrimSpace(publication.Venue)
+	paper.PublicationYear = publication.Year
+	if paper.PublicationYear > 0 {
+		paper.Year = paper.PublicationYear
+	}
+	if strings.TrimSpace(paper.PublicationVenue) != "" {
+		paper.Journal = strings.TrimSpace(paper.PublicationVenue)
+	}
+	if publication.CitationCount > 0 {
+		paper.CitationCount = publication.CitationCount
+	}
 	paper.SourceLabel = resolveSearchSourceLabel(paper)
 	paper.EnrichmentNote = errorMessage
 
@@ -145,6 +196,9 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 			Institutions:      institutions,
 			Keywords:          keywords,
 			SourceLabel:       paper.SourceLabel,
+			PublicationVenue:  paper.PublicationVenue,
+			PublicationYear:   paper.PublicationYear,
+			CitationCount:     paper.CitationCount,
 			OpenAlexAttempted: openAlexAttempted,
 			CrossrefAttempted: crossrefAttempted,
 			ErrorMessage:      paper.EnrichmentNote,
@@ -159,10 +213,10 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 	return paper, "机构补全完成"
 }
 
-func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper SearchPaper) ([]string, []string, error) {
+func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper SearchPaper) ([]string, []string, deepStartPublicationMetadata, error) {
 	query := strings.TrimSpace(paper.Title)
 	if query == "" {
-		return nil, nil, fmt.Errorf("missing title")
+		return nil, nil, deepStartPublicationMetadata{}, fmt.Errorf("missing title")
 	}
 
 	values := url.Values{}
@@ -173,14 +227,23 @@ func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper Sea
 
 	body, err := e.getJSON(ctx, endpoint, "")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, deepStartPublicationMetadata{}, err
 	}
 
 	var result struct {
 		Results []struct {
 			Title           string `json:"title"`
 			PublicationYear int    `json:"publication_year"`
-			Authorships     []struct {
+			CitedByCount    int    `json:"cited_by_count"`
+			HostVenue       *struct {
+				DisplayName string `json:"display_name"`
+			} `json:"host_venue"`
+			PrimaryLocation *struct {
+				Source *struct {
+					DisplayName string `json:"display_name"`
+				} `json:"source"`
+			} `json:"primary_location"`
+			Authorships []struct {
 				Institutions []struct {
 					DisplayName string `json:"display_name"`
 				} `json:"institutions"`
@@ -189,13 +252,17 @@ func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper Sea
 				DisplayName string  `json:"display_name"`
 				Score       float64 `json:"score"`
 			} `json:"concepts"`
+			BestOALocation *struct {
+				PDFURL         string `json:"pdf_url"`
+				LandingPageURL string `json:"landing_page_url"`
+			} `json:"best_oa_location"`
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, nil, err
+		return nil, nil, deepStartPublicationMetadata{}, err
 	}
 	if len(result.Results) == 0 {
-		return nil, nil, fmt.Errorf("empty results")
+		return nil, nil, deepStartPublicationMetadata{}, fmt.Errorf("empty results")
 	}
 
 	best := chooseOpenAlexResult(result.Results, paper)
@@ -221,13 +288,44 @@ func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper Sea
 		}
 	}
 
-	return normalizeInstitutionList(institutions), uniqueStrings(keywords), nil
+	venue := ""
+	if best.PrimaryLocation != nil && best.PrimaryLocation.Source != nil {
+		venue = strings.TrimSpace(best.PrimaryLocation.Source.DisplayName)
+	}
+	if venue == "" && best.HostVenue != nil {
+		venue = strings.TrimSpace(best.HostVenue.DisplayName)
+	}
+	publication := deepStartPublicationMetadata{
+		Venue:         venue,
+		Year:          best.PublicationYear,
+		CitationCount: best.CitedByCount,
+	}
+	if best.BestOALocation != nil {
+		if pdfURL := strings.TrimSpace(best.BestOALocation.PDFURL); pdfURL != "" {
+			publication.PDFURLs = append(publication.PDFURLs, pdfURL)
+		}
+		if landingURL := strings.TrimSpace(best.BestOALocation.LandingPageURL); landingURL != "" {
+			publication.PDFURLs = append(publication.PDFURLs, landingURL)
+		}
+	}
+	publication.PDFURLs = uniqueStrings(publication.PDFURLs)
+
+	return normalizeInstitutionList(institutions), uniqueStrings(keywords), publication, nil
 }
 
 func chooseOpenAlexResult(results []struct {
 	Title           string `json:"title"`
 	PublicationYear int    `json:"publication_year"`
-	Authorships     []struct {
+	CitedByCount    int    `json:"cited_by_count"`
+	HostVenue       *struct {
+		DisplayName string `json:"display_name"`
+	} `json:"host_venue"`
+	PrimaryLocation *struct {
+		Source *struct {
+			DisplayName string `json:"display_name"`
+		} `json:"source"`
+	} `json:"primary_location"`
+	Authorships []struct {
 		Institutions []struct {
 			DisplayName string `json:"display_name"`
 		} `json:"institutions"`
@@ -236,10 +334,23 @@ func chooseOpenAlexResult(results []struct {
 		DisplayName string  `json:"display_name"`
 		Score       float64 `json:"score"`
 	} `json:"concepts"`
+	BestOALocation *struct {
+		PDFURL         string `json:"pdf_url"`
+		LandingPageURL string `json:"landing_page_url"`
+	} `json:"best_oa_location"`
 }, paper SearchPaper) struct {
 	Title           string `json:"title"`
 	PublicationYear int    `json:"publication_year"`
-	Authorships     []struct {
+	CitedByCount    int    `json:"cited_by_count"`
+	HostVenue       *struct {
+		DisplayName string `json:"display_name"`
+	} `json:"host_venue"`
+	PrimaryLocation *struct {
+		Source *struct {
+			DisplayName string `json:"display_name"`
+		} `json:"source"`
+	} `json:"primary_location"`
+	Authorships []struct {
 		Institutions []struct {
 			DisplayName string `json:"display_name"`
 		} `json:"institutions"`
@@ -248,6 +359,10 @@ func chooseOpenAlexResult(results []struct {
 		DisplayName string  `json:"display_name"`
 		Score       float64 `json:"score"`
 	} `json:"concepts"`
+	BestOALocation *struct {
+		PDFURL         string `json:"pdf_url"`
+		LandingPageURL string `json:"landing_page_url"`
+	} `json:"best_oa_location"`
 } {
 	target := normalizedDedupeToken(paper.Title)
 	best := results[0]
@@ -278,10 +393,10 @@ func openAlexMatchScore(title string, year int, targetTitle string, targetYear i
 	return score
 }
 
-func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper SearchPaper) ([]string, []string, error) {
+func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper SearchPaper) ([]string, []string, deepStartPublicationMetadata, error) {
 	query := strings.TrimSpace(paper.Title)
 	if query == "" {
-		return nil, nil, fmt.Errorf("missing title")
+		return nil, nil, deepStartPublicationMetadata{}, fmt.Errorf("missing title")
 	}
 
 	values := url.Values{}
@@ -291,15 +406,17 @@ func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper Sea
 
 	body, err := e.getJSON(ctx, endpoint, "application/json")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, deepStartPublicationMetadata{}, err
 	}
 
 	var result struct {
 		Message struct {
 			Items []struct {
-				Title   []string `json:"title"`
-				Subject []string `json:"subject"`
-				Author  []struct {
+				Title               []string `json:"title"`
+				Subject             []string `json:"subject"`
+				ContainerTitle      []string `json:"container-title"`
+				IsReferencedByCount int      `json:"is-referenced-by-count"`
+				Author              []struct {
 					Affiliation []struct {
 						Name string `json:"name"`
 					} `json:"affiliation"`
@@ -311,10 +428,10 @@ func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper Sea
 		} `json:"message"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, nil, err
+		return nil, nil, deepStartPublicationMetadata{}, err
 	}
 	if len(result.Message.Items) == 0 {
-		return nil, nil, fmt.Errorf("empty results")
+		return nil, nil, deepStartPublicationMetadata{}, fmt.Errorf("empty results")
 	}
 
 	best := chooseCrossrefItem(result.Message.Items, paper)
@@ -334,13 +451,25 @@ func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper Sea
 		}
 	}
 
-	return normalizeInstitutionList(institutions), uniqueStrings(keywords), nil
+	publicationVenue := ""
+	if len(best.ContainerTitle) > 0 {
+		publicationVenue = strings.TrimSpace(best.ContainerTitle[0])
+	}
+	publication := deepStartPublicationMetadata{
+		Venue:         publicationVenue,
+		Year:          extractCrossrefYear(best.Issued.DateParts),
+		CitationCount: best.IsReferencedByCount,
+	}
+
+	return normalizeInstitutionList(institutions), uniqueStrings(keywords), publication, nil
 }
 
 func chooseCrossrefItem(items []struct {
-	Title   []string `json:"title"`
-	Subject []string `json:"subject"`
-	Author  []struct {
+	Title               []string `json:"title"`
+	Subject             []string `json:"subject"`
+	ContainerTitle      []string `json:"container-title"`
+	IsReferencedByCount int      `json:"is-referenced-by-count"`
+	Author              []struct {
 		Affiliation []struct {
 			Name string `json:"name"`
 		} `json:"affiliation"`
@@ -349,9 +478,11 @@ func chooseCrossrefItem(items []struct {
 		DateParts [][]int `json:"date-parts"`
 	} `json:"issued"`
 }, paper SearchPaper) struct {
-	Title   []string `json:"title"`
-	Subject []string `json:"subject"`
-	Author  []struct {
+	Title               []string `json:"title"`
+	Subject             []string `json:"subject"`
+	ContainerTitle      []string `json:"container-title"`
+	IsReferencedByCount int      `json:"is-referenced-by-count"`
+	Author              []struct {
 		Affiliation []struct {
 			Name string `json:"name"`
 		} `json:"affiliation"`
@@ -423,7 +554,23 @@ func (e *DeepStartEnricher) getJSON(ctx context.Context, endpoint string, accept
 	return io.ReadAll(resp.Body)
 }
 
-func buildPaperKeywords(paper SearchPaper, _ string, candidates []string) []string {
+func mergePublicationMetadata(base deepStartPublicationMetadata, candidate deepStartPublicationMetadata) deepStartPublicationMetadata {
+	if strings.TrimSpace(base.Venue) == "" && strings.TrimSpace(candidate.Venue) != "" {
+		base.Venue = strings.TrimSpace(candidate.Venue)
+	}
+	if base.Year <= 0 && candidate.Year > 0 {
+		base.Year = candidate.Year
+	}
+	if candidate.CitationCount > base.CitationCount {
+		base.CitationCount = candidate.CitationCount
+	}
+	if len(candidate.PDFURLs) > 0 {
+		base.PDFURLs = uniqueStrings(append(base.PDFURLs, candidate.PDFURLs...))
+	}
+	return base
+}
+
+func buildPaperKeywords(paper SearchPaper, query string, candidates []string) []string {
 	keywords := make([]string, 0, len(candidates)+len(paper.Tags))
 	keywords = append(keywords, candidates...)
 	keywords = append(keywords, paper.Tags...)
@@ -432,17 +579,17 @@ func buildPaperKeywords(paper SearchPaper, _ string, candidates []string) []stri
 	if len(keywords) == 0 {
 		keywords = append(keywords, extractKeywordsFromText(strings.Join([]string{paper.Title, paper.Abstract}, " "))...)
 	}
-	return uniqueStrings(trimKeywordList(keywords, 10))
+	return uniqueStrings(trimKeywordList(keywords, query, 10))
 }
 
-func trimKeywordList(values []string, limit int) []string {
+func trimKeywordList(values []string, query string, limit int) []string {
 	clean := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
-		if shouldSkipKeyword(value) {
+		if shouldSkipKeyword(value, query) {
 			continue
 		}
 		clean = append(clean, value)
@@ -453,10 +600,19 @@ func trimKeywordList(values []string, limit int) []string {
 	return clean
 }
 
-func shouldSkipKeyword(value string) bool {
+func shouldSkipKeyword(value, query string) bool {
 	normalized := strings.TrimSpace(strings.ToLower(value))
 	if normalized == "" {
 		return true
+	}
+	normalizedQuery := strings.TrimSpace(strings.ToLower(query))
+	if normalizedQuery != "" {
+		if normalized == normalizedQuery {
+			return true
+		}
+		if len([]rune(normalizedQuery)) > 12 && strings.Contains(normalized, normalizedQuery) {
+			return true
+		}
 	}
 	if len([]rune(normalized)) > 64 {
 		return true

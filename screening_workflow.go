@@ -273,7 +273,7 @@ func (a *App) AnalyzePapers(sessionID string) (*ScreeningDecisionNode, error) {
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
-	if a.llm == nil {
+	if a.currentStrongLLM() == nil {
 		return nil, fmt.Errorf("LLM client is not initialized")
 	}
 
@@ -315,7 +315,7 @@ func (a *App) ApplyScreeningChoice(sessionID string, selectedOptions []string) (
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
-	if a.llm == nil {
+	if a.currentStrongLLM() == nil {
 		return nil, fmt.Errorf("LLM client is not initialized")
 	}
 
@@ -491,7 +491,12 @@ func (a *App) buildNextScreeningNode(sessionTitle string, papers []ScreeningPape
 		return buildCompletionNode(activePapers), nil
 	}
 
-	node, err := a.llm.AnalyzeScreening(ScreeningAIRequest{
+	strong := a.currentStrongLLM()
+	if strong == nil {
+		return nil, fmt.Errorf("LLM client is not initialized")
+	}
+
+	node, err := strong.AnalyzeScreening(ScreeningAIRequest{
 		SessionTitle: sessionTitle,
 		Papers:       activePapers,
 		PathHistory:  history,
@@ -835,7 +840,7 @@ func decodeStoredScreeningContent(raw string) storedScreeningContent {
 }
 
 func pdfProviderForConfig(config AppConfig) string {
-	if normalizeLLMConfig(config.LLM).ProviderType == "anthropic" {
+	if normalizeLLMConfig(config.WeakLLM).ProviderType == "anthropic" {
 		return "anthropic"
 	}
 	return "openai"

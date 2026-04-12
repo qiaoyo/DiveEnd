@@ -50,6 +50,14 @@ export function ExtractPaperContent(arg1) {
   return window['go']['main']['App']['ExtractPaperContent'](arg1);
 }
 
+export function GetDeepReadPDFBytes(arg1) {
+  return window['go']['main']['App']['GetDeepReadPDFBytes'](arg1);
+}
+
+export function GetDeepReadState(arg1) {
+  return window['go']['main']['App']['GetDeepReadState'](arg1);
+}
+
 export function GetDeepStartSession(arg1) {
   return window['go']['main']['App']['GetDeepStartSession'](arg1);
 }
@@ -130,6 +138,10 @@ export function ListScreeningSessions() {
   return window['go']['main']['App']['ListScreeningSessions']();
 }
 
+export function PrepareDeepReadPaper(arg1) {
+  return window['go']['main']['App']['PrepareDeepReadPaper'](arg1);
+}
+
 export function ReplyDeepStartSession(arg1, arg2) {
   return window['go']['main']['App']['ReplyDeepStartSession'](arg1, arg2);
 }
@@ -142,8 +154,20 @@ export function ResolveSyncConflict(arg1, arg2) {
   return window['go']['main']['App']['ResolveSyncConflict'](arg1, arg2);
 }
 
+export function RetryPaperDownload(arg1) {
+  return window['go']['main']['App']['RetryPaperDownload'](arg1);
+}
+
+export function RetryPaperDownloadWithURL(arg1, arg2) {
+  return window['go']['main']['App']['RetryPaperDownloadWithURL'](arg1, arg2);
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
+}
+
+export function SaveDeepReadNote(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveDeepReadNote'](arg1, arg2, arg3);
 }
 
 export function SearchPapers(arg1, arg2) {
@@ -152,6 +176,10 @@ export function SearchPapers(arg1, arg2) {
 
 export function StartDeepStartSession(arg1, arg2) {
   return window['go']['main']['App']['StartDeepStartSession'](arg1, arg2);
+}
+
+export function SupplementDeepStartSearch(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SupplementDeepStartSearch'](arg1, arg2, arg3);
 }
 
 export function TranslatePaperSection(arg1, arg2, arg3) {

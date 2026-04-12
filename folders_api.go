@@ -27,8 +27,23 @@ func (a *App) CreateFolderNode(request CreateFolderNodeRequest) (*Folder, error)
 	}
 
 	parentID := strings.TrimSpace(request.ParentID)
-	path := normalizeFolderPath(request.Path)
-	name := normalizeFolderSegment(request.Name)
+	rawPath := strings.TrimSpace(request.Path)
+	rawName := strings.TrimSpace(request.Name)
+
+	path := ""
+	name := ""
+	if rawPath != "" {
+		if err := validateFolderPathStrict(rawPath); err != nil {
+			return nil, err
+		}
+		path = normalizeFolderPath(rawPath)
+	}
+	if rawName != "" {
+		if err := validateFolderSegmentStrict(rawName); err != nil {
+			return nil, err
+		}
+		name = normalizeFolderSegment(rawName)
+	}
 
 	var (
 		folder Folder

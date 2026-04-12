@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -108,7 +110,7 @@ func (c *PDFServiceClient) ParsePDF(filePath string) (*PDFParseResponse, error) 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call PDF parse service: %w", err)
+		return nil, classifyPDFServiceCallError(c.baseURL, "parse", err)
 	}
 	defer resp.Body.Close()
 
@@ -150,7 +152,7 @@ func (c *PDFServiceClient) ExtractContent(markdown, provider string) (*PDFExtrac
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call extraction service: %w", err)
+		return nil, classifyPDFServiceCallError(c.baseURL, "extract", err)
 	}
 	defer resp.Body.Close()
 
@@ -170,6 +172,28 @@ func (c *PDFServiceClient) ExtractContent(markdown, provider string) (*PDFExtrac
 	}
 
 	return &result, nil
+}
+
+func classifyPDFServiceCallError(baseURL, operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	var netErr net.Error
+	if strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "no such host") ||
+		strings.Contains(message, "network is unreachable") ||
+		strings.Contains(message, "connection reset by peer") ||
+		(errors.As(err, &netErr) && netErr.Timeout()) {
+		return fmt.Errorf(
+			"failed to call PDF %s service: 无法连接 %s。请先启动 PDF 服务：cd services/pdf_service && pip install -r requirements.txt && uvicorn app.main:app --reload --host 0.0.0.0 --port 50051",
+			operation,
+			baseURL,
+		)
+	}
+
+	return fmt.Errorf("failed to call PDF %s service: %w", operation, err)
 }
 
 func decodeServiceError(operation string, resp *http.Response) error {

@@ -26,6 +26,10 @@ export function EnhancedSearchPapers(arg1:string,arg2:number,arg3:number,arg4:nu
 
 export function ExtractPaperContent(arg1:string):Promise<main.ExtractProgress>;
 
+export function GetDeepReadPDFBytes(arg1:string):Promise<string>;
+
+export function GetDeepReadState(arg1:string):Promise<main.DeepReadState>;
+
 export function GetDeepStartSession(arg1:string):Promise<main.DeepStartSessionDetail>;
 
 export function GetExtractProgress(arg1:string):Promise<main.ExtractProgress>;
@@ -66,17 +70,27 @@ export function ListDeepStartSessions():Promise<Array<main.DeepStartSessionSumma
 
 export function ListScreeningSessions():Promise<Array<main.ScreeningSession>>;
 
+export function PrepareDeepReadPaper(arg1:string):Promise<main.DeepReadState>;
+
 export function ReplyDeepStartSession(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
 
 export function RerunDeepStartSearch(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
 
 export function ResolveSyncConflict(arg1:string,arg2:string):Promise<void>;
 
+export function RetryPaperDownload(arg1:string):Promise<void>;
+
+export function RetryPaperDownloadWithURL(arg1:string,arg2:string):Promise<void>;
+
 export function SaveConfig(arg1:main.AppConfig):Promise<main.SaveConfigResult>;
+
+export function SaveDeepReadNote(arg1:string,arg2:string,arg3:string):Promise<main.DeepReadNote>;
 
 export function SearchPapers(arg1:string,arg2:number):Promise<Array<main.SearchPaper>>;
 
 export function StartDeepStartSession(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
+
+export function SupplementDeepStartSearch(arg1:string,arg2:string,arg3:number):Promise<main.DeepStartSessionDetail>;
 
 export function TranslatePaperSection(arg1:string,arg2:string,arg3:string):Promise<main.TranslationRecord>;
 

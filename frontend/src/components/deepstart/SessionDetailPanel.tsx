@@ -17,6 +17,7 @@ import {
   cancelDeepStartTask,
   createFolderNode,
   deleteFolderNode,
+  getDeepStartSession,
   getFolderStorageTreeOverview,
   getFolderTree,
   getPapers,
@@ -24,6 +25,7 @@ import {
   onDeepStartProgress,
   replyDeepStartSession,
   rerunDeepStartSearch,
+  supplementDeepStartSearch,
   undoDeepStartNarrow,
   updateDeepStartSelections,
 } from '../../lib/backend';
@@ -38,7 +40,7 @@ import type {
   SearchPaper,
 } from '../../types';
 
-type BusyAction = 'replying' | 'rerunning' | 'selecting' | 'importing' | 'undoing' | null;
+type BusyAction = 'replying' | 'rerunning' | 'supplementing' | 'selecting' | 'importing' | 'undoing' | null;
 
 type ChatRuntimeState = {
   status: 'idle' | 'running' | 'cancelling' | 'cancelled' | 'failed' | 'completed';
@@ -68,7 +70,14 @@ function tierStyle(tier: string) {
 }
 
 function sourceLabel(paper: SearchPaper): string {
-  return paper.sourceLabel || paper.journal || '未知来源';
+  return paper.sourceLabel || paper.source || '未知来源';
+}
+
+function publicationLabel(paper: SearchPaper): string {
+  const venue = (paper.publicationVenue || paper.journal || '').trim() || '发表未提供';
+  const year = paper.publicationYear || paper.year;
+  const citation = paper.citationCount > 0 ? `引用 ${paper.citationCount}` : '引用未提供';
+  return `${venue} · ${year || '年份未知'} · ${citation}`;
 }
 
 function institutionLabel(paper: SearchPaper): string {
@@ -251,14 +260,40 @@ type FolderOption = {
   label: string;
 };
 
-function flattenFolderTree(nodes: FolderNode[], depth = 0): FolderOption[] {
+const folderPathSegmentPattern = /^[A-Za-z_\u4E00-\u9FFF ]+$/;
+
+function validateFolderPathInput(path: string): string | null {
+  const trimmed = path.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.length > 180) {
+    return '目录路径过长，请缩短后重试';
+  }
+
+  const normalized = trimmed.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  for (const segment of segments) {
+    const compact = segment.trim().replace(/\s+/g, ' ');
+    if (!compact) {
+      return '目录路径不能包含空层级，请检查 / 分隔';
+    }
+    if (!folderPathSegmentPattern.test(compact)) {
+      return '目录路径仅支持中文、英文、空格和下划线（_）';
+    }
+  }
+  return null;
+}
+
+function flattenFolderTree(nodes: FolderNode[]): FolderOption[] {
   const options: FolderOption[] = [];
   for (const node of nodes) {
     options.push({
       id: node.folder.id,
-      label: `${'  '.repeat(depth)}${node.folder.name}`,
+      label: node.folder.path || node.folder.name,
     });
-    options.push(...flattenFolderTree(node.children, depth + 1));
+    options.push(...flattenFolderTree(node.children));
   }
   return options;
 }
@@ -292,11 +327,10 @@ export function SessionDetailPanel() {
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
   const [newFolderPath, setNewFolderPath] = useState('');
-  const [newFolderParentId, setNewFolderParentId] = useState('');
   const [newFolderError, setNewFolderError] = useState('');
   const [replyInput, setReplyInput] = useState('');
+  const [supplementPerSourceLimit, setSupplementPerSourceLimit] = useState(20);
   const [rerunQuery, setRerunQuery] = useState(activeDeepStartSession?.summary.currentQuery ?? '');
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [activePaperId, setActivePaperId] = useState<string | null>(null);
@@ -316,12 +350,12 @@ export function SessionDetailPanel() {
   const useLegacyAbstractHighlight = false;
   const skipStoragePollingInTests = import.meta.env.MODE === 'test';
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastSessionRefreshAtRef = useRef(0);
 
   useEffect(() => {
     if (activeDeepStartSession) {
       setRerunQuery(activeDeepStartSession.summary.currentQuery);
       setInitialSuggestedQueries(activeDeepStartSession.currentAnalysis?.suggestedQueries ?? []);
-      setNewFolderParentId(activeDeepStartSession.summary.targetFolderId || activeFolderId || '');
       setChatRuntime({
         status: 'idle',
         phase: 'idle',
@@ -409,6 +443,24 @@ export function SessionDetailPanel() {
       return;
     }
 
+    const refreshSessionIfNeeded = (force = false) => {
+      const now = Date.now();
+      if (!force && now-lastSessionRefreshAtRef.current < 900) {
+        return;
+      }
+      lastSessionRefreshAtRef.current = now;
+      void getDeepStartSession(sessionID)
+        .then((detail) => {
+          upsertDeepStartSession(detail);
+          if (detail.summary.targetFolderId) {
+            setActiveFolderId(detail.summary.targetFolderId);
+          }
+        })
+        .catch((error) => {
+          setError(error instanceof Error ? error.message : '刷新会话状态失败');
+        });
+    };
+
     return onDeepStartProgress((progress) => {
       if (progress.sessionId && progress.sessionId !== sessionID) {
         return;
@@ -435,6 +487,7 @@ export function SessionDetailPanel() {
         });
         setOptimisticUserMessage('');
         setBusyAction(null);
+        refreshSessionIfNeeded(true);
         return;
       }
 
@@ -446,12 +499,20 @@ export function SessionDetailPanel() {
           eta: 0,
           message: progress.message || '任务完成',
         });
+        if (activeDeepStartSession?.summary.processingStatus === 'background_processing' || (progress.backgroundCompleted ?? 0) > 0) {
+          refreshSessionIfNeeded(true);
+        }
         return;
       }
 
       if (
         progress.phase === 'searching' ||
         progress.phase === 'enriching' ||
+        progress.phase === 'downloading' ||
+        progress.phase === 'parsing' ||
+        progress.phase === 'weak_extracting' ||
+        progress.phase === 'initial_batch_ready' ||
+        progress.phase === 'background_processing' ||
         progress.phase === 'analyzing' ||
         progress.phase === 'persisting'
       ) {
@@ -462,9 +523,18 @@ export function SessionDetailPanel() {
           eta: progress.estimatedRemainingSeconds,
           message: progress.message || '后台正在处理中',
         });
+        if (progress.phase === 'initial_batch_ready' || progress.phase === 'background_processing') {
+          refreshSessionIfNeeded();
+        }
       }
     });
-  }, [activeDeepStartSession?.summary.id]);
+  }, [
+    activeDeepStartSession?.summary.id,
+    activeDeepStartSession?.summary.processingStatus,
+    setActiveFolderId,
+    setError,
+    upsertDeepStartSession,
+  ]);
 
   const currentResults = activeDeepStartSession?.currentResults ?? [];
   const currentAnalysis = activeDeepStartSession?.currentAnalysis;
@@ -558,7 +628,7 @@ export function SessionDetailPanel() {
     if (folderTree.length > 0) {
       return flattenFolderTree(folderTree);
     }
-    return folders.map((folder) => ({ id: folder.id, label: folder.name }));
+    return folders.map((folder) => ({ id: folder.id, label: folder.path || folder.name }));
   }, [folderTree, folders]);
 
   const persistSession = (detail: NonNullable<typeof activeDeepStartSession>) => {
@@ -708,6 +778,65 @@ export function SessionDetailPanel() {
     }
   };
 
+  const handleSupplementSearch = async (query?: string) => {
+    if (!activeDeepStartSession) {
+      setError('请先开始一轮探索');
+      return;
+    }
+
+    const nextQuery = (query ?? replyInput).trim();
+    if (!nextQuery) {
+      setError('请输入补充检索 query');
+      return;
+    }
+    if (busyAction === 'supplementing' || busyAction === 'replying' || busyAction === 'rerunning') {
+      return;
+    }
+
+    const limit = Math.max(5, Math.min(100, Number(supplementPerSourceLimit) || 20));
+    setBusyAction('supplementing');
+    setChatRuntime({
+      status: 'running',
+      phase: 'searching',
+      percent: 3,
+      eta: 60,
+      message: `正在发起补充检索（每源 ${limit} 篇）`,
+    });
+    try {
+      const detail = await supplementDeepStartSearch(activeDeepStartSession.summary.id, nextQuery, limit);
+      persistSession(detail);
+      setReplyInput('');
+      setRerunQuery(nextQuery);
+      setChatRuntime({
+        status: 'completed',
+        phase: 'completed',
+        percent: 100,
+        eta: 0,
+        message: `补充检索完成，当前候选池 ${detail.currentResults.length} 篇`,
+      });
+    } catch (error) {
+      if (isDeepStartCancelledError(error)) {
+        setChatRuntime((prev) => ({
+          ...prev,
+          status: 'cancelled',
+          phase: 'cancelled',
+          eta: 0,
+          message: '补充检索已停止，原会话保持不变',
+        }));
+        return;
+      }
+      setChatRuntime((prev) => ({
+        ...prev,
+        status: 'failed',
+        phase: 'failed',
+        message: error instanceof Error ? error.message : '补充检索失败',
+      }));
+      setError(error instanceof Error ? error.message : '补充检索失败');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleCancelRunningTask = async () => {
     if (!activeDeepStartSession) {
       return;
@@ -784,30 +913,26 @@ export function SessionDetailPanel() {
 
   const handleCreateFolder = () => {
     setNewFolderError('');
-    setNewFolderName('');
     setNewFolderPath('');
-    setNewFolderParentId(activeDeepStartSession?.summary.targetFolderId || activeFolderId || '');
     setIsFolderModalOpen(true);
   };
 
   const submitCreateFolder = async () => {
-    const name = newFolderName.trim();
     const path = newFolderPath.trim();
-    if (!name && !path) {
-      setNewFolderError('请填写目录名称或目录路径');
+    if (!path) {
+      setNewFolderError('请填写目录路径');
       return;
     }
-    if (name.length > 60 || path.length > 180) {
-      setNewFolderError('目录名称或路径过长，请缩短后重试');
+    const pathValidationError = validateFolderPathInput(path);
+    if (pathValidationError) {
+      setNewFolderError(pathValidationError);
       return;
     }
 
     setIsCreatingFolder(true);
     try {
       const folder = await createFolderNode({
-        parentId: newFolderParentId || undefined,
-        path: path || undefined,
-        name: path ? undefined : name,
+        path,
       });
       const [tree, overview] = await Promise.all([
         getFolderTree(),
@@ -818,7 +943,7 @@ export function SessionDetailPanel() {
       setStorageTreeOverview(overview);
       await handleTargetFolderChange(folder.id);
       setIsFolderModalOpen(false);
-      setImportFeedback(`已创建文件夹「${folder.name}」`);
+      setImportFeedback(`已创建文件夹「${folder.path || folder.name}」`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '创建文件夹失败';
       setNewFolderError(message);
@@ -956,7 +1081,7 @@ export function SessionDetailPanel() {
           </div>
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
             论文卡片: {node.paperCount} · 排队中: {queueing}/{node.paperCount || 0} · 已下载: {node.downloaded}/
-            {node.paperCount || 0}
+            {node.paperCount || 0} · 下载失败: {node.failed}/{node.paperCount || 0}
           </p>
         </div>
         {node.children.map((child) => renderStorageNode(child, depth + 1))}
@@ -1001,9 +1126,11 @@ export function SessionDetailPanel() {
               )}
             </div>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
-              {sourceLabel(paper)} · {paper.year || '年份未知'}
+              {publicationLabel(paper)}
             </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">{institutionLabel(paper)}</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
+              来源：{sourceLabel(paper)} · {institutionLabel(paper)}
+            </p>
           </div>
           <button
             type="button"
@@ -1065,9 +1192,12 @@ export function SessionDetailPanel() {
   const currentPoolCount = activeDeepStartSession.currentResults.length;
   const selectedCount = selectedPaperIds.size;
   const isSelectionActionBlocked = busyAction === 'selecting' || busyAction === 'importing' || busyAction === 'undoing';
-  const isRerunBlocked = busyAction === 'rerunning' || busyAction === 'replying' || busyAction === 'undoing';
-  const isReplyBlocked = busyAction === 'replying' || busyAction === 'rerunning' || busyAction === 'undoing';
-  const showRerunStop = busyAction === 'rerunning' || chatRuntime.status === 'cancelling';
+  const isRerunBlocked =
+    busyAction === 'rerunning' || busyAction === 'replying' || busyAction === 'supplementing' || busyAction === 'undoing';
+  const isReplyBlocked =
+    busyAction === 'replying' || busyAction === 'rerunning' || busyAction === 'supplementing' || busyAction === 'undoing';
+  const showRerunStop =
+    busyAction === 'rerunning' || busyAction === 'supplementing' || chatRuntime.status === 'cancelling';
   const isChatThinking =
     chatRuntime.status === 'running' &&
     (chatRuntime.phase === 'analyzing' || chatRuntime.phase === 'persisting');
@@ -1275,6 +1405,33 @@ export function SessionDetailPanel() {
                       '发送'
                     )}
                   </button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] text-slate-500 dark:text-slate-300">每源</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={100}
+                        value={supplementPerSourceLimit}
+                        onChange={(event) => setSupplementPerSourceLimit(Number(event.target.value) || 20)}
+                        className="w-14 rounded-lg border border-slate-200 bg-white/80 px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-900/80"
+                      />
+                    </div>
+                    <button
+                      onClick={() => void handleSupplementSearch(replyInput)}
+                      disabled={isReplyBlocked || !replyInput.trim()}
+                      className="inline-flex h-fit items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs text-white transition hover:bg-emerald-500 disabled:opacity-60"
+                    >
+                      {busyAction === 'supplementing' ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          补检中
+                        </>
+                      ) : (
+                        '发起补充检索'
+                      )}
+                    </button>
+                  </div>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-300">Enter 换行，Ctrl/Cmd + Enter 发送</p>
               </div>
@@ -1290,12 +1447,35 @@ export function SessionDetailPanel() {
                 </p>
                 {searchStats && (
                   <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-slate-200">
+                    {searchStats.originalQuery && (
+                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                        原始问题：{searchStats.originalQuery}
+                      </div>
+                    )}
+                    {(searchStats.rewrittenQueries?.length ?? 0) > 0 && (
+                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                        英文检索词：{(searchStats.rewrittenQueries ?? []).join(' | ')}
+                      </div>
+                    )}
+                    {searchStats.queryHits && Object.keys(searchStats.queryHits).length > 0 && (
+                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                        重写命中：
+                        {Object.entries(searchStats.queryHits)
+                          .map(([query, count]) => `${query}=${count}`)
+                          .join('；')}
+                      </div>
+                    )}
                     <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
                       首轮检索基线：原始 {searchStats.rawCount} · 去重后 {searchStats.dedupCount} · 入池 {searchStats.finalCount}
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
                       当前候选池：{currentPoolCount} 篇
                     </div>
+                    {(activeDeepStartSession.summary.totalPlannedCount ?? 0) > 0 && (
+                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                        处理状态：{activeDeepStartSession.summary.processingStatus === 'background_processing' ? '后台处理中' : '已完成'} · 首批就绪 {activeDeepStartSession.summary.initialReadyCount || currentPoolCount} / 总计划 {activeDeepStartSession.summary.totalPlannedCount} · 后台剩余 {activeDeepStartSession.summary.backgroundRemaining || 0}
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
@@ -1404,7 +1584,10 @@ export function SessionDetailPanel() {
                 <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Paper Detail</p>
                 <h3 className="mt-2 text-lg font-semibold leading-7">{activePaper.title}</h3>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
-                  {sourceLabel(activePaper)} · {activePaper.year || '年份未知'}
+                  {publicationLabel(activePaper)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  来源：{sourceLabel(activePaper)}
                 </p>
               </div>
               <button
@@ -1513,53 +1696,28 @@ export function SessionDetailPanel() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
             <h3 className="text-base font-semibold">新建文件夹</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">支持多级目录：可选父目录 + 名称，或直接输入路径。</p>
-            <select
-              value={newFolderParentId}
-              onChange={(event) => setNewFolderParentId(event.target.value)}
-              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
-            >
-              <option value="">根目录</option>
-              {folderOptions.map((option) => (
-                <option key={`parent-${option.id}`} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">仅支持路径输入，按分段自动创建多级目录（全局根级）。</p>
             <input
               type="text"
               autoFocus
-              value={newFolderName}
-              onChange={(event) => {
-                setNewFolderName(event.target.value);
-                if (newFolderError) {
-                  setNewFolderError('');
-                }
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  void submitCreateFolder();
-                }
-              }}
-              placeholder="目录名（可选）"
-              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
-            />
-            <input
-              type="text"
               value={newFolderPath}
               onChange={(event) => {
-                setNewFolderPath(event.target.value);
-                if (newFolderError) {
+                const nextValue = event.target.value;
+                setNewFolderPath(nextValue);
+                const validationError = validateFolderPathInput(nextValue);
+                if (validationError) {
+                  setNewFolderError(validationError);
+                } else if (newFolderError) {
                   setNewFolderError('');
                 }
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
-                  void submitCreateFolder();
+                  event.preventDefault();
                 }
               }}
-              placeholder="或直接输入路径，例如 Robotics/VLA/Benchmarks"
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+              placeholder="输入路径，例如 Robotics/VLA/Benchmarks"
+              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
             />
             {newFolderError && <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">{newFolderError}</p>}
             <div className="mt-4 flex justify-end gap-2">

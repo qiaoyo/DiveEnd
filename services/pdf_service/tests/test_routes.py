@@ -10,7 +10,7 @@ from app.main import create_app
 def test_parse_upload_route_returns_expected_schema():
     app = create_app()
 
-    with patch("app.routes.parse.parse_pdf_with_marker") as mock_parse:
+    with patch("app.routes.parse.parse_pdf_with_pymupdf4llm") as mock_parse:
         mock_parse.return_value = {
             "success": True,
             "markdown": "# Title\n\n## Abstract",

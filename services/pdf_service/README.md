@@ -25,10 +25,10 @@ Python microservice for PDF parsing and LLM-based structured extraction.
 │                            │                              │
 │         ┌──────────────────┼──────────────────┐          │
 │         ▼                  ▼                  ▼          │
-│  ┌────────────┐   ┌────────────┐   ┌────────────┐    │
-│  │   OpenAI   │   │  Anthropic │   │   Marker   │    │
-│  │    API     │   │    API     │   │  (Local)   │    │
-│  └────────────┘   └────────────┘   └────────────┘    │
+│  ┌────────────┐   ┌────────────┐   ┌──────────────┐   │
+│  │   OpenAI   │   │  Anthropic │   │ PyMuPDF4LLM  │   │
+│  │    API     │   │    API     │   │  (CPU Local) │   │
+│  └────────────┘   └────────────┘   └──────────────┘   │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -188,7 +188,7 @@ Content-Type: application/json
 
 ## Architecture Decisions
 
-1. **Marker for PDF Parsing**: Selected Marker over alternatives (PyMuPDF, pdfplumber) due to superior academic PDF handling, especially for multi-column layouts and mathematical formulas.
+1. **PyMuPDF4LLM for PDF Parsing**: Uses CPU-friendly markdown extraction and avoids downloading heavyweight local model weights such as `model.safetensors`.
 
 2. **FastAPI over Flask/Django**: FastAPI provides async/await support, automatic OpenAPI documentation, and Pydantic validation - all critical for this service's performance and maintainability.
 

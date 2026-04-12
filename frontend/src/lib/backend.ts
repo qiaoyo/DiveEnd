@@ -5,6 +5,8 @@ import type {
   DeepStartProgressEvent,
   DeepStartSessionDetail,
   DeepStartSessionSummary,
+  DeepReadNote,
+  DeepReadState,
   EnhancedSearchResult,
   ExtractProgress,
   FolderNode,
@@ -54,6 +56,11 @@ declare global {
           StartDeepStartSession(prompt: string, targetFolderId: string): Promise<DeepStartSessionDetail>;
           CancelDeepStartTask(sessionId: string): Promise<void>;
           ReplyDeepStartSession(sessionId: string, message: string): Promise<DeepStartSessionDetail>;
+          SupplementDeepStartSearch(
+            sessionId: string,
+            query: string,
+            perSourceLimit: number
+          ): Promise<DeepStartSessionDetail>;
           UndoDeepStartNarrow(sessionId: string): Promise<DeepStartSessionDetail>;
           RerunDeepStartSearch(sessionId: string, query: string): Promise<DeepStartSessionDetail>;
           UpdateDeepStartSelections(
@@ -69,6 +76,8 @@ declare global {
           GetPapers(folderId: string): Promise<Paper[]>;
           ImportPapers(folderId: string, papers: SearchPaper[]): Promise<Paper[]>;
           ImportPapersWithAssets(folderId: string, papers: SearchPaper[]): Promise<ImportPapersWithAssetsResult>;
+          RetryPaperDownload(paperId: string): Promise<void>;
+          RetryPaperDownloadWithURL(paperId: string, manualURL: string): Promise<void>;
           GetLocalStorageOverview(): Promise<LocalStorageOverview>;
           GetFolderStorageTreeOverview(): Promise<FolderStorageTreeOverview>;
           DeletePaper(id: string): Promise<void>;
@@ -78,6 +87,10 @@ declare global {
             text: string
           ): Promise<TranslationRecord>;
           GetTranslations(paperId: string): Promise<TranslationRecord[]>;
+          GetDeepReadState(paperId: string): Promise<DeepReadState>;
+          PrepareDeepReadPaper(paperId: string): Promise<DeepReadState>;
+          SaveDeepReadNote(paperId: string, section: string, content: string): Promise<DeepReadNote>;
+          GetDeepReadPDFBytes(paperId: string): Promise<string>;
 
           // Screening API
           CreateScreeningSession(title: string): Promise<ScreeningSession>;
@@ -135,6 +148,16 @@ type MockBaiduSeed = {
 
 function normalizeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
+}
+
+function normalizeStringMap(value: Record<string, string> | null | undefined): Record<string, string> {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  const entries = Object.entries(value)
+    .map(([key, item]) => [String(key).trim(), String(item ?? '').trim()] as const)
+    .filter(([key, item]) => key.length > 0 && item.length > 0);
+  return Object.fromEntries(entries);
 }
 
 function normalizeFolder(folder: Partial<Folder> | null | undefined): Folder {
@@ -248,14 +271,93 @@ function normalizeSearchPaper(paper: Partial<SearchPaper> | null | undefined): S
     abstract: paper?.abstract ?? '',
     year: paper?.year ?? 0,
     journal: paper?.journal ?? '',
+    publicationVenue: paper?.publicationVenue ?? '',
+    publicationYear: paper?.publicationYear ?? 0,
+    citationCount: paper?.citationCount ?? 0,
     url: paper?.url ?? '',
     category: paper?.category ?? '',
     tags: normalizeArray(paper?.tags),
     source: paper?.source ?? '',
+    externalIds: normalizeStringMap(paper?.externalIds as Record<string, string> | undefined),
+    pdfCandidates: normalizeArray(paper?.pdfCandidates),
     institutions: normalizeArray(paper?.institutions),
     keywords: normalizeArray(paper?.keywords),
     sourceLabel: paper?.sourceLabel ?? '',
     enrichmentNote: paper?.enrichmentNote ?? '',
+    preprocessStatus: paper?.preprocessStatus ?? '',
+    localPdfPath: paper?.localPdfPath ?? '',
+    markdownPath: paper?.markdownPath ?? '',
+    parseStatus: paper?.parseStatus ?? '',
+    parseError: paper?.parseError ?? '',
+    extractStatus: paper?.extractStatus ?? '',
+    extractError: paper?.extractError ?? '',
+    problem: paper?.problem ?? '',
+    method: paper?.method ?? '',
+    topicLabel: paper?.topicLabel ?? '',
+    methodLabel: paper?.methodLabel ?? '',
+    taskLabel: paper?.taskLabel ?? '',
+    domainLabel: paper?.domainLabel ?? '',
+    classificationConfidence: Number(paper?.classificationConfidence ?? 0) || 0,
+    processingStage: paper?.processingStage ?? '',
+    processingError: paper?.processingError ?? '',
+  };
+}
+
+function normalizeDeepStartSummary(
+  summary: Partial<DeepStartSessionDetail['summary']> | null | undefined,
+): DeepStartSessionDetail['summary'] {
+  return {
+    id: summary?.id ?? '',
+    title: summary?.title ?? '',
+    rootPrompt: summary?.rootPrompt ?? '',
+    currentQuery: summary?.currentQuery ?? '',
+    targetFolderId: summary?.targetFolderId ?? '',
+    processingStatus: summary?.processingStatus ?? 'completed',
+    initialReadyCount: Number(summary?.initialReadyCount ?? 0) || 0,
+    totalPlannedCount: Number(summary?.totalPlannedCount ?? 0) || 0,
+    backgroundRemaining: Number(summary?.backgroundRemaining ?? 0) || 0,
+    createdAt: summary?.createdAt ?? new Date().toISOString(),
+    updatedAt: summary?.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+function normalizeDeepReadNote(note: Partial<DeepReadNote> | null | undefined): DeepReadNote {
+  return {
+    id: note?.id ?? '',
+    paperId: note?.paperId ?? '',
+    section: note?.section ?? '',
+    content: note?.content ?? '',
+    createdAt: note?.createdAt ?? new Date().toISOString(),
+    updatedAt: note?.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+function normalizeDeepReadState(state: Partial<DeepReadState> | null | undefined): DeepReadState {
+  return {
+    paperId: state?.paperId ?? '',
+    hasPdf: Boolean(state?.hasPdf),
+    pdfPath: state?.pdfPath ?? '',
+    parseStatus: state?.parseStatus ?? 'idle',
+    parseError: state?.parseError ?? '',
+    sections: normalizeArray(state?.sections).map((section, index) => ({
+      id: section?.id ?? `section-${index + 1}`,
+      title: section?.title ?? `Section ${index + 1}`,
+      content: section?.content ?? '',
+      index: section?.index ?? index,
+    })),
+    markdown: state?.markdown ?? '',
+    translations: normalizeArray(state?.translations).map((record) => ({
+      id: record?.id ?? '',
+      paperId: record?.paperId ?? '',
+      section: record?.section ?? '',
+      originalText: record?.originalText ?? '',
+      translatedText: record?.translatedText ?? '',
+      summary: record?.summary ?? '',
+      createdAt: record?.createdAt ?? new Date().toISOString(),
+      updatedAt: record?.updatedAt ?? new Date().toISOString(),
+    })),
+    notes: normalizeArray(state?.notes).map((note) => normalizeDeepReadNote(note)),
+    lastPreparedAt: state?.lastPreparedAt ?? '',
   };
 }
 
@@ -274,6 +376,9 @@ function normalizeAnalysis(analysis: DeepStartAnalysis | null | undefined): Deep
     retainedPaperIds: normalizeArray(analysis.retainedPaperIds),
     searchStats: {
       query: analysis.searchStats?.query ?? '',
+      originalQuery: analysis.searchStats?.originalQuery ?? '',
+      rewrittenQueries: normalizeArray(analysis.searchStats?.rewrittenQueries),
+      queryHits: (analysis.searchStats?.queryHits as Record<string, number> | undefined) ?? {},
       rawCount: analysis.searchStats?.rawCount ?? 0,
       dedupCount: analysis.searchStats?.dedupCount ?? 0,
       finalCount: analysis.searchStats?.finalCount ?? 0,
@@ -290,6 +395,7 @@ function normalizeSessionDetail(
 
   return {
     ...detail,
+    summary: normalizeDeepStartSummary(detail.summary),
     messages: normalizeArray(detail.messages),
     currentResults: normalizeArray(detail.currentResults).map((paper) => normalizeSearchPaper(paper)),
     currentAnalysis: normalizeAnalysis(detail.currentAnalysis),
@@ -523,6 +629,9 @@ const sampleSearchResults: SearchPaper[] = [
       'We study agentic workflows for software engineering tasks and compare retrieval, planning and tool-use strategies.',
     year: 2024,
     journal: 'arXiv',
+    publicationVenue: 'arXiv',
+    publicationYear: 2024,
+    citationCount: 12,
     url: 'https://arxiv.org/abs/2403.10001',
     category: 'code agent',
     tags: ['agent', 'software engineering'],
@@ -540,6 +649,9 @@ const sampleSearchResults: SearchPaper[] = [
       'This survey reviews AI-assisted paper reading systems, translation support, note synthesis and retrieval workflows.',
     year: 2024,
     journal: 'arXiv',
+    publicationVenue: 'arXiv',
+    publicationYear: 2024,
+    citationCount: 18,
     url: 'https://arxiv.org/abs/2402.20002',
     category: 'paper reading',
     tags: ['survey', 'reading assistant'],
@@ -997,6 +1109,64 @@ export async function replyDeepStartSession(
   return detail;
 }
 
+export async function supplementDeepStartSearch(
+  sessionId: string,
+  query: string,
+  perSourceLimit: number
+): Promise<DeepStartSessionDetail> {
+  const app = runtimeApp();
+  if (app?.SupplementDeepStartSearch) {
+    const detail = await app.SupplementDeepStartSearch(sessionId, query, perSourceLimit);
+    const normalized = normalizeSessionDetail(detail);
+    if (!normalized) {
+      throw new Error('会话不存在');
+    }
+    return normalized;
+  }
+
+  const existing = mockDeepStartDetails.get(sessionId);
+  if (!existing) {
+    throw new Error('会话不存在');
+  }
+  const added = await searchPapers(query, Math.max(20, (Number(perSourceLimit) || 20) * 2));
+  const now = new Date().toISOString();
+  const mergedById = new Map(existing.currentResults.map((paper) => [paper.id, paper]));
+  for (const paper of added) {
+    mergedById.set(paper.id, paper);
+  }
+  const merged = [...mergedById.values()];
+
+  const detail: DeepStartSessionDetail = {
+    ...existing,
+    summary: {
+      ...existing.summary,
+      currentQuery: query,
+      updatedAt: now,
+    },
+    messages: [
+      ...existing.messages,
+      {
+        id: `mock-msg-user-${Date.now()}`,
+        sessionId,
+        role: 'user',
+        content: `补充检索：${query}`,
+        createdAt: now,
+      },
+      {
+        id: `mock-msg-assistant-${Date.now()}`,
+        sessionId,
+        role: 'assistant',
+        content: `已补充检索并合并到当前论文池，当前共 ${merged.length} 篇。`,
+        createdAt: now,
+      },
+    ],
+    currentResults: merged,
+    currentAnalysis: buildMockDeepStartAnalysis(query, merged),
+  };
+  upsertMockDeepStartSession(detail);
+  return detail;
+}
+
 export async function undoDeepStartNarrow(sessionId: string): Promise<DeepStartSessionDetail> {
   const app = runtimeApp();
   if (app?.UndoDeepStartNarrow) {
@@ -1273,6 +1443,38 @@ export async function importPapersWithAssets(
   });
 }
 
+export async function retryPaperDownload(paperId: string): Promise<void> {
+  const app = runtimeApp();
+  if (app?.RetryPaperDownload) {
+    return app.RetryPaperDownload(paperId);
+  }
+}
+
+export async function retryPaperDownloadWithURL(paperId: string, manualURL: string): Promise<void> {
+  const normalized = manualURL.trim();
+  if (!/^https?:\/\//i.test(normalized)) {
+    throw new Error('请填写有效的 http/https PDF 链接');
+  }
+
+  const app = runtimeApp();
+  if (app?.RetryPaperDownloadWithURL) {
+    return app.RetryPaperDownloadWithURL(paperId, normalized);
+  }
+
+  const now = new Date().toISOString();
+  mockPapers = mockPapers.map((paper) =>
+    paper.id === paperId
+      ? {
+          ...paper,
+          url: normalized,
+          downloadStatus: 'queued',
+          downloadError: '',
+          updatedAt: now,
+        }
+      : paper,
+  );
+}
+
 export async function getLocalStorageOverview(): Promise<LocalStorageOverview> {
   const app = runtimeApp();
   if (app?.GetLocalStorageOverview) {
@@ -1412,6 +1614,69 @@ export async function getTranslations(paperId: string): Promise<TranslationRecor
   return mockTranslations.get(paperId) ?? [];
 }
 
+export async function getDeepReadState(paperId: string): Promise<DeepReadState> {
+  const app = runtimeApp();
+  if (app?.GetDeepReadState) {
+    return normalizeDeepReadState(await app.GetDeepReadState(paperId));
+  }
+
+  const selected = mockPapers.find((paper) => paper.id === paperId);
+  return normalizeDeepReadState({
+    paperId,
+    hasPdf: Boolean(selected?.pdfPath),
+    pdfPath: selected?.pdfPath ?? '',
+    parseStatus: selected?.pdfPath ? 'ready' : 'missing_pdf',
+    parseError: selected?.pdfPath ? '' : '演示模式：当前论文没有本地 PDF。',
+    sections: [
+      {
+        id: 'section-1',
+        title: 'Abstract',
+        content: selected?.abstract ?? '',
+        index: 0,
+      },
+    ],
+    translations: mockTranslations.get(paperId) ?? [],
+    notes: [],
+    lastPreparedAt: new Date().toISOString(),
+  });
+}
+
+export async function prepareDeepReadPaper(paperId: string): Promise<DeepReadState> {
+  const app = runtimeApp();
+  if (app?.PrepareDeepReadPaper) {
+    return normalizeDeepReadState(await app.PrepareDeepReadPaper(paperId));
+  }
+  return getDeepReadState(paperId);
+}
+
+export async function saveDeepReadNote(
+  paperId: string,
+  section: string,
+  content: string,
+): Promise<DeepReadNote> {
+  const app = runtimeApp();
+  if (app?.SaveDeepReadNote) {
+    return normalizeDeepReadNote(await app.SaveDeepReadNote(paperId, section, content));
+  }
+
+  return normalizeDeepReadNote({
+    id: `mock-note-${Date.now()}`,
+    paperId,
+    section,
+    content,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function getDeepReadPDFBytes(paperId: string): Promise<string> {
+  const app = runtimeApp();
+  if (app?.GetDeepReadPDFBytes) {
+    return app.GetDeepReadPDFBytes(paperId);
+  }
+  throw new Error('当前运行环境不支持直接读取本地 PDF 字节流');
+}
+
 // ============ Screening API ============
 
 export function canResolveFilePaths(): boolean {
@@ -1480,6 +1745,11 @@ function normalizeDeepStartProgressEvent(
     sessionId: progress?.sessionId ?? '',
     phase:
       progress?.phase === 'enriching' ||
+      progress?.phase === 'downloading' ||
+      progress?.phase === 'parsing' ||
+      progress?.phase === 'weak_extracting' ||
+      progress?.phase === 'initial_batch_ready' ||
+      progress?.phase === 'background_processing' ||
       progress?.phase === 'analyzing' ||
       progress?.phase === 'persisting' ||
       progress?.phase === 'cancelling' ||
@@ -1494,9 +1764,21 @@ function normalizeDeepStartProgressEvent(
     total,
     completed,
     overallPercent: Math.max(0, Math.min(100, Number(progress?.overallPercent ?? 0) || 0)),
+    successCount: Math.max(0, Number(progress?.successCount ?? 0) || 0),
+    failedCount: Math.max(0, Number(progress?.failedCount ?? 0) || 0),
+    noPdfUrlCount: Math.max(0, Number(progress?.noPdfUrlCount ?? 0) || 0),
+    downloadedCount: Math.max(0, Number(progress?.downloadedCount ?? 0) || 0),
+    parsedCount: Math.max(0, Number(progress?.parsedCount ?? 0) || 0),
+    extractedCount: Math.max(0, Number(progress?.extractedCount ?? 0) || 0),
+    initialBatchTotal: Math.max(0, Number(progress?.initialBatchTotal ?? 0) || 0),
+    initialBatchCompleted: Math.max(0, Number(progress?.initialBatchCompleted ?? 0) || 0),
+    backgroundCompleted: Math.max(0, Number(progress?.backgroundCompleted ?? 0) || 0),
     stats: progress?.stats
       ? {
           query: progress.stats.query ?? '',
+          originalQuery: progress.stats.originalQuery ?? '',
+          rewrittenQueries: normalizeArray(progress.stats.rewrittenQueries),
+          queryHits: (progress.stats.queryHits as Record<string, number> | undefined) ?? {},
           rawCount: Number(progress.stats.rawCount ?? 0) || 0,
           dedupCount: Number(progress.stats.dedupCount ?? 0) || 0,
           finalCount: Number(progress.stats.finalCount ?? 0) || 0,

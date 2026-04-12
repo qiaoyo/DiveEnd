@@ -181,8 +181,166 @@ export namespace main {
 	        this.name = source["name"];
 	    }
 	}
+	export class DeepReadNote {
+	    id: string;
+	    paperId: string;
+	    section: string;
+	    content: string;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeepReadNote(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.paperId = source["paperId"];
+	        this.section = source["section"];
+	        this.content = source["content"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DeepReadSection {
+	    id: string;
+	    title: string;
+	    content: string;
+	    index: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeepReadSection(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.index = source["index"];
+	    }
+	}
+	export class TranslationRecord {
+	    id: string;
+	    paperId: string;
+	    section: string;
+	    originalText: string;
+	    translatedText: string;
+	    summary: string;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new TranslationRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.paperId = source["paperId"];
+	        this.section = source["section"];
+	        this.originalText = source["originalText"];
+	        this.translatedText = source["translatedText"];
+	        this.summary = source["summary"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DeepReadState {
+	    paperId: string;
+	    hasPdf: boolean;
+	    pdfPath: string;
+	    parseStatus: string;
+	    parseError?: string;
+	    sections: DeepReadSection[];
+	    markdown?: string;
+	    translations: TranslationRecord[];
+	    notes: DeepReadNote[];
+	    // Go type: time
+	    lastPreparedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeepReadState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.paperId = source["paperId"];
+	        this.hasPdf = source["hasPdf"];
+	        this.pdfPath = source["pdfPath"];
+	        this.parseStatus = source["parseStatus"];
+	        this.parseError = source["parseError"];
+	        this.sections = this.convertValues(source["sections"], DeepReadSection);
+	        this.markdown = source["markdown"];
+	        this.translations = this.convertValues(source["translations"], TranslationRecord);
+	        this.notes = this.convertValues(source["notes"], DeepReadNote);
+	        this.lastPreparedAt = this.convertValues(source["lastPreparedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SearchRetrievalStats {
 	    query: string;
+	    originalQuery?: string;
+	    rewrittenQueries?: string[];
+	    queryHits?: Record<string, number>;
 	    rawCount: number;
 	    dedupCount: number;
 	    finalCount: number;
@@ -194,6 +352,9 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.query = source["query"];
+	        this.originalQuery = source["originalQuery"];
+	        this.rewrittenQueries = source["rewrittenQueries"];
+	        this.queryHits = source["queryHits"];
 	        this.rawCount = source["rawCount"];
 	        this.dedupCount = source["dedupCount"];
 	        this.finalCount = source["finalCount"];
@@ -329,14 +490,35 @@ export namespace main {
 	    abstract: string;
 	    year: number;
 	    journal: string;
+	    publicationVenue: string;
+	    publicationYear: number;
+	    citationCount: number;
 	    url: string;
 	    category: string;
 	    tags: string[];
 	    source: string;
+	    externalIds?: Record<string, string>;
+	    pdfCandidates?: string[];
 	    institutions: string[];
 	    keywords: string[];
 	    sourceLabel: string;
 	    enrichmentNote?: string;
+	    preprocessStatus?: string;
+	    localPdfPath?: string;
+	    markdownPath?: string;
+	    parseStatus?: string;
+	    parseError?: string;
+	    extractStatus?: string;
+	    extractError?: string;
+	    problem?: string;
+	    method?: string;
+	    topicLabel?: string;
+	    methodLabel?: string;
+	    taskLabel?: string;
+	    domainLabel?: string;
+	    classificationConfidence?: number;
+	    processingStage?: string;
+	    processingError?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SearchPaper(source);
@@ -350,14 +532,35 @@ export namespace main {
 	        this.abstract = source["abstract"];
 	        this.year = source["year"];
 	        this.journal = source["journal"];
+	        this.publicationVenue = source["publicationVenue"];
+	        this.publicationYear = source["publicationYear"];
+	        this.citationCount = source["citationCount"];
 	        this.url = source["url"];
 	        this.category = source["category"];
 	        this.tags = source["tags"];
 	        this.source = source["source"];
+	        this.externalIds = source["externalIds"];
+	        this.pdfCandidates = source["pdfCandidates"];
 	        this.institutions = source["institutions"];
 	        this.keywords = source["keywords"];
 	        this.sourceLabel = source["sourceLabel"];
 	        this.enrichmentNote = source["enrichmentNote"];
+	        this.preprocessStatus = source["preprocessStatus"];
+	        this.localPdfPath = source["localPdfPath"];
+	        this.markdownPath = source["markdownPath"];
+	        this.parseStatus = source["parseStatus"];
+	        this.parseError = source["parseError"];
+	        this.extractStatus = source["extractStatus"];
+	        this.extractError = source["extractError"];
+	        this.problem = source["problem"];
+	        this.method = source["method"];
+	        this.topicLabel = source["topicLabel"];
+	        this.methodLabel = source["methodLabel"];
+	        this.taskLabel = source["taskLabel"];
+	        this.domainLabel = source["domainLabel"];
+	        this.classificationConfidence = source["classificationConfidence"];
+	        this.processingStage = source["processingStage"];
+	        this.processingError = source["processingError"];
 	    }
 	}
 	export class DeepStartSessionSummary {
@@ -366,6 +569,10 @@ export namespace main {
 	    rootPrompt: string;
 	    currentQuery: string;
 	    targetFolderId: string;
+	    processingStatus?: string;
+	    initialReadyCount?: number;
+	    totalPlannedCount?: number;
+	    backgroundRemaining?: number;
 	    // Go type: time
 	    createdAt: any;
 	    // Go type: time
@@ -382,6 +589,10 @@ export namespace main {
 	        this.rootPrompt = source["rootPrompt"];
 	        this.currentQuery = source["currentQuery"];
 	        this.targetFolderId = source["targetFolderId"];
+	        this.processingStatus = source["processingStatus"];
+	        this.initialReadyCount = source["initialReadyCount"];
+	        this.totalPlannedCount = source["totalPlannedCount"];
+	        this.backgroundRemaining = source["backgroundRemaining"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	    }
@@ -1321,52 +1532,6 @@ export namespace main {
 	        this.conflicts = source["conflicts"];
 	        this.totalSynced = source["totalSynced"];
 	        this.totalFailed = source["totalFailed"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class TranslationRecord {
-	    id: string;
-	    paperId: string;
-	    section: string;
-	    originalText: string;
-	    translatedText: string;
-	    summary: string;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
-	
-	    static createFrom(source: any = {}) {
-	        return new TranslationRecord(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.paperId = source["paperId"];
-	        this.section = source["section"];
-	        this.originalText = source["originalText"];
-	        this.translatedText = source["translatedText"];
-	        this.summary = source["summary"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -32,6 +32,8 @@ type paperDownloadJob struct {
 	FolderPath    string
 	SourceURL     string
 	SourcePaperID string
+	ExternalIDs   map[string]string
+	PDFCandidates []string
 }
 
 func normalizeSourcePaperID(paper SearchPaper) string {
@@ -117,15 +119,15 @@ func (a *App) ImportPapersWithAssets(folderID string, papers []SearchPaper) (*Im
 			return nil, err
 		}
 		result.Imported = append(result.Imported, paper)
-	}
 
-	for _, paper := range result.Imported {
 		a.enqueuePaperDownload(paperDownloadJob{
 			PaperID:       paper.ID,
 			FolderID:      paper.FolderID,
 			FolderPath:    targetFolderPath,
-			SourceURL:     paper.URL,
-			SourcePaperID: paper.SourcePaperID,
+			SourceURL:     strings.TrimSpace(searchPaper.URL),
+			SourcePaperID: sourcePaperID,
+			ExternalIDs:   normalizeExternalIDMap(searchPaper.ExternalIDs),
+			PDFCandidates: compactStrings(searchPaper.PDFCandidates, 8),
 		})
 	}
 
@@ -297,7 +299,7 @@ func (a *App) processDownloadJob(ctx context.Context, job paperDownloadJob) {
 		filepath.FromSlash(targetFolderPath),
 		job.PaperID+".pdf",
 	)
-	candidates := buildPDFCandidateURLs(job.SourceURL, job.SourcePaperID)
+	candidates := buildPDFCandidateURLs(job.SourceURL, job.SourcePaperID, job.ExternalIDs, job.PDFCandidates)
 	if len(candidates) == 0 {
 		_ = a.db.UpdatePaperDownloadState(job.PaperID, "failed", "", "no downloadable pdf url")
 		return
@@ -413,7 +415,7 @@ func looksLikePDF(contentType string, prefix []byte) bool {
 	return bytes.HasPrefix(trimmed, []byte("%PDF-"))
 }
 
-func buildPDFCandidateURLs(sourceURL, sourcePaperID string) []string {
+func buildPDFCandidateURLs(sourceURL, sourcePaperID string, externalIDs map[string]string, extraCandidates []string) []string {
 	candidates := make([]string, 0, 4)
 	appendCandidate := func(raw string) {
 		raw = strings.TrimSpace(raw)
@@ -428,12 +430,24 @@ func buildPDFCandidateURLs(sourceURL, sourcePaperID string) []string {
 		candidates = append(candidates, raw)
 	}
 
+	for _, candidate := range extraCandidates {
+		appendCandidate(candidate)
+	}
+
 	normalizedSourceURL := strings.TrimSpace(sourceURL)
 	if normalizedSourceURL != "" {
 		if strings.Contains(strings.ToLower(normalizedSourceURL), "/abs/") && strings.Contains(strings.ToLower(normalizedSourceURL), "arxiv.org") {
 			appendCandidate(arxivAbsToPDFURL(normalizedSourceURL))
 		}
 		appendCandidate(normalizedSourceURL)
+	}
+
+	if arxivID := extractArxivID(externalIDValue(externalIDs, "ArXiv")); arxivID != "" {
+		appendCandidate(fmt.Sprintf("https://arxiv.org/pdf/%s.pdf", arxivID))
+	}
+	if doi := strings.TrimSpace(externalIDValue(externalIDs, "DOI")); doi != "" {
+		doi = strings.TrimPrefix(strings.TrimPrefix(doi, "doi:"), "DOI:")
+		appendCandidate("https://doi.org/" + doi)
 	}
 
 	if arxivID := extractArxivID(sourcePaperID); arxivID != "" {
@@ -513,4 +527,104 @@ func countStoredPDFFiles(folderPath string) int {
 		}
 	}
 	return count
+}
+
+func (a *App) RetryPaperDownload(paperID string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return fmt.Errorf("paper id cannot be empty")
+	}
+
+	paper, err := a.db.GetPaperByID(paperID)
+	if err != nil {
+		return err
+	}
+
+	folderPath := ""
+	if folder, folderErr := a.db.GetFolderByID(paper.FolderID); folderErr == nil {
+		folderPath = normalizeFolderPath(folder.Path)
+	}
+
+	if err := a.db.UpdatePaperDownloadState(paper.ID, "queued", "", ""); err != nil {
+		return err
+	}
+
+	a.enqueuePaperDownload(paperDownloadJob{
+		PaperID:       paper.ID,
+		FolderID:      paper.FolderID,
+		FolderPath:    folderPath,
+		SourceURL:     strings.TrimSpace(paper.URL),
+		SourcePaperID: strings.TrimSpace(paper.SourcePaperID),
+	})
+	return nil
+}
+
+func validateManualDownloadURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("manual url cannot be empty")
+	}
+
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed == nil {
+		return "", fmt.Errorf("manual url must be a valid http/https url")
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("manual url must be a valid http/https url")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return "", fmt.Errorf("manual url must be a valid http/https url")
+	}
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func (a *App) RetryPaperDownloadWithURL(paperID, manualURL string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return fmt.Errorf("paper id cannot be empty")
+	}
+
+	validatedURL, err := validateManualDownloadURL(manualURL)
+	if err != nil {
+		return err
+	}
+
+	paper, err := a.db.GetPaperByID(paperID)
+	if err != nil {
+		return err
+	}
+
+	folderPath := ""
+	if folder, folderErr := a.db.GetFolderByID(paper.FolderID); folderErr == nil {
+		folderPath = normalizeFolderPath(folder.Path)
+	}
+
+	paper.URL = validatedURL
+	paper.UpdatedAt = time.Now()
+	if err := a.db.UpsertPaper(paper); err != nil {
+		return err
+	}
+
+	if err := a.db.UpdatePaperDownloadState(paper.ID, "queued", "", ""); err != nil {
+		return err
+	}
+
+	a.enqueuePaperDownload(paperDownloadJob{
+		PaperID:       paper.ID,
+		FolderID:      paper.FolderID,
+		FolderPath:    folderPath,
+		SourceURL:     validatedURL,
+		SourcePaperID: strings.TrimSpace(paper.SourcePaperID),
+	})
+	return nil
 }

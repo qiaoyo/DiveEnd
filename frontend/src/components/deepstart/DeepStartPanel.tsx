@@ -75,6 +75,16 @@ export function DeepStartPanel() {
     switch (deepStartProgress?.phase) {
       case 'enriching':
         return '补全机构与关键词';
+      case 'downloading':
+        return '下载论文 PDF';
+      case 'parsing':
+        return '解析 PDF 内容';
+      case 'weak_extracting':
+        return '弱模型抽取';
+      case 'initial_batch_ready':
+        return '首批可用';
+      case 'background_processing':
+        return '后台补全中';
       case 'analyzing':
         return '生成 AI 分析';
       case 'persisting':
@@ -298,8 +308,33 @@ export function DeepStartPanel() {
                   </div>
                 )}
                 {deepStartProgress?.stats && (
-                  <div className="mt-2 text-xs text-indigo-700 dark:text-indigo-200">
-                    检索统计：原始 {deepStartProgress.stats.rawCount} · 去重后 {deepStartProgress.stats.dedupCount} · 入池 {deepStartProgress.stats.finalCount}
+                  <div className="mt-2 space-y-1 text-xs text-indigo-700 dark:text-indigo-200">
+                    <div>
+                      检索统计：原始 {deepStartProgress.stats.rawCount} · 去重后 {deepStartProgress.stats.dedupCount} · 入池 {deepStartProgress.stats.finalCount}
+                    </div>
+                    {deepStartProgress.stats.originalQuery && (
+                      <div>原始问题：{deepStartProgress.stats.originalQuery}</div>
+                    )}
+                    {(deepStartProgress.stats.rewrittenQueries?.length ?? 0) > 0 && (
+                      <div>英文检索词：{(deepStartProgress.stats.rewrittenQueries ?? []).join(' | ')}</div>
+                    )}
+                    {deepStartProgress.stats.queryHits &&
+                      Object.keys(deepStartProgress.stats.queryHits).length > 0 && (
+                        <div>
+                          重写命中：
+                          {Object.entries(deepStartProgress.stats.queryHits)
+                            .map(([query, count]) => `${query}=${count}`)
+                            .join('；')}
+                        </div>
+                      )}
+                  </div>
+                )}
+                {(deepStartProgress?.phase === 'downloading' ||
+                  deepStartProgress?.phase === 'parsing' ||
+                  deepStartProgress?.phase === 'weak_extracting') && (
+                  <div className="mt-1 text-xs text-indigo-700 dark:text-indigo-200">
+                    批处理统计：成功 {deepStartProgress.successCount ?? 0} · 失败 {deepStartProgress.failedCount ?? 0} · 无链接{' '}
+                    {deepStartProgress.noPdfUrlCount ?? 0}
                   </div>
                 )}
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">

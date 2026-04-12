@@ -129,6 +129,9 @@ describe('SessionDetailPanel', () => {
             abstract: 'This embodied benchmark studies robot policy transfer in realistic scenarios.',
             year: 2025,
             journal: 'arXiv',
+            publicationVenue: 'NeurIPS',
+            publicationYear: 2025,
+            citationCount: 156,
             url: 'https://example.org/paper-1',
             category: 'benchmark',
             tags: ['robotics'],
@@ -195,8 +198,8 @@ describe('SessionDetailPanel', () => {
     expect(within(chatSection as HTMLElement).getByText('embodied benchmark')).toBeInTheDocument();
 
     expect(screen.getByText('Unified Embodied Agent Benchmark')).toBeInTheDocument();
-    expect(screen.getByText('arXiv · 2025')).toBeInTheDocument();
-    expect(screen.getByText('CMU · OpenAI')).toBeInTheDocument();
+    expect(screen.getByText('NeurIPS · 2025 · 引用 156')).toBeInTheDocument();
+    expect(screen.getByText(/CMU · OpenAI/)).toBeInTheDocument();
     expect(screen.getByText('robot policy')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择' })).toBeInTheDocument();
   });
@@ -227,16 +230,43 @@ describe('SessionDetailPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /新建文件夹/i }));
     expect(screen.getByRole('heading', { name: '新建文件夹' })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('目录名（可选）'), {
-      target: { value: 'My Folder' },
+    fireEvent.change(screen.getByPlaceholderText('输入路径，例如 Robotics/VLA/Benchmarks'), {
+      target: { value: 'Robotics/VLA/My Folder' },
     });
     fireEvent.click(screen.getByRole('button', { name: /^创建$/ }));
 
     await waitFor(() => {
       expect(backendMocks.createFolderNode).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'My Folder' })
+        expect.objectContaining({ path: 'Robotics/VLA/My Folder' })
       );
     });
+  });
+
+  it('does not submit create-folder on Enter key', async () => {
+    render(<SessionDetailPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /新建文件夹/i }));
+    const input = screen.getByPlaceholderText('输入路径，例如 Robotics/VLA/Benchmarks');
+    fireEvent.change(input, {
+      target: { value: 'Robotics/VLA/My Folder' },
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await Promise.resolve();
+    expect(backendMocks.createFolderNode).not.toHaveBeenCalled();
+  });
+
+  it('blocks create-folder when path contains invalid characters', async () => {
+    render(<SessionDetailPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /新建文件夹/i }));
+    fireEvent.change(screen.getByPlaceholderText('输入路径，例如 Robotics/VLA/Benchmarks'), {
+      target: { value: 'Robotics/VLA/2026#bad' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^创建$/ }));
+
+    expect(await screen.findByText('目录路径仅支持中文、英文、空格和下划线（_）')).toBeInTheDocument();
+    expect(backendMocks.createFolderNode).not.toHaveBeenCalled();
   });
 
   it('can collapse chat bar', async () => {

@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,11 @@ type llmService interface {
 	TranslateSection(section, originalText string) (translated string, summary string, err error)
 	AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error)
 	AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisionNode, error)
+}
+
+type weakLLMService interface {
+	TranslateSection(section, originalText string) (translated string, summary string, err error)
+	ExtractPaperProfile(markdown string) (*PaperProfileExtraction, error)
 }
 
 type paperSearchService interface {
@@ -46,8 +53,20 @@ type LLMClient struct {
 }
 
 func NewLLMClient(config AppConfig) *LLMClient {
-	llmConfig := normalizeLLMConfig(config.LLM)
+	return NewStrongLLMClient(config)
+}
 
+func NewStrongLLMClient(config AppConfig) *LLMClient {
+	llmConfig := normalizeLLMConfig(config.LLM)
+	return newLLMClientFromConfig(llmConfig)
+}
+
+func NewWeakLLMClient(config AppConfig) *LLMClient {
+	llmConfig := normalizeLLMConfig(config.WeakLLM)
+	return newLLMClientFromConfig(llmConfig)
+}
+
+func newLLMClientFromConfig(llmConfig LLMConfig) *LLMClient {
 	return &LLMClient{
 		apiKey:                 llmConfig.APIKey,
 		model:                  llmConfig.Model,
@@ -87,6 +106,141 @@ type ScreeningAIRequest struct {
 	SessionTitle string
 	Papers       []ScreeningPaper
 	PathHistory  []PathHistoryItem
+}
+
+func (c *LLMClient) ExtractPaperProfile(markdown string) (*PaperProfileExtraction, error) {
+	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
+		return nil, fmt.Errorf("missing API key for %s", c.providerLabel())
+	}
+	if strings.TrimSpace(c.model) == "" {
+		return nil, fmt.Errorf("missing model for %s", c.providerLabel())
+	}
+
+	markdown = strings.TrimSpace(markdown)
+	if markdown == "" {
+		return nil, fmt.Errorf("markdown cannot be empty")
+	}
+	if len(markdown) > 24000 {
+		markdown = markdown[:24000]
+	}
+
+	prompt := fmt.Sprintf(`
+You are an academic paper information extractor.
+
+Extract key information from the markdown content below and return valid JSON only:
+{
+  "title": "paper title",
+  "authors": ["author a", "author b"],
+  "abstract": "paper abstract",
+  "problem": "2-3 sentence problem statement",
+  "method": "2-3 sentence method summary",
+  "keywords": ["keyword1", "keyword2", "keyword3"],
+  "relevanceTags": ["tag1", "tag2", "tag3"],
+  "topicLabel": "one short topic label",
+  "methodLabel": "one short method label",
+  "taskLabel": "one short task label",
+  "domainLabel": "one short domain label",
+  "classificationConfidence": 0.0
+}
+
+Rules:
+- Keep keywords and relevanceTags concise.
+- Keep each label short and concrete.
+- classificationConfidence should be a number between 0 and 1.
+- If a field is missing, return empty string or empty array.
+- Return JSON only, no markdown wrapper.
+
+Markdown:
+%s
+`, markdown)
+
+	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed PaperProfileExtraction
+	if err := json.Unmarshal([]byte(extractJSONObject(response)), &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse paper profile extraction response: %w", err)
+	}
+
+	parsed.Title = strings.TrimSpace(parsed.Title)
+	parsed.Abstract = strings.TrimSpace(parsed.Abstract)
+	parsed.Problem = strings.TrimSpace(parsed.Problem)
+	parsed.Method = strings.TrimSpace(parsed.Method)
+	parsed.Authors = compactStrings(parsed.Authors, 32)
+	parsed.Keywords = compactStrings(parsed.Keywords, 16)
+	parsed.RelevanceTags = compactStrings(parsed.RelevanceTags, 16)
+	parsed.TopicLabel = strings.TrimSpace(parsed.TopicLabel)
+	parsed.MethodLabel = strings.TrimSpace(parsed.MethodLabel)
+	parsed.TaskLabel = strings.TrimSpace(parsed.TaskLabel)
+	parsed.DomainLabel = strings.TrimSpace(parsed.DomainLabel)
+	if parsed.ClassificationConfidence < 0 {
+		parsed.ClassificationConfidence = 0
+	}
+	if parsed.ClassificationConfidence > 1 {
+		parsed.ClassificationConfidence = 1
+	}
+	return &parsed, nil
+}
+
+func (c *LLMClient) RewriteSearchQueries(query string) ([]string, error) {
+	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
+		return nil, fmt.Errorf("missing API key for %s", c.providerLabel())
+	}
+	if strings.TrimSpace(c.model) == "" {
+		return nil, fmt.Errorf("missing model for %s", c.providerLabel())
+	}
+
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query cannot be empty")
+	}
+
+	prompt := fmt.Sprintf(`
+You are a search query rewriting assistant for academic paper retrieval.
+
+Convert the input query into concise English retrieval queries that work well for Semantic Scholar and arXiv.
+
+Return valid JSON only:
+{
+  "primaryQuery": "english main query",
+  "expandedQueries": ["english expansion 1", "english expansion 2"]
+}
+
+Rules:
+- Keep each query short and keyword-centric.
+- Avoid natural-language intent sentences.
+- Prefer domain terms, methods, tasks, and benchmark-oriented keywords.
+- Return up to 2 expanded queries.
+
+Input query:
+%s
+`, query)
+
+	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed struct {
+		PrimaryQuery    string   `json:"primaryQuery"`
+		ExpandedQueries []string `json:"expandedQueries"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(response)), &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse rewritten query response: %w", err)
+	}
+
+	queries := make([]string, 0, 3)
+	if primary := strings.TrimSpace(parsed.PrimaryQuery); primary != "" {
+		queries = append(queries, primary)
+	}
+	queries = append(queries, compactStrings(parsed.ExpandedQueries, 2)...)
+	queries = uniqueStrings(queries)
+	if len(queries) == 0 {
+		return nil, fmt.Errorf("empty rewritten queries")
+	}
+	return queries, nil
 }
 
 func (c *LLMClient) TranslateSection(section, originalText string) (translated string, summary string, err error) {
@@ -166,6 +320,7 @@ You will receive:
 Rules:
 - Return valid JSON only.
 - Do not invent paper IDs. Only use IDs that exist in the provided results.
+- Prefer grouping by topicLabel/methodLabel/taskLabel/domainLabel when these fields are available.
 - Group the papers into meaningful directions or sub-topics.
 - Mark recommended papers with tier "core", "important", or "optional".
 - If the result set is weak or empty, explain that honestly and propose better follow-up questions and search queries.
@@ -736,6 +891,9 @@ func buildSearchQueryCandidates(query string) []string {
 		if token == "" {
 			continue
 		}
+		if !isQueryKeywordToken(token) {
+			continue
+		}
 		if _, stop := searchEnglishStopWords[token]; stop {
 			continue
 		}
@@ -751,9 +909,18 @@ func buildSearchQueryCandidates(query string) []string {
 		candidates = append(candidates, strings.Join(keywords, " "))
 	}
 
+	// 对中英混合输入补一个纯英文关键词候选，提升 Semantic Scholar 命中率。
+	asciiKeywords := extractASCIISearchKeywords(original, 8)
+	if len(asciiKeywords) > 0 {
+		candidates = append(candidates, strings.Join(asciiKeywords, " "))
+	}
+
 	if strings.Contains(lowered, "embodied intelligence") || strings.Contains(original, "具身智能") {
 		candidates = append(candidates, "embodied intelligence robotics manipulation navigation")
 		candidates = append(candidates, "vision language action robotics")
+	}
+	if strings.Contains(lowered, "world model") || strings.Contains(original, "世界模型") {
+		candidates = append(candidates, "world model reinforcement learning robotics")
 	}
 
 	if strings.Contains(lowered, "vla") || strings.Contains(lowered, "vision-language-action") {
@@ -761,6 +928,214 @@ func buildSearchQueryCandidates(query string) []string {
 	}
 
 	return uniqueStrings(candidates)
+}
+
+func isQueryKeywordToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	hasASCIIAlphaNum := false
+	hasNonASCII := false
+	for _, r := range token {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if r <= unicode.MaxASCII {
+				hasASCIIAlphaNum = true
+			} else {
+				hasNonASCII = true
+			}
+		}
+	}
+	// 过滤掉“model的论文”这类中英混写 token，避免把整句意图词带进检索变体。
+	if hasASCIIAlphaNum && hasNonASCII {
+		return false
+	}
+	return true
+}
+
+func extractASCIISearchKeywords(value string, limit int) []string {
+	if limit <= 0 || strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	keywords := make([]string, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	var current strings.Builder
+
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		token := strings.ToLower(strings.TrimSpace(current.String()))
+		current.Reset()
+		if token == "" || utf8Len(token) <= 1 {
+			return
+		}
+		if _, stop := searchEnglishStopWords[token]; stop {
+			return
+		}
+		if _, ok := seen[token]; ok {
+			return
+		}
+		seen[token] = struct{}{}
+		keywords = append(keywords, token)
+	}
+
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			current.WriteRune(r)
+			continue
+		}
+		flush()
+		if len(keywords) >= limit {
+			break
+		}
+	}
+	flush()
+
+	if len(keywords) > limit {
+		keywords = keywords[:limit]
+	}
+	return keywords
+}
+
+func normalizeExternalIDMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	clean := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		clean[key] = value
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	return clean
+}
+
+func normalizeExternalIDMapFromAny(values map[string]any) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	clean := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" || value == nil {
+			continue
+		}
+
+		var normalized string
+		switch typed := value.(type) {
+		case string:
+			normalized = strings.TrimSpace(typed)
+		case json.Number:
+			normalized = strings.TrimSpace(typed.String())
+		case float64:
+			if math.IsNaN(typed) || math.IsInf(typed, 0) {
+				continue
+			}
+			if typed == math.Trunc(typed) {
+				normalized = strconv.FormatInt(int64(typed), 10)
+			} else {
+				normalized = strconv.FormatFloat(typed, 'f', -1, 64)
+			}
+		case float32:
+			f := float64(typed)
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				continue
+			}
+			if f == math.Trunc(f) {
+				normalized = strconv.FormatInt(int64(f), 10)
+			} else {
+				normalized = strconv.FormatFloat(f, 'f', -1, 64)
+			}
+		case int:
+			normalized = strconv.Itoa(typed)
+		case int64:
+			normalized = strconv.FormatInt(typed, 10)
+		case int32:
+			normalized = strconv.FormatInt(int64(typed), 10)
+		case int16:
+			normalized = strconv.FormatInt(int64(typed), 10)
+		case int8:
+			normalized = strconv.FormatInt(int64(typed), 10)
+		case uint:
+			normalized = strconv.FormatUint(uint64(typed), 10)
+		case uint64:
+			normalized = strconv.FormatUint(typed, 10)
+		case uint32:
+			normalized = strconv.FormatUint(uint64(typed), 10)
+		case uint16:
+			normalized = strconv.FormatUint(uint64(typed), 10)
+		case uint8:
+			normalized = strconv.FormatUint(uint64(typed), 10)
+		case bool:
+			normalized = strconv.FormatBool(typed)
+		default:
+			normalized = strings.TrimSpace(fmt.Sprint(typed))
+		}
+
+		if normalized == "" {
+			continue
+		}
+		clean[key] = normalized
+	}
+
+	if len(clean) == 0 {
+		return nil
+	}
+	return clean
+}
+
+func externalIDValue(values map[string]string, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	for candidateKey, candidateValue := range values {
+		if strings.EqualFold(strings.TrimSpace(candidateKey), strings.TrimSpace(key)) {
+			return strings.TrimSpace(candidateValue)
+		}
+	}
+	return ""
+}
+
+func buildInitialPDFCandidates(urlValue string, externalIDs map[string]string) []string {
+	candidates := make([]string, 0, 4)
+	appendCandidate := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == raw {
+				return
+			}
+		}
+		candidates = append(candidates, raw)
+	}
+
+	if trimmed := strings.TrimSpace(urlValue); trimmed != "" {
+		appendCandidate(trimmed)
+		if strings.Contains(strings.ToLower(trimmed), "arxiv.org/abs/") {
+			appendCandidate(arxivAbsToPDFURL(trimmed))
+		}
+	}
+
+	if arxivID := extractArxivID(externalIDValue(externalIDs, "ArXiv")); arxivID != "" {
+		appendCandidate(fmt.Sprintf("https://arxiv.org/pdf/%s.pdf", arxivID))
+	}
+
+	if doi := strings.TrimSpace(externalIDValue(externalIDs, "DOI")); doi != "" {
+		appendCandidate("https://doi.org/" + strings.TrimPrefix(doi, "doi:"))
+	}
+
+	return candidates
 }
 
 func searchQueryVariant(candidates []string, attempt int) string {
@@ -807,6 +1182,10 @@ type SearchClient struct {
 	statsMu               sync.RWMutex
 	lastSearchStats       SearchRetrievalStats
 }
+
+type searchContextKey string
+
+const searchContextPerSourceLimitKey searchContextKey = "per_source_limit_override"
 
 const (
 	searchHTTPTimeout       = 12 * time.Second
@@ -901,6 +1280,17 @@ func (s *SearchClient) Search(query string, limit int) ([]SearchPaper, error) {
 	return s.SearchWithContext(context.Background(), query, limit)
 }
 
+func (s *SearchClient) SearchWithPerSourceLimit(ctx context.Context, query string, limit int, perSourceLimit int) ([]SearchPaper, error) {
+	if perSourceLimit <= 0 {
+		return s.SearchWithContext(ctx, query, limit)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithValue(ctx, searchContextPerSourceLimitKey, perSourceLimit)
+	return s.SearchWithContext(ctx, query, limit)
+}
+
 func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limit int) ([]SearchPaper, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -925,6 +1315,9 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 
 	// 每源抓取上限与会话总上限解耦：DeepStart 可以总量 200，但单源默认抓取 100。
 	searchLimit := s.perSourceResultLimit
+	if override, ok := ctx.Value(searchContextPerSourceLimitKey).(int); ok && override > 0 {
+		searchLimit = override
+	}
 	if searchLimit <= 0 {
 		searchLimit = 100
 	}
@@ -1157,10 +1550,25 @@ func (s *SearchClient) retrySourceSearch(
 			return papers, nil
 		}
 
+		done := attempt == s.retryMax
+		if emptyErr, ok := err.(*emptyResultsVariantError); ok {
+			candidateCount := emptyErr.candidateCount
+			if candidateCount <= 0 {
+				candidateCount = 1
+			}
+			if attempt >= candidateCount {
+				done = true
+				err = fmt.Errorf("no results after trying %d query variants", candidateCount)
+			}
+		}
+
 		lastErr = err
 		log.Printf("[Search][%s] attempt %d/%d failed: %v", sourceName, attempt, s.retryMax, err)
 		if onAttempt != nil {
-			onAttempt(sourceName, attempt, false, attempt == s.retryMax, 0, err)
+			onAttempt(sourceName, attempt, false, done, 0, err)
+		}
+		if done {
+			return nil, fmt.Errorf("%s failed after %d retries in %v: %v", sourceName, attempt, time.Since(startedAt), lastErr)
 		}
 		if attempt < s.retryMax {
 			if wait := s.retryInterval - time.Since(attemptStarted); wait > 0 {
@@ -1225,19 +1633,27 @@ func (s *SearchClient) searchArxivSanityLite(query string, limit int) ([]SearchP
 	for _, item := range result.Papers {
 		authors := strings.Join(item.Authors, ", ")
 		arxivURL := fmt.Sprintf("https://arxiv.org/abs/%s", strings.TrimSpace(item.ID))
+		pdfCandidates := []string{}
+		if arxivID := extractArxivID(item.ID); arxivID != "" {
+			pdfCandidates = append(pdfCandidates, fmt.Sprintf("https://arxiv.org/pdf/%s.pdf", arxivID))
+		}
 
 		papers = append(papers, SearchPaper{
-			ID:          item.ID,
-			Title:       strings.TrimSpace(item.Title),
-			Authors:     authors,
-			Abstract:    strings.TrimSpace(item.Abstract),
-			Year:        item.Year,
-			Journal:     "arXiv",
-			URL:         arxivURL,
-			Category:    item.Category,
-			Tags:        item.Tags,
-			Source:      "arxiv_sanity",
-			SourceLabel: "arXiv Sanity Lite",
+			ID:               item.ID,
+			Title:            strings.TrimSpace(item.Title),
+			Authors:          authors,
+			Abstract:         strings.TrimSpace(item.Abstract),
+			Year:             item.Year,
+			Journal:          "arXiv",
+			PublicationVenue: "arXiv",
+			PublicationYear:  item.Year,
+			CitationCount:    0,
+			URL:              arxivURL,
+			Category:         item.Category,
+			Tags:             item.Tags,
+			Source:           "arxiv_sanity",
+			PDFCandidates:    pdfCandidates,
+			SourceLabel:      "arXiv Sanity Lite",
 		})
 	}
 
@@ -1263,7 +1679,7 @@ func (s *SearchClient) searchSemanticScholar(
 			}
 			pageSize := minInt(100, remaining)
 			apiURL := fmt.Sprintf(
-				"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&offset=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf",
+				"https://api.semanticscholar.org/graph/v1/paper/search?query=%s&limit=%d&offset=%d&fields=title,authors,abstract,year,venue,journal,openAccessPdf,citationCount,url,externalIds",
 				url.QueryEscape(variant),
 				pageSize,
 				offset,
@@ -1315,6 +1731,9 @@ func (s *SearchClient) searchSemanticScholar(
 					OpenAccessPDF *struct {
 						URL string `json:"url"`
 					} `json:"openAccessPdf"`
+					CitationCount int            `json:"citationCount"`
+					URL           string         `json:"url"`
+					ExternalIDs   map[string]any `json:"externalIds"`
 				} `json:"data"`
 			}
 
@@ -1338,22 +1757,34 @@ func (s *SearchClient) searchSemanticScholar(
 					journal = strings.TrimSpace(item.Journal.Name)
 				}
 
-				urlValue := ""
+				externalIDs := normalizeExternalIDMapFromAny(item.ExternalIDs)
+				openAccessURL := ""
 				if item.OpenAccessPDF != nil {
-					urlValue = strings.TrimSpace(item.OpenAccessPDF.URL)
+					openAccessURL = strings.TrimSpace(item.OpenAccessPDF.URL)
 				}
+				landingURL := strings.TrimSpace(item.URL)
+				urlValue := openAccessURL
+				if urlValue == "" {
+					urlValue = landingURL
+				}
+				pdfCandidates := buildInitialPDFCandidates(openAccessURL, externalIDs)
 
 				papers = append(papers, SearchPaper{
-					ID:          item.PaperID,
-					Title:       item.Title,
-					Authors:     strings.Join(authors, ", "),
-					Abstract:    item.Abstract,
-					Year:        item.Year,
-					Journal:     journal,
-					URL:         urlValue,
-					Tags:        []string{},
-					Source:      "semantic_scholar",
-					SourceLabel: "Semantic Scholar",
+					ID:               item.PaperID,
+					Title:            item.Title,
+					Authors:          strings.Join(authors, ", "),
+					Abstract:         item.Abstract,
+					Year:             item.Year,
+					Journal:          journal,
+					PublicationVenue: journal,
+					PublicationYear:  item.Year,
+					CitationCount:    item.CitationCount,
+					URL:              urlValue,
+					Tags:             []string{},
+					Source:           "semantic_scholar",
+					ExternalIDs:      externalIDs,
+					PDFCandidates:    pdfCandidates,
+					SourceLabel:      "Semantic Scholar",
 				})
 			}
 
@@ -1371,7 +1802,10 @@ func (s *SearchClient) searchSemanticScholar(
 		}
 
 		if len(papers) == 0 {
-			return nil, fmt.Errorf("empty results for query variant %q", variant)
+			return nil, &emptyResultsVariantError{
+				variant:        variant,
+				candidateCount: len(candidates),
+			}
 		}
 		if len(papers) > limit {
 			papers = papers[:limit]
@@ -1421,7 +1855,10 @@ func (s *SearchClient) searchArXiv(
 			return nil, err
 		}
 		if len(papers) == 0 {
-			return nil, fmt.Errorf("empty results for query variant %q", variant)
+			return nil, &emptyResultsVariantError{
+				variant:        variant,
+				candidateCount: len(candidates),
+			}
 		}
 		return papers, nil
 	}, onAttempt)
@@ -1546,16 +1983,20 @@ func parseArXivXML(data []byte) ([]SearchPaper, error) {
 		}
 
 		papers = append(papers, SearchPaper{
-			ID:          shortID,
-			Title:       title,
-			Authors:     strings.Join(entry.Authors, ", "),
-			Abstract:    strings.Join(strings.Fields(entry.Summary), " "),
-			Year:        year,
-			Journal:     "arXiv",
-			URL:         id,
-			Tags:        []string{},
-			Source:      "arxiv",
-			SourceLabel: "arXiv",
+			ID:               shortID,
+			Title:            title,
+			Authors:          strings.Join(entry.Authors, ", "),
+			Abstract:         strings.Join(strings.Fields(entry.Summary), " "),
+			Year:             year,
+			Journal:          "arXiv",
+			PublicationVenue: "arXiv",
+			PublicationYear:  year,
+			CitationCount:    0,
+			URL:              id,
+			PDFCandidates:    []string{fmt.Sprintf("https://arxiv.org/pdf/%s.pdf", shortID)},
+			Tags:             []string{},
+			Source:           "arxiv",
+			SourceLabel:      "arXiv",
 		})
 	}
 
@@ -1588,6 +2029,15 @@ func normalizedDedupeToken(value string) string {
 		return ""
 	}
 	return strings.Join(strings.Fields(value), " ")
+}
+
+type emptyResultsVariantError struct {
+	variant        string
+	candidateCount int
+}
+
+func (e *emptyResultsVariantError) Error() string {
+	return fmt.Sprintf("empty results for query variant %q", e.variant)
 }
 
 func isSearchPaperPreferred(candidate SearchPaper, existing SearchPaper) bool {

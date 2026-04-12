@@ -165,6 +165,12 @@ describe('backend runtime helpers', () => {
       total: 200,
       completed: 40,
       overallPercent: 32,
+      successCount: 0,
+      failedCount: 0,
+      noPdfUrlCount: 0,
+      downloadedCount: 0,
+      parsedCount: 0,
+      extractedCount: 0,
       stats: {
         query: 'embodied',
         rawCount: 220,

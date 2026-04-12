@@ -92,14 +92,35 @@ export interface SearchPaper {
   abstract: string;
   year: number;
   journal: string;
+  publicationVenue: string;
+  publicationYear: number;
+  citationCount: number;
   url: string;
   category: string;
   tags: string[];
   source: string; // 'semantic_scholar' | 'arxiv' | 'arxiv_sanity'
+  externalIds?: Record<string, string>;
+  pdfCandidates?: string[];
   institutions: string[];
   keywords: string[];
   sourceLabel: string;
   enrichmentNote?: string;
+  preprocessStatus?: string;
+  localPdfPath?: string;
+  markdownPath?: string;
+  parseStatus?: string;
+  parseError?: string;
+  extractStatus?: string;
+  extractError?: string;
+  problem?: string;
+  method?: string;
+  topicLabel?: string;
+  methodLabel?: string;
+  taskLabel?: string;
+  domainLabel?: string;
+  classificationConfidence?: number;
+  processingStage?: string;
+  processingError?: string;
 }
 
 export interface ImportSkippedPaper {
@@ -232,6 +253,10 @@ export interface DeepStartSessionSummary {
   rootPrompt: string;
   currentQuery: string;
   targetFolderId: string;
+  processingStatus?: 'initializing' | 'background_processing' | 'completed' | string;
+  initialReadyCount?: number;
+  totalPlannedCount?: number;
+  backgroundRemaining?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -269,6 +294,9 @@ export interface DeepStartAnalysis {
   retainedPaperIds: string[];
   searchStats: {
     query: string;
+    originalQuery?: string;
+    rewrittenQueries?: string[];
+    queryHits?: Record<string, number>;
     rawCount: number;
     dedupCount: number;
     finalCount: number;
@@ -277,15 +305,40 @@ export interface DeepStartAnalysis {
 
 export interface DeepStartProgressEvent {
   sessionId?: string;
-  phase: 'searching' | 'enriching' | 'analyzing' | 'persisting' | 'cancelling' | 'cancelled' | 'failed' | 'completed';
+  phase:
+    | 'searching'
+    | 'enriching'
+    | 'downloading'
+    | 'parsing'
+    | 'weak_extracting'
+    | 'initial_batch_ready'
+    | 'background_processing'
+    | 'analyzing'
+    | 'persisting'
+    | 'cancelling'
+    | 'cancelled'
+    | 'failed'
+    | 'completed';
   message?: string;
   elapsedSeconds: number;
   estimatedRemainingSeconds: number;
   total: number;
   completed: number;
   overallPercent: number;
+  successCount?: number;
+  failedCount?: number;
+  noPdfUrlCount?: number;
+  downloadedCount?: number;
+  parsedCount?: number;
+  extractedCount?: number;
+  initialBatchTotal?: number;
+  initialBatchCompleted?: number;
+  backgroundCompleted?: number;
   stats?: {
     query: string;
+    originalQuery?: string;
+    rewrittenQueries?: string[];
+    queryHits?: Record<string, number>;
     rawCount: number;
     dedupCount: number;
     finalCount: number;
@@ -309,6 +362,35 @@ export interface TranslationRecord {
   summary: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DeepReadSection {
+  id: string;
+  title: string;
+  content: string;
+  index: number;
+}
+
+export interface DeepReadNote {
+  id: string;
+  paperId: string;
+  section: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeepReadState {
+  paperId: string;
+  hasPdf: boolean;
+  pdfPath: string;
+  parseStatus: 'idle' | 'preparing' | 'ready' | 'failed' | 'missing_pdf' | string;
+  parseError?: string;
+  sections: DeepReadSection[];
+  markdown?: string;
+  translations: TranslationRecord[];
+  notes: DeepReadNote[];
+  lastPreparedAt?: string;
 }
 
 export interface ScreeningPaper {

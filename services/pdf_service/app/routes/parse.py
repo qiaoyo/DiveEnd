@@ -1,17 +1,39 @@
-"""PDF parsing routes."""
+"""PDF parsing routes (PyMuPDF4LLM backend)."""
 
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from core.logger import setup_logging
 
 router = APIRouter()
 logger = setup_logging()
+
+
+@lru_cache(maxsize=1)
+def _resolve_parser_runtime():
+    """Resolve PyMuPDF4LLM runtime in a lazy and safe way."""
+    import pymupdf4llm  # type: ignore
+    import pymupdf as fitz  # type: ignore
+
+    return {
+        "pymupdf4llm": pymupdf4llm,
+        "fitz": fitz,
+    }
+
+
+@lru_cache(maxsize=1)
+def parser_runtime_status() -> tuple[bool, str]:
+    """Return parser availability and backend kind."""
+    try:
+        _resolve_parser_runtime()
+        return True, "pymupdf4llm"
+    except Exception:
+        return False, "unavailable"
 
 
 class ParseResponse(BaseModel):
@@ -65,8 +87,8 @@ async def parse_upload(
 
         logger.info(f"Processing PDF: {file.filename}, size: {len(content)} bytes")
 
-        # Parse PDF using Marker
-        result = parse_pdf_with_marker(tmp_path, extract_sections)
+        # Parse PDF using PyMuPDF4LLM
+        result = parse_pdf_with_pymupdf4llm(tmp_path, extract_sections)
 
         # Cleanup temp file
         Path(tmp_path).unlink(missing_ok=True)
@@ -117,8 +139,8 @@ async def parse_url(
 
         logger.info(f"Downloaded PDF, size: {len(response.content)} bytes")
 
-        # Parse PDF using Marker
-        result = parse_pdf_with_marker(tmp_path, extract_sections)
+        # Parse PDF using PyMuPDF4LLM
+        result = parse_pdf_with_pymupdf4llm(tmp_path, extract_sections)
 
         # Cleanup temp file
         Path(tmp_path).unlink(missing_ok=True)
@@ -139,8 +161,8 @@ async def parse_url(
         )
 
 
-def parse_pdf_with_marker(pdf_path: str, extract_sections: bool = True) -> dict:
-    """Parse PDF using Marker library.
+def parse_pdf_with_pymupdf4llm(pdf_path: str, extract_sections: bool = True) -> dict:
+    """Parse PDF using PyMuPDF4LLM.
 
     Args:
         pdf_path: Path to PDF file
@@ -150,18 +172,21 @@ def parse_pdf_with_marker(pdf_path: str, extract_sections: bool = True) -> dict:
         Dictionary with markdown, metadata, and sections
     """
     try:
-        from marker.convert import convert_single_pdf
-        from marker.models import load_all_models
+        runtime = _resolve_parser_runtime()
+        pymupdf4llm = runtime["pymupdf4llm"]
+        fitz = runtime["fitz"]
+        logger.info(f"Parsing PDF with PyMuPDF4LLM: {pdf_path}")
 
-        logger.info(f"Parsing PDF with Marker: {pdf_path}")
+        markdown = pymupdf4llm.to_markdown(pdf_path)
 
-        # Load models (will be cached after first call)
-        model_lst = load_all_models()
-
-        # Convert PDF
-        markdown, metadata, images = convert_single_pdf(
-            pdf_path, model_lst, batch_multiplier=2
-        )
+        metadata = {}
+        try:
+            document = fitz.open(pdf_path)
+            metadata = document.metadata or {}
+            metadata["pages"] = len(document)
+            document.close()
+        except Exception:
+            metadata = {}
 
         result = {
             "success": True,
@@ -180,7 +205,7 @@ def parse_pdf_with_marker(pdf_path: str, extract_sections: bool = True) -> dict:
         return result
 
     except ImportError as e:
-        logger.error(f"Marker library not available: {e}")
+        logger.error(f"PyMuPDF4LLM library not available: {e}")
         return {
             "success": False,
             "markdown": None,

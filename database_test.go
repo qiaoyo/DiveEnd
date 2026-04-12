@@ -351,6 +351,9 @@ func TestDeepStartEnrichmentCacheRoundTrip(t *testing.T) {
 		Institutions:      []string{"CMU", "OpenAI"},
 		Keywords:          []string{"embodied", "agent"},
 		SourceLabel:       "arXiv",
+		PublicationVenue:  "NeurIPS",
+		PublicationYear:   2025,
+		CitationCount:     123,
 		OpenAlexAttempted: true,
 		CrossrefAttempted: true,
 		ErrorMessage:      "",
@@ -372,5 +375,8 @@ func TestDeepStartEnrichmentCacheRoundTrip(t *testing.T) {
 	}
 	if loaded.SourceLabel != "arXiv" {
 		t.Fatalf("expected source label to round-trip, got %q", loaded.SourceLabel)
+	}
+	if loaded.PublicationVenue != "NeurIPS" || loaded.PublicationYear != 2025 || loaded.CitationCount != 123 {
+		t.Fatalf("expected publication metadata to round-trip, got %+v", loaded)
 	}
 }

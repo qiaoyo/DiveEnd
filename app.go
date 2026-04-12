@@ -16,7 +16,9 @@ type App struct {
 	ctx               context.Context
 	config            AppConfig
 	db                *DB
-	llm               llmService
+	llm               llmService // legacy alias for strong llm
+	strongLLM         llmService
+	weakLLM           weakLLMService
 	search            paperSearchService
 	deepStartEnricher deepStartEnricher
 	pdfService        *PDFServiceClient
@@ -273,8 +275,38 @@ func (a *App) TranslatePaperSection(paperID, section, text string) (*Translation
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
-	if a.llm == nil {
-		return nil, fmt.Errorf("LLM not initialized")
+	if a.llm != nil && a.llm != a.strongLLM {
+		section = strings.TrimSpace(section)
+		if section == "" {
+			section = "Untitled Section"
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil, fmt.Errorf("text cannot be empty")
+		}
+		translated, summary, err := a.llm.TranslateSection(section, text)
+		if err != nil {
+			return nil, err
+		}
+
+		record := &TranslationRecord{
+			PaperID:        paperID,
+			Section:        section,
+			OriginalText:   text,
+			TranslatedText: translated,
+			Summary:        summary,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		if err := a.db.SaveTranslation(record); err != nil {
+			return nil, err
+		}
+		return record, nil
+	}
+
+	translator := a.currentWeakLLM()
+	if translator == nil {
+		return nil, fmt.Errorf("weak LLM not initialized")
 	}
 
 	section = strings.TrimSpace(section)
@@ -286,7 +318,7 @@ func (a *App) TranslatePaperSection(paperID, section, text string) (*Translation
 		return nil, fmt.Errorf("text cannot be empty")
 	}
 
-	translated, summary, err := a.llm.TranslateSection(section, text)
+	translated, summary, err := translator.TranslateSection(section, text)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +355,9 @@ func (a *App) ensureReady() error {
 
 func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.config = normalizeAppConfig(config)
-	a.llm = NewLLMClient(a.config)
+	a.strongLLM = NewStrongLLMClient(a.config)
+	a.weakLLM = NewWeakLLMClient(a.config)
+	a.llm = a.strongLLM
 	searchClient := NewSearchClient(a.config)
 	searchClient.SetProgressReporter(func(progress SearchProgressEvent) {
 		if a.ctx != nil {
@@ -365,4 +399,23 @@ func defaultPDFServiceURL() string {
 		return raw
 	}
 	return "http://127.0.0.1:50051"
+}
+
+func (a *App) currentStrongLLM() llmService {
+	if a.llm != nil {
+		return a.llm
+	}
+	return a.strongLLM
+}
+
+func (a *App) currentWeakLLM() weakLLMService {
+	if a.weakLLM != nil {
+		return a.weakLLM
+	}
+	if strong := a.currentStrongLLM(); strong != nil {
+		if client, ok := strong.(*LLMClient); ok {
+			return client
+		}
+	}
+	return nil
 }

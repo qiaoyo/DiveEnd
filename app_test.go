@@ -19,6 +19,14 @@ type fakeLLM struct {
 	screening  *ScreeningDecisionNode
 }
 
+type fakeWeakLLM struct {
+	translated     string
+	summary        string
+	profile        *PaperProfileExtraction
+	rewrittenQuery []string
+	rewriteErr     error
+}
+
 func (f fakeLLM) TranslateSection(section, originalText string) (string, string, error) {
 	return f.translated, f.summary, nil
 }
@@ -56,10 +64,43 @@ func (f fakeLLM) AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisio
 	}, nil
 }
 
+func (f fakeWeakLLM) TranslateSection(section, originalText string) (string, string, error) {
+	return f.translated, f.summary, nil
+}
+
+func (f fakeWeakLLM) ExtractPaperProfile(markdown string) (*PaperProfileExtraction, error) {
+	if f.profile != nil {
+		cloned := *f.profile
+		return &cloned, nil
+	}
+	return &PaperProfileExtraction{
+		Title:                    "",
+		Abstract:                 "",
+		Keywords:                 []string{"baseline"},
+		RelevanceTags:            []string{"survey"},
+		TopicLabel:               "topic",
+		MethodLabel:              "method",
+		TaskLabel:                "task",
+		DomainLabel:              "domain",
+		ClassificationConfidence: 0.7,
+	}, nil
+}
+
+func (f fakeWeakLLM) RewriteSearchQueries(query string) ([]string, error) {
+	if f.rewriteErr != nil {
+		return nil, f.rewriteErr
+	}
+	if len(f.rewrittenQuery) > 0 {
+		return append([]string{}, f.rewrittenQuery...), nil
+	}
+	return []string{query}, nil
+}
+
 type fakeSearch struct {
 	calls     []string
 	limits    []int
 	results   map[string][]SearchPaper
+	defaultResults []SearchPaper
 	lastStats SearchRetrievalStats
 }
 
@@ -74,6 +115,15 @@ func (f *fakeSearch) Search(query string, limit int) ([]SearchPaper, error) {
 			FinalCount: len(results),
 		}
 		return results, nil
+	}
+	if len(f.defaultResults) > 0 {
+		f.lastStats = SearchRetrievalStats{
+			Query:      query,
+			RawCount:   len(f.defaultResults),
+			DedupCount: len(f.defaultResults),
+			FinalCount: len(f.defaultResults),
+		}
+		return append([]SearchPaper{}, f.defaultResults...), nil
 	}
 	f.lastStats = SearchRetrievalStats{Query: query}
 	return nil, fmt.Errorf("query not found: %s", query)
@@ -841,17 +891,148 @@ func TestAppDeepStartUsesConfiguredResultLimitAndPersistsSearchStats(t *testing.
 	if err != nil {
 		t.Fatalf("StartDeepStartSession() error = %v", err)
 	}
-	if len(search.limits) != 1 {
-		t.Fatalf("expected one search call, got %d", len(search.limits))
+	if len(search.limits) == 0 {
+		t.Fatal("expected at least one search call")
 	}
-	if search.limits[0] != 200 {
-		t.Fatalf("expected deepstart search limit=200, got %d", search.limits[0])
+	for _, usedLimit := range search.limits {
+		if usedLimit != 200 {
+			t.Fatalf("expected deepstart search limit=200, got %d in %+v", usedLimit, search.limits)
+		}
 	}
 	if session.CurrentAnalysis == nil {
 		t.Fatal("expected current analysis to exist")
 	}
 	if session.CurrentAnalysis.SearchStats.FinalCount != 2 {
 		t.Fatalf("expected search stats final count=2, got %+v", session.CurrentAnalysis.SearchStats)
+	}
+}
+
+func TestAppDeepStartInitialBatchReadyThenBackgroundCompletes(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	config.Search.DeepStartResultLimit = 200
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() {
+		app.cancelAllDeepStartTasks()
+		_ = app.db.Close()
+	})
+
+	papers := make([]SearchPaper, 0, 50)
+	for i := 0; i < 50; i++ {
+		papers = append(papers, SearchPaper{
+			ID:    fmt.Sprintf("paper-%03d", i+1),
+			Title: fmt.Sprintf("Embodied Paper %03d", i+1),
+			Year:  2026 - (i % 3),
+		})
+	}
+
+	app.search = &fakeSearch{
+		results: map[string][]SearchPaper{
+			"embodied robotics": papers,
+		},
+		defaultResults: papers,
+	}
+	app.llm = fakeLLM{
+		analysis: DeepStartAIResponse{
+			Title: "Embodied Robotics",
+			Analysis: DeepStartAnalysis{
+				Overview:            "overview",
+				Directions:          []DeepStartDirection{},
+				PaperNotes:          []DeepStartPaperNote{},
+				FollowUpQuestions:   []string{"q1"},
+				SuggestedQueries:    []string{"embodied robotics benchmark"},
+				RecommendedPaperIDs: []string{"paper-001"},
+			},
+		},
+	}
+	app.weakLLM = fakeWeakLLM{
+		rewrittenQuery: []string{"embodied robotics"},
+	}
+
+	session, err := app.StartDeepStartSession("embodied robotics", "")
+	if err != nil {
+		t.Fatalf("StartDeepStartSession() error = %v", err)
+	}
+	if got := len(session.CurrentResults); got != 40 {
+		t.Fatalf("expected initial ready 40 papers, got %d", got)
+	}
+	if session.Summary.TotalPlannedCount != 50 {
+		t.Fatalf("expected total planned=50, got %d", session.Summary.TotalPlannedCount)
+	}
+	if session.Summary.BackgroundRemaining != 10 {
+		t.Fatalf("expected background remaining=10, got %d", session.Summary.BackgroundRemaining)
+	}
+	if session.Summary.ProcessingStatus != "background_processing" {
+		t.Fatalf("expected processing status background_processing, got %q", session.Summary.ProcessingStatus)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		latest, getErr := app.GetDeepStartSession(session.Summary.ID)
+		if getErr != nil {
+			t.Fatalf("GetDeepStartSession() error = %v", getErr)
+		}
+		if latest.Summary.ProcessingStatus == "completed" && len(latest.CurrentResults) >= 50 {
+			if latest.Summary.BackgroundRemaining != 0 {
+				t.Fatalf("expected background remaining=0 after completion, got %d", latest.Summary.BackgroundRemaining)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background processing did not complete in time: status=%q results=%d remaining=%d",
+				latest.Summary.ProcessingStatus, len(latest.CurrentResults), latest.Summary.BackgroundRemaining)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestAppReplyDeepStartSessionAppendsNarrowingSummary(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	app.search = &fakeSearch{
+		results: map[string][]SearchPaper{
+			"vla": {
+				{ID: "paper-1", Title: "VLA Survey", Abstract: "survey", Year: 2025},
+				{ID: "paper-2", Title: "VLA Benchmark", Abstract: "benchmark", Year: 2024},
+				{ID: "paper-3", Title: "Robot Control", Abstract: "control", Year: 2023},
+			},
+		},
+	}
+	app.llm = fakeLLM{
+		analysis: DeepStartAIResponse{
+			Title: "VLA",
+			Analysis: DeepStartAnalysis{
+				Overview:            "analysis",
+				Directions:          []DeepStartDirection{},
+				PaperNotes:          []DeepStartPaperNote{},
+				FollowUpQuestions:   []string{},
+				SuggestedQueries:    []string{},
+				RecommendedPaperIDs: []string{"paper-1"},
+				RetainedPaperIDs:    []string{"paper-1", "paper-2"},
+			},
+		},
+	}
+
+	session, err := app.StartDeepStartSession("vla", "")
+	if err != nil {
+		t.Fatalf("StartDeepStartSession() error = %v", err)
+	}
+	reply, err := app.ReplyDeepStartSession(session.Summary.ID, "只看 benchmark")
+	if err != nil {
+		t.Fatalf("ReplyDeepStartSession() error = %v", err)
+	}
+	lastMessage := reply.Messages[len(reply.Messages)-1]
+	if !strings.Contains(lastMessage.Content, "本轮缩窄：") {
+		t.Fatalf("expected narrowing summary in assistant message, got %q", lastMessage.Content)
 	}
 }
 
@@ -904,7 +1085,131 @@ func TestAppDeepStartSkipsLLMWhenSearchFailsWithNoResults(t *testing.T) {
 	if session.CurrentAnalysis == nil {
 		t.Fatal("expected fallback analysis to be present")
 	}
-	if !strings.Contains(session.CurrentAnalysis.Overview, "本轮检索暂时失败") {
+	if !strings.Contains(session.CurrentAnalysis.Overview, "暂时没有检索到稳定结果") {
 		t.Fatalf("expected search failure warning in overview, got %q", session.CurrentAnalysis.Overview)
+	}
+}
+
+func TestAppCreateFolderNodeSupportsRootPathSegments(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	folder, err := app.CreateFolderNode(CreateFolderNodeRequest{Path: "Robotics/VLA/Benchmarks"})
+	if err != nil {
+		t.Fatalf("CreateFolderNode() error = %v", err)
+	}
+	if folder.Path != "Robotics/VLA/Benchmarks" {
+		t.Fatalf("expected created path Robotics/VLA/Benchmarks, got %q", folder.Path)
+	}
+
+	tree, err := app.GetFolderTree()
+	if err != nil {
+		t.Fatalf("GetFolderTree() error = %v", err)
+	}
+	var foundRoot, foundLeaf bool
+	var walk func(nodes []FolderNode)
+	walk = func(nodes []FolderNode) {
+		for _, node := range nodes {
+			if node.Folder.Path == "Robotics" {
+				foundRoot = true
+			}
+			if node.Folder.Path == "Robotics/VLA/Benchmarks" {
+				foundLeaf = true
+			}
+			walk(node.Children)
+		}
+	}
+	walk(tree)
+	if !foundRoot || !foundLeaf {
+		t.Fatalf("expected folder tree to contain Robotics and Robotics/VLA/Benchmarks, got %+v", tree)
+	}
+}
+
+func TestAppCreateFolderNodeRejectsDigitsAndSpecialCharacters(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	if _, err := app.CreateFolderNode(CreateFolderNodeRequest{Path: "Robotics/2026"}); err == nil {
+		t.Fatal("expected folder path with digits to be rejected")
+	}
+	if _, err := app.CreateFolderNode(CreateFolderNodeRequest{Path: "Robotics/VLA#"}); err == nil {
+		t.Fatal("expected folder path with special characters to be rejected")
+	}
+	if _, err := app.CreateFolderNode(CreateFolderNodeRequest{Path: "机器人_阅读/综述 分类"}); err != nil {
+		t.Fatalf("expected Chinese/English/space/underscore path to pass, got %v", err)
+	}
+}
+
+func TestAppDeepReadStateAndNotesWithoutPDF(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	folders, err := app.db.GetFolders()
+	if err != nil {
+		t.Fatalf("GetFolders() error = %v", err)
+	}
+	if len(folders) == 0 {
+		t.Fatal("expected default folder to exist")
+	}
+
+	paper := &Paper{
+		ID:             "paper-deepread-1",
+		SourcePaperID:  "paper-deepread-1",
+		Title:          "Embodied Agent Study",
+		Authors:        "Alice, Bob",
+		Abstract:       "Test abstract",
+		Year:           2025,
+		Journal:        "ICRA",
+		URL:            "https://example.org/paper",
+		PDFPath:        "",
+		DownloadStatus: "queued",
+		FolderID:       folders[0].ID,
+		AddedAt:        time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	if err := app.db.UpsertPaper(paper); err != nil {
+		t.Fatalf("UpsertPaper() error = %v", err)
+	}
+
+	state, err := app.GetDeepReadState(paper.ID)
+	if err != nil {
+		t.Fatalf("GetDeepReadState() error = %v", err)
+	}
+	if state.HasPDF {
+		t.Fatal("expected HasPDF=false when paper has no local pdf path")
+	}
+	if state.ParseStatus != "missing_pdf" {
+		t.Fatalf("expected parse status missing_pdf, got %q", state.ParseStatus)
+	}
+
+	note, err := app.SaveDeepReadNote(paper.ID, "Abstract", "important baseline")
+	if err != nil {
+		t.Fatalf("SaveDeepReadNote() error = %v", err)
+	}
+	if strings.TrimSpace(note.Content) != "important baseline" {
+		t.Fatalf("unexpected note content: %+v", note)
+	}
+
+	latest, err := app.GetDeepReadState(paper.ID)
+	if err != nil {
+		t.Fatalf("GetDeepReadState(latest) error = %v", err)
+	}
+	if len(latest.Notes) != 1 {
+		t.Fatalf("expected one deepread note, got %d", len(latest.Notes))
 	}
 }

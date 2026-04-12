@@ -1,6 +1,48 @@
 package main
 
-import "strings"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+var strictFolderSegmentPattern = regexp.MustCompile(`^[A-Za-z_\p{Han} ]+$`)
+
+func validateFolderSegmentStrict(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return fmt.Errorf("folder name cannot be empty")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("folder name cannot contain path separators")
+	}
+
+	normalized := strings.Join(strings.Fields(name), " ")
+	if normalized == "" {
+		return fmt.Errorf("folder name cannot be empty")
+	}
+	if !strictFolderSegmentPattern.MatchString(normalized) {
+		return fmt.Errorf("folder path only allows Chinese/English letters, spaces and underscore (_)")
+	}
+	return nil
+}
+
+func validateFolderPathStrict(path string) error {
+	path = strings.TrimSpace(path)
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.Trim(path, " /")
+	if path == "" {
+		return fmt.Errorf("folder path cannot be empty")
+	}
+
+	segments := strings.Split(path, "/")
+	for _, segment := range segments {
+		if err := validateFolderSegmentStrict(segment); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func normalizeFolderSegment(name string) string {
 	name = strings.TrimSpace(name)
@@ -85,4 +127,3 @@ func splitNormalizedFolderPath(path string) []string {
 	}
 	return clean
 }
-

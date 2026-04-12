@@ -253,7 +253,10 @@ func TestSearchClientSearchRequestsAtLeast100FromSemanticAndArxiv(t *testing.T) 
       "year": 2025,
       "venue": "NeurIPS",
       "journal": {"name":"NeurIPS"},
-      "openAccessPdf": {"url":"https://example.com/sem-1.pdf"}
+      "openAccessPdf": {"url":"https://example.com/sem-1.pdf"},
+      "url": "https://www.semanticscholar.org/paper/sem-1",
+      "externalIds": {"ArXiv":"2501.00001","DOI":"10.1000/xyz123","CorpusId":123456789},
+      "citationCount": 321
     }
   ]
 }`)),
@@ -302,6 +305,44 @@ func TestSearchClientSearchRequestsAtLeast100FromSemanticAndArxiv(t *testing.T) 
 	}
 	if len(papers) != 2 {
 		t.Fatalf("expected 2 papers, got %d", len(papers))
+	}
+	var semanticPaper *SearchPaper
+	for idx := range papers {
+		if papers[idx].ID == "sem-1" {
+			semanticPaper = &papers[idx]
+			break
+		}
+	}
+	if semanticPaper == nil {
+		t.Fatalf("expected semantic paper in results, got %+v", papers)
+	}
+	if semanticPaper.PublicationVenue == "" || semanticPaper.PublicationYear == 0 {
+		t.Fatalf("expected publication metadata to be populated, got %+v", semanticPaper)
+	}
+	if semanticPaper.CitationCount != 321 {
+		t.Fatalf("expected citation count to be parsed, got %+v", semanticPaper)
+	}
+	if semanticPaper.ExternalIDs["ArXiv"] != "2501.00001" {
+		t.Fatalf("expected semantic external ids to be parsed, got %+v", semanticPaper.ExternalIDs)
+	}
+	if semanticPaper.ExternalIDs["CorpusId"] != "123456789" {
+		t.Fatalf("expected numeric semantic external ids to be normalized as string, got %+v", semanticPaper.ExternalIDs)
+	}
+	if len(semanticPaper.PDFCandidates) == 0 {
+		t.Fatalf("expected semantic pdf candidates, got %+v", semanticPaper.PDFCandidates)
+	}
+	candidateSet := map[string]bool{}
+	for _, candidate := range semanticPaper.PDFCandidates {
+		candidateSet[candidate] = true
+	}
+	if !candidateSet["https://example.com/sem-1.pdf"] {
+		t.Fatalf("expected OA pdf candidate, got %+v", semanticPaper.PDFCandidates)
+	}
+	if !candidateSet["https://arxiv.org/pdf/2501.00001.pdf"] {
+		t.Fatalf("expected arxiv fallback candidate, got %+v", semanticPaper.PDFCandidates)
+	}
+	if !candidateSet["https://doi.org/10.1000/xyz123"] {
+		t.Fatalf("expected doi fallback candidate, got %+v", semanticPaper.PDFCandidates)
 	}
 }
 
@@ -648,6 +689,20 @@ func TestBuildSearchQueryCandidatesCompactsSentencePrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSearchQueryCandidatesExtractsASCIIFromMixedLanguagePrompt(t *testing.T) {
+	candidates := buildSearchQueryCandidates("我想梳理这两年关于 world model的论文.")
+	found := false
+	for _, candidate := range candidates {
+		if candidate == "world model" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected mixed-language prompt to produce english keyword variant, got %v", candidates)
+	}
+}
+
 func TestSearchClientSemanticRetriesOnEmptyResultsWithQueryVariants(t *testing.T) {
 	config := defaultAppConfig()
 	config.Search.EnableArxiv = false
@@ -708,5 +763,45 @@ func TestSearchClientSemanticRetriesOnEmptyResultsWithQueryVariants(t *testing.T
 	}
 	if seenQueries[0] == seenQueries[1] {
 		t.Fatalf("expected second attempt to use query variant, got queries=%v", seenQueries)
+	}
+}
+
+func TestSearchClientSemanticStopsAfterTryingAllEmptyQueryVariants(t *testing.T) {
+	config := defaultAppConfig()
+	config.Search.EnableArxiv = false
+	config.Search.EnableSemanticScholar = true
+	config.Search.RetryDurationSeconds = 60
+	config.Search.RetryIntervalSeconds = 1
+	client := NewSearchClient(config)
+	client.retryInterval = 0
+
+	query := "我想梳理这两年关于 world model的论文."
+	candidates := buildSearchQueryCandidates(query)
+	attempts := 0
+
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if !strings.Contains(r.URL.Host, "api.semanticscholar.org") {
+				return nil, fmt.Errorf("unexpected host: %s", r.URL.Host)
+			}
+			attempts++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(bytes.NewBufferString(`{"data":[]}`)),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	_, err := client.Search(query, 100)
+	if err == nil {
+		t.Fatal("expected search to fail when all query variants return empty results")
+	}
+	if !strings.Contains(err.Error(), "no results after trying") {
+		t.Fatalf("expected terminal no-result error, got %v", err)
+	}
+	if attempts != len(candidates) {
+		t.Fatalf("expected %d semantic attempts (one per query variant), got %d", len(candidates), attempts)
 	}
 }

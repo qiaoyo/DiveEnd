@@ -191,20 +191,56 @@ type Paper struct {
 }
 
 type SearchPaper struct {
-	ID             string   `json:"id"`
-	Title          string   `json:"title"`
-	Authors        string   `json:"authors"`
-	Abstract       string   `json:"abstract"`
-	Year           int      `json:"year"`
-	Journal        string   `json:"journal"`
-	URL            string   `json:"url"`
-	Category       string   `json:"category"`
-	Tags           []string `json:"tags"`
-	Source         string   `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
-	Institutions   []string `json:"institutions"`
-	Keywords       []string `json:"keywords"`
-	SourceLabel    string   `json:"sourceLabel"`
-	EnrichmentNote string   `json:"enrichmentNote,omitempty"`
+	ID               string            `json:"id"`
+	Title            string            `json:"title"`
+	Authors          string            `json:"authors"`
+	Abstract         string            `json:"abstract"`
+	Year             int               `json:"year"`
+	Journal          string            `json:"journal"`
+	PublicationVenue string            `json:"publicationVenue"`
+	PublicationYear  int               `json:"publicationYear"`
+	CitationCount    int               `json:"citationCount"`
+	URL              string            `json:"url"`
+	Category         string            `json:"category"`
+	Tags             []string          `json:"tags"`
+	Source           string            `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
+	ExternalIDs      map[string]string `json:"externalIds,omitempty"`
+	PDFCandidates    []string          `json:"pdfCandidates,omitempty"`
+	Institutions     []string          `json:"institutions"`
+	Keywords         []string          `json:"keywords"`
+	SourceLabel      string            `json:"sourceLabel"`
+	EnrichmentNote   string            `json:"enrichmentNote,omitempty"`
+	PreprocessStatus string            `json:"preprocessStatus,omitempty"` // pending | no_pdf_url | downloading | downloaded | parsing | parsed | extracting | extracted | failed
+	LocalPDFPath     string            `json:"localPdfPath,omitempty"`
+	MarkdownPath     string            `json:"markdownPath,omitempty"`
+	ParseStatus      string            `json:"parseStatus,omitempty"` // pending | success | failed | skipped
+	ParseError       string            `json:"parseError,omitempty"`
+	ExtractStatus    string            `json:"extractStatus,omitempty"` // pending | success | failed | skipped
+	ExtractError     string            `json:"extractError,omitempty"`
+	Problem          string            `json:"problem,omitempty"`
+	Method           string            `json:"method,omitempty"`
+	TopicLabel       string            `json:"topicLabel,omitempty"`
+	MethodLabel      string            `json:"methodLabel,omitempty"`
+	TaskLabel        string            `json:"taskLabel,omitempty"`
+	DomainLabel      string            `json:"domainLabel,omitempty"`
+	ClassificationConfidence float64   `json:"classificationConfidence,omitempty"`
+	ProcessingStage  string            `json:"processingStage,omitempty"`
+	ProcessingError  string            `json:"processingError,omitempty"`
+}
+
+type PaperProfileExtraction struct {
+	Title         string   `json:"title"`
+	Authors       []string `json:"authors"`
+	Abstract      string   `json:"abstract"`
+	Problem       string   `json:"problem"`
+	Method        string   `json:"method"`
+	Keywords      []string `json:"keywords"`
+	RelevanceTags []string `json:"relevanceTags"`
+	TopicLabel    string   `json:"topicLabel"`
+	MethodLabel   string   `json:"methodLabel"`
+	TaskLabel     string   `json:"taskLabel"`
+	DomainLabel   string   `json:"domainLabel"`
+	ClassificationConfidence float64 `json:"classificationConfidence"`
 }
 
 type ImportSkippedPaper struct {
@@ -263,10 +299,13 @@ type LocalStorageOverview struct {
 }
 
 type SearchRetrievalStats struct {
-	Query      string `json:"query"`
-	RawCount   int    `json:"rawCount"`
-	DedupCount int    `json:"dedupCount"`
-	FinalCount int    `json:"finalCount"`
+	Query           string         `json:"query"`
+	OriginalQuery   string         `json:"originalQuery,omitempty"`
+	RewrittenQueries []string      `json:"rewrittenQueries,omitempty"`
+	QueryHits       map[string]int `json:"queryHits,omitempty"`
+	RawCount        int            `json:"rawCount"`
+	DedupCount      int            `json:"dedupCount"`
+	FinalCount      int            `json:"finalCount"`
 }
 
 type SearchSourceStatus struct {
@@ -295,6 +334,10 @@ type DeepStartSessionSummary struct {
 	RootPrompt     string    `json:"rootPrompt"`
 	CurrentQuery   string    `json:"currentQuery"`
 	TargetFolderID string    `json:"targetFolderId"`
+	ProcessingStatus string  `json:"processingStatus,omitempty"` // initializing | background_processing | completed
+	InitialReadyCount int    `json:"initialReadyCount,omitempty"`
+	TotalPlannedCount int    `json:"totalPlannedCount,omitempty"`
+	BackgroundRemaining int  `json:"backgroundRemaining,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
@@ -343,13 +386,22 @@ type DeepStartSessionDetail struct {
 
 type DeepStartProgressEvent struct {
 	SessionID                 string                `json:"sessionId,omitempty"`
-	Phase                     string                `json:"phase"` // searching | enriching | analyzing | persisting | cancelling | cancelled | completed
+	Phase                     string                `json:"phase"` // searching | enriching | downloading | parsing | weak_extracting | initial_batch_ready | background_processing | analyzing | persisting | cancelling | cancelled | completed
 	Message                   string                `json:"message,omitempty"`
 	ElapsedSeconds            int                   `json:"elapsedSeconds"`
 	EstimatedRemainingSeconds int                   `json:"estimatedRemainingSeconds"`
 	Total                     int                   `json:"total"`
 	Completed                 int                   `json:"completed"`
 	OverallPercent            int                   `json:"overallPercent"`
+	SuccessCount              int                   `json:"successCount,omitempty"`
+	FailedCount               int                   `json:"failedCount,omitempty"`
+	NoPDFURLCount             int                   `json:"noPdfUrlCount,omitempty"`
+	DownloadedCount           int                   `json:"downloadedCount,omitempty"`
+	ParsedCount               int                   `json:"parsedCount,omitempty"`
+	ExtractedCount            int                   `json:"extractedCount,omitempty"`
+	InitialBatchTotal         int                   `json:"initialBatchTotal,omitempty"`
+	InitialBatchCompleted     int                   `json:"initialBatchCompleted,omitempty"`
+	BackgroundCompleted       int                   `json:"backgroundCompleted,omitempty"`
 	Stats                     *SearchRetrievalStats `json:"stats,omitempty"`
 }
 
@@ -358,6 +410,9 @@ type DeepStartEnrichmentCache struct {
 	Institutions      []string
 	Keywords          []string
 	SourceLabel       string
+	PublicationVenue  string
+	PublicationYear   int
+	CitationCount     int
 	OpenAlexAttempted bool
 	CrossrefAttempted bool
 	ErrorMessage      string
@@ -373,6 +428,45 @@ type TranslationRecord struct {
 	Summary        string    `json:"summary"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type DeepReadSection struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	Index   int    `json:"index"`
+}
+
+type DeepReadParseCache struct {
+	PaperID        string            `json:"paperId"`
+	PDFPath        string            `json:"pdfPath"`
+	Status         string            `json:"status"` // idle | preparing | ready | failed | missing_pdf
+	ErrorMessage   string            `json:"errorMessage,omitempty"`
+	Markdown       string            `json:"markdown,omitempty"`
+	Sections       []DeepReadSection `json:"sections"`
+	LastPreparedAt time.Time         `json:"lastPreparedAt"`
+}
+
+type DeepReadNote struct {
+	ID        string    `json:"id"`
+	PaperID   string    `json:"paperId"`
+	Section   string    `json:"section"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type DeepReadState struct {
+	PaperID        string              `json:"paperId"`
+	HasPDF         bool                `json:"hasPdf"`
+	PDFPath        string              `json:"pdfPath"`
+	ParseStatus    string              `json:"parseStatus"`
+	ParseError     string              `json:"parseError,omitempty"`
+	Sections       []DeepReadSection   `json:"sections"`
+	Markdown       string              `json:"markdown,omitempty"`
+	Translations   []TranslationRecord `json:"translations"`
+	Notes          []DeepReadNote      `json:"notes"`
+	LastPreparedAt time.Time           `json:"lastPreparedAt"`
 }
 
 // ========== Phase 6: Baidu Cloud Sync 相关数据模型 ==========
