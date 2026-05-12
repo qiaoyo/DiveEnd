@@ -6,9 +6,16 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var ErrDeepStartTaskCancelled = errors.New("deepstart task cancelled")
+
+type deepStartTaskHandle struct {
+	cancel context.CancelFunc
+	token  string
+}
 
 func isDeepStartCancelledError(err error) bool {
 	return errors.Is(err, ErrDeepStartTaskCancelled) ||
@@ -16,32 +23,35 @@ func isDeepStartCancelledError(err error) bool {
 		errors.Is(err, context.DeadlineExceeded)
 }
 
-func (a *App) beginDeepStartTask(sessionID string) (context.Context, error) {
+func (a *App) beginDeepStartTask(sessionID string) (context.Context, string, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return nil, fmt.Errorf("session ID cannot be empty")
+		return nil, "", fmt.Errorf("session ID cannot be empty")
 	}
 
 	a.deepStartTaskMu.Lock()
 	defer a.deepStartTaskMu.Unlock()
 
-	if _, exists := a.deepStartTasks[sessionID]; exists {
-		return nil, fmt.Errorf("deepstart task already running")
+	if existing, exists := a.deepStartTasks[sessionID]; exists && existing.cancel != nil {
+		existing.cancel()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	a.deepStartTasks[sessionID] = cancel
-	return ctx, nil
+	token := uuid.NewString()
+	a.deepStartTasks[sessionID] = deepStartTaskHandle{cancel: cancel, token: token}
+	return ctx, token, nil
 }
 
-func (a *App) finishDeepStartTask(sessionID string) {
+func (a *App) finishDeepStartTask(sessionID string, token string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return
 	}
 
 	a.deepStartTaskMu.Lock()
-	delete(a.deepStartTasks, sessionID)
+	if current, ok := a.deepStartTasks[sessionID]; ok && current.token == token {
+		delete(a.deepStartTasks, sessionID)
+	}
 	a.deepStartTaskMu.Unlock()
 }
 
@@ -56,7 +66,7 @@ func (a *App) CancelDeepStartTask(sessionID string) error {
 	}
 
 	a.deepStartTaskMu.Lock()
-	cancel, exists := a.deepStartTasks[sessionID]
+	handle, exists := a.deepStartTasks[sessionID]
 	a.deepStartTaskMu.Unlock()
 	if !exists {
 		return nil
@@ -73,17 +83,21 @@ func (a *App) CancelDeepStartTask(sessionID string) error {
 		OverallPercent:            0,
 	})
 
-	cancel()
+	if handle.cancel != nil {
+		handle.cancel()
+	}
 	return nil
 }
 
 func (a *App) cancelAllDeepStartTasks() {
 	a.deepStartTaskMu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(a.deepStartTasks))
-	for _, cancel := range a.deepStartTasks {
-		cancels = append(cancels, cancel)
+	for _, handle := range a.deepStartTasks {
+		if handle.cancel != nil {
+			cancels = append(cancels, handle.cancel)
+		}
 	}
-	a.deepStartTasks = map[string]context.CancelFunc{}
+	a.deepStartTasks = map[string]deepStartTaskHandle{}
 	a.deepStartTaskMu.Unlock()
 
 	for _, cancel := range cancels {

@@ -21,10 +21,12 @@ import {
   getFolderTree,
   getPapers,
   prepareDeepReadPaper,
+  retryFolderPendingDownloads,
   retryPaperDownload,
   retryPaperDownloadWithURL,
   saveConfig,
   saveDeepReadNote,
+  selectAndAttachPaperPDF,
   translatePaperSection,
 } from '../../lib/backend';
 import type { DeepReadState, Folder as FolderRecord, FolderNode, Paper } from '../../types';
@@ -109,6 +111,18 @@ function isNoDownloadablePDFError(errorMessage: string): boolean {
   return errorMessage.toLowerCase().includes('no downloadable pdf url');
 }
 
+function isHttpURL(raw: string | undefined): boolean {
+  return /^https?:\/\//i.test((raw || '').trim());
+}
+
+function queryTokens(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[\s,;，；、|/]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
 export function DeepReadPanel() {
   const {
     activeFolderId,
@@ -132,6 +146,8 @@ export function DeepReadPanel() {
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [retryingPaperId, setRetryingPaperId] = useState('');
+  const [retryingFolder, setRetryingFolder] = useState(false);
+  const [attachingPaperId, setAttachingPaperId] = useState('');
   const [leftTab, setLeftTab] = useState<LeftTab>('directory');
   const [deepReadState, setDeepReadState] = useState<DeepReadState | null>(null);
   const [loadingState, setLoadingState] = useState(false);
@@ -147,6 +163,7 @@ export function DeepReadPanel() {
   const [pdfViewportWidth, setPDFViewportWidth] = useState(780);
   const [pdfLoadError, setPDFLoadError] = useState('');
   const [pdfBytes, setPDFBytes] = useState<Uint8Array | null>(null);
+  const [translationError, setTranslationError] = useState('');
   const [manualURLDrafts, setManualURLDrafts] = useState<Record<string, string>>({});
   const [manualURLPanelPaperId, setManualURLPanelPaperId] = useState<string | null>(null);
   const [submittingManualURLPaperId, setSubmittingManualURLPaperId] = useState('');
@@ -162,7 +179,8 @@ export function DeepReadPanel() {
   const pdfSrc = useMemo(() => fileURLFromPath(deepReadState?.pdfPath ?? ''), [deepReadState?.pdfPath]);
   const pdfFileInput = useMemo(() => {
     if (pdfBytes && pdfBytes.length > 0) {
-      return { data: pdfBytes };
+      const data = pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength);
+      return { data };
     }
     if (pdfSrc) {
       return pdfSrc;
@@ -179,13 +197,13 @@ export function DeepReadPanel() {
   });
 
   const filteredPapers = useMemo(() => {
-    const query = libraryQuery.trim().toLowerCase();
-    if (!query) {
+    const tokens = queryTokens(libraryQuery);
+    if (tokens.length === 0) {
       return papers;
     }
     return papers.filter((paper) => {
-      const haystack = `${paper.title} ${paper.authors} ${paper.journal}`.toLowerCase();
-      return haystack.includes(query);
+      const haystack = `${paper.title} ${paper.authors} ${paper.journal} ${paper.abstract} ${paper.tags.join(' ')}`.toLowerCase();
+      return tokens.every((token) => haystack.includes(token));
     });
   }, [libraryQuery, papers]);
 
@@ -474,6 +492,7 @@ export function DeepReadPanel() {
     }
 
     setIsTranslating(true);
+    setTranslationError('');
     try {
       const record = await translatePaperSection(
         selectedPaper.id,
@@ -491,7 +510,9 @@ export function DeepReadPanel() {
         };
       });
     } catch (error) {
-      setError(error instanceof Error ? error.message : '翻译失败');
+      const message = error instanceof Error ? error.message : '翻译失败';
+      setTranslationError(message);
+      setError(message);
     } finally {
       setIsTranslating(false);
     }
@@ -577,6 +598,51 @@ export function DeepReadPanel() {
     }
   };
 
+  const handleRetryFolderDownloads = async () => {
+    if (!activeFolderId || retryingFolder) {
+      return;
+    }
+    setRetryingFolder(true);
+    try {
+      const queued = await retryFolderPendingDownloads(activeFolderId);
+      await loadFolderPapers(activeFolderId, true);
+      if (queued === 0) {
+        setError('当前文件夹没有需要重新下载的论文');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '批量重新下载失败');
+    } finally {
+      setRetryingFolder(false);
+    }
+  };
+
+  const handleAttachLocalPDF = async (paper: Paper) => {
+    if (attachingPaperId) {
+      return;
+    }
+    setAttachingPaperId(paper.id);
+    setPDFLoadError('');
+    try {
+      const updated = await selectAndAttachPaperPDF(paper.id);
+      if (activeFolderId) {
+        await loadFolderPapers(activeFolderId, true);
+      }
+      if (selectedPaper?.id === paper.id) {
+        setSelectedPaper(updated);
+        const state = await getDeepReadState(paper.id);
+        setDeepReadState(state);
+        const base64 = await getDeepReadPDFBytes(paper.id);
+        const bytes = decodeBase64PDFBytes(base64);
+        setPDFBytes(bytes.length > 0 ? bytes : null);
+      }
+      setManualURLPanelPaperId(null);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '导入本地 PDF 失败');
+    } finally {
+      setAttachingPaperId('');
+    }
+  };
+
   const handleManualURLDraftChange = (paperId: string, value: string) => {
     setManualURLDrafts((prev) => ({
       ...prev,
@@ -630,6 +696,7 @@ export function DeepReadPanel() {
   const currentFolder = folders.find((folder) => folder.id === activeFolderId);
   const parseStatus = deepReadState?.parseStatus || 'idle';
   const isMissingPDF = parseStatus === 'missing_pdf';
+  const selectedPaperURL = selectedPaper?.url || '';
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -649,14 +716,14 @@ export function DeepReadPanel() {
               {preparing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               {preparing ? '处理中' : '准备阅读内容'}
             </button>
-            {selectedPaper?.url && (
+            {isHttpURL(selectedPaperURL) && (
               <a
-                href={selectedPaper.url}
+                href={selectedPaperURL}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 transition hover:border-indigo-400 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:text-indigo-100"
               >
-                打开原文
+                打开网页
                 <ExternalLink className="h-3.5 w-3.5" />
               </a>
             )}
@@ -965,6 +1032,13 @@ export function DeepReadPanel() {
                   {isTranslating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Languages className="h-3.5 w-3.5" />}
                   {isTranslating ? '处理中' : '生成翻译与摘要'}
                 </button>
+                {translationError ? (
+                  <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs leading-5 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+                    翻译失败：{translationError}
+                    <br />
+                    请检查弱模型 API Key、base URL、网络连通性，或缩短待翻译文本后重试。
+                  </div>
+                ) : null}
                 <p className="mt-2 text-xs leading-6 text-slate-700 dark:text-slate-200">
                   {latestTranslation?.translatedText || '选中章节并执行翻译后，这里会显示最新译文。'}
                 </p>
@@ -1047,6 +1121,15 @@ export function DeepReadPanel() {
               </h3>
               <span className="text-[11px] text-slate-500 dark:text-slate-400">{filteredPapers.length}</span>
             </div>
+            <button
+              type="button"
+              onClick={() => void handleRetryFolderDownloads()}
+              disabled={!activeFolderId || retryingFolder}
+              className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
+            >
+              {retryingFolder ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              重新下载当前文件夹未完成 PDF
+            </button>
             <input
               type="text"
               value={libraryQuery}
@@ -1059,6 +1142,9 @@ export function DeepReadPanel() {
                 filteredPapers.map((paper) => {
                   const active = selectedPaper?.id === paper.id;
                   const retrying = retryingPaperId === paper.id;
+                  const attaching = attachingPaperId === paper.id;
+                  const status = paper.downloadStatus.toLowerCase();
+                  const canRepairDownload = status === 'failed' || status === 'queued' || status === 'downloading';
                   return (
                     <article
                       key={paper.id}
@@ -1082,7 +1168,7 @@ export function DeepReadPanel() {
                         <span className={`rounded-full border px-2 py-0.5 text-[10px] ${statusStyle(paper.downloadStatus)}`}>
                           {statusLabel(paper.downloadStatus)}
                         </span>
-                        {paper.downloadStatus.toLowerCase() === 'failed' ? (
+                        {canRepairDownload ? (
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
@@ -1093,18 +1179,29 @@ export function DeepReadPanel() {
                               {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                               重试
                             </button>
+                            {status === 'failed' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setManualURLPanelPaperId((prev) => (prev === paper.id ? null : paper.id));
+                                  setManualURLDrafts((prev) => ({
+                                    ...prev,
+                                    [paper.id]: (prev[paper.id] || paper.url || '').trim(),
+                                  }));
+                                }}
+                                className="rounded-lg border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-600 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                              >
+                                手动链接
+                              </button>
+                            ) : null}
                             <button
                               type="button"
-                              onClick={() => {
-                                setManualURLPanelPaperId((prev) => (prev === paper.id ? null : paper.id));
-                                setManualURLDrafts((prev) => ({
-                                  ...prev,
-                                  [paper.id]: (prev[paper.id] || paper.url || '').trim(),
-                                }));
-                              }}
-                              className="rounded-lg border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-600 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                              onClick={() => void handleAttachLocalPDF(paper)}
+                              disabled={attaching}
+                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 px-2 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-500/40 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
                             >
-                              手动链接
+                              {attaching ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+                              本地PDF
                             </button>
                           </div>
                         ) : null}
@@ -1112,7 +1209,7 @@ export function DeepReadPanel() {
                       {paper.downloadError && (
                         <p className="mt-1 line-clamp-2 text-[10px] text-rose-700 dark:text-rose-300">{paper.downloadError}</p>
                       )}
-                      {manualURLPanelPaperId === paper.id && paper.downloadStatus.toLowerCase() === 'failed' && (
+                      {manualURLPanelPaperId === paper.id && status === 'failed' && (
                         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/70">
                           <p className="text-[10px] text-slate-600 dark:text-slate-300">填写可访问的 http/https PDF 链接</p>
                           <input

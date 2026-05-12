@@ -97,11 +97,11 @@ func (f fakeWeakLLM) RewriteSearchQueries(query string) ([]string, error) {
 }
 
 type fakeSearch struct {
-	calls     []string
-	limits    []int
-	results   map[string][]SearchPaper
+	calls          []string
+	limits         []int
+	results        map[string][]SearchPaper
 	defaultResults []SearchPaper
-	lastStats SearchRetrievalStats
+	lastStats      SearchRetrievalStats
 }
 
 func (f *fakeSearch) Search(query string, limit int) ([]SearchPaper, error) {
@@ -956,14 +956,14 @@ func TestAppDeepStartInitialBatchReadyThenBackgroundCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartDeepStartSession() error = %v", err)
 	}
-	if got := len(session.CurrentResults); got != 40 {
-		t.Fatalf("expected initial ready 40 papers, got %d", got)
+	if got := len(session.CurrentResults); got != deepStartInitialReadyLimit {
+		t.Fatalf("expected initial ready %d papers, got %d", deepStartInitialReadyLimit, got)
 	}
 	if session.Summary.TotalPlannedCount != 50 {
 		t.Fatalf("expected total planned=50, got %d", session.Summary.TotalPlannedCount)
 	}
-	if session.Summary.BackgroundRemaining != 10 {
-		t.Fatalf("expected background remaining=10, got %d", session.Summary.BackgroundRemaining)
+	if expected := 50 - deepStartInitialReadyLimit; session.Summary.BackgroundRemaining != expected {
+		t.Fatalf("expected background remaining=%d, got %d", expected, session.Summary.BackgroundRemaining)
 	}
 	if session.Summary.ProcessingStatus != "background_processing" {
 		t.Fatalf("expected processing status background_processing, got %q", session.Summary.ProcessingStatus)

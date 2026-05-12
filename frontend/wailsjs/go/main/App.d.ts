@@ -6,6 +6,8 @@ export function AnalyzePapers(arg1:string):Promise<main.ScreeningDecisionNode>;
 
 export function ApplyScreeningChoice(arg1:string,arg2:Array<string>):Promise<main.ScreeningDecisionNode>;
 
+export function AttachLocalPDFToPaper(arg1:string,arg2:string):Promise<main.Paper>;
+
 export function CancelDeepStartTask(arg1:string):Promise<void>;
 
 export function CancelScreening(arg1:string):Promise<void>;
@@ -78,6 +80,8 @@ export function RerunDeepStartSearch(arg1:string,arg2:string):Promise<main.DeepS
 
 export function ResolveSyncConflict(arg1:string,arg2:string):Promise<void>;
 
+export function RetryFolderPendingDownloads(arg1:string):Promise<number>;
+
 export function RetryPaperDownload(arg1:string):Promise<void>;
 
 export function RetryPaperDownloadWithURL(arg1:string,arg2:string):Promise<void>;
@@ -87,6 +91,10 @@ export function SaveConfig(arg1:main.AppConfig):Promise<main.SaveConfigResult>;
 export function SaveDeepReadNote(arg1:string,arg2:string,arg3:string):Promise<main.DeepReadNote>;
 
 export function SearchPapers(arg1:string,arg2:number):Promise<Array<main.SearchPaper>>;
+
+export function SelectAndAttachPaperPDF(arg1:string):Promise<main.Paper>;
+
+export function SelectScreeningPDFs():Promise<Array<string>>;
 
 export function StartDeepStartSession(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
 

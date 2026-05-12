@@ -41,17 +41,19 @@ export const Sync: React.FC = () => {
   });
 
   const loadSyncState = async () => {
-    const [status, progress, conflicts, records] = await Promise.all([
+    const [status, progress, conflicts, records] = await Promise.allSettled([
       backend.getSyncStatus(),
       backend.getSyncProgress(),
       backend.getSyncConflicts(),
       backend.getSyncRecords(30),
-    ]);
+    ] as const);
 
-    setSyncStatus(status);
-    setSyncProgress(progress);
-    setSyncConflicts(conflicts);
-    setSyncHistory(records);
+    if (status.status === 'fulfilled') setSyncStatus(status.value);
+    if (progress.status === 'fulfilled') setSyncProgress(progress.value);
+    if (conflicts.status === 'fulfilled') setSyncConflicts(conflicts.value);
+    if (records.status === 'fulfilled') setSyncHistory(records.value);
+
+    // Keep the dashboard usable even when one cloud-side probe fails.
   };
 
   useEffect(() => {
@@ -375,10 +377,10 @@ export const Sync: React.FC = () => {
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200">
               <div className="flex items-center gap-2 font-semibold">
                 <ShieldAlert className="h-3.5 w-3.5" />
-                当前阶段说明
+                同步能力说明
               </div>
               <p className="mt-1 leading-6">
-                本页已是“真实状态 + 手动触发同步”，完整自动双向同步和冲突自动合并仍在下一阶段。
+                本页读取真实同步状态、历史和冲突，并支持手动同步；启动自动同步、退出前未同步提醒和更细的冲突合并策略会继续完善。
               </p>
             </div>
           </section>

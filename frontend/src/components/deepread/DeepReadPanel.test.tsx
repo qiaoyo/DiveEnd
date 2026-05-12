@@ -9,11 +9,14 @@ const backendMocks = vi.hoisted(() => ({
   getFolderTree: vi.fn(),
   getPapers: vi.fn(),
   prepareDeepReadPaper: vi.fn(),
+  retryFolderPendingDownloads: vi.fn(),
   retryPaperDownload: vi.fn(),
   retryPaperDownloadWithURL: vi.fn(),
   saveConfig: vi.fn(),
   saveDeepReadNote: vi.fn(),
+  selectAndAttachPaperPDF: vi.fn(),
   translatePaperSection: vi.fn(),
+  getDeepReadPDFBytes: vi.fn(),
 }));
 
 vi.mock('../../lib/backend', () => backendMocks);
@@ -134,7 +137,26 @@ describe('DeepReadPanel', () => {
     });
 
     backendMocks.retryPaperDownload.mockResolvedValue(undefined);
+    backendMocks.retryFolderPendingDownloads.mockResolvedValue(1);
     backendMocks.retryPaperDownloadWithURL.mockResolvedValue(undefined);
+    backendMocks.selectAndAttachPaperPDF.mockResolvedValue({
+      id: 'paper-2',
+      sourcePaperId: 'paper-2',
+      title: 'Child Folder Paper',
+      authors: 'Carol',
+      abstract: 'child abstract',
+      year: 2024,
+      journal: 'RSS',
+      url: 'https://example.org/paper-2',
+      pdfPath: '/tmp/paper-2.pdf',
+      downloadStatus: 'downloaded',
+      downloadError: '',
+      folderId: 'folder-2',
+      category: '',
+      tags: [],
+      addedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     backendMocks.saveConfig.mockResolvedValue({
       config: defaultConfig,
       requiresRestart: false,

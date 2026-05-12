@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const backendMocks = vi.hoisted(() => ({
   canResolveFilePaths: vi.fn(),
+  hasNativeFilePicker: vi.fn(),
   resolveFilePaths: vi.fn(),
+  selectScreeningPDFs: vi.fn(),
   onExtractProgress: vi.fn(),
   createScreeningSession: vi.fn(),
   uploadScreeningFiles: vi.fn(),
@@ -24,7 +26,9 @@ describe('Screening page', () => {
     vi.clearAllMocks();
 
     backendMocks.canResolveFilePaths.mockReturnValue(true);
+    backendMocks.hasNativeFilePicker.mockReturnValue(false);
     backendMocks.resolveFilePaths.mockReturnValue(['/tmp/paper-1.pdf', '/tmp/paper-2.pdf']);
+    backendMocks.selectScreeningPDFs.mockResolvedValue(['/tmp/paper-1.pdf', '/tmp/paper-2.pdf']);
     backendMocks.onExtractProgress.mockReturnValue(() => undefined);
     backendMocks.createScreeningSession.mockResolvedValue({
       id: 'session-1',

@@ -30,14 +30,14 @@ type App struct {
 	downloadWG        sync.WaitGroup
 	downloadMu        sync.Mutex
 	deepStartTaskMu   sync.Mutex
-	deepStartTasks    map[string]context.CancelFunc
+	deepStartTasks    map[string]deepStartTaskHandle
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
 		extractProgress: map[string]*ExtractProgress{},
-		deepStartTasks:  map[string]context.CancelFunc{},
+		deepStartTasks:  map[string]deepStartTaskHandle{},
 	}
 }
 

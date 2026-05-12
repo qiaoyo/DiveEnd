@@ -15,7 +15,7 @@ function isDeepStartCancelledError(error: unknown): boolean {
 
 export function DeepStartPanel() {
   const navigate = useNavigate();
-  const { activeFolderId, folders, setActiveDeepStartSession, setError } = useAppStore();
+  const { activeFolderId, deepStartSessions, folders, setActiveDeepStartSession, setError } = useAppStore();
 
   const [isStarting, setIsStarting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -363,6 +363,37 @@ export function DeepStartPanel() {
               </div>
             )}
           </div>
+
+          {deepStartSessions.length > 0 && (
+            <section className="mt-6 rounded-[24px] border border-slate-200 bg-white/75 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Recent History</h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">已保存 {deepStartSessions.length} 个 DeepStart 会话，重启后会从本地数据库恢复。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/history')}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                >
+                  全部历史
+                </button>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                {deepStartSessions.slice(0, 3).map((session) => (
+                  <button
+                    key={session.id}
+                    type="button"
+                    onClick={() => navigate(`/session/${session.id}`)}
+                    className="rounded-2xl border border-slate-200 bg-white/80 p-3 text-left transition hover:border-indigo-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-950/70 dark:hover:border-indigo-500/50"
+                  >
+                    <div className="line-clamp-2 text-sm font-medium">{session.title || session.rootPrompt}</div>
+                    <div className="mt-2 line-clamp-1 text-xs text-slate-500 dark:text-slate-400">{session.currentQuery || session.rootPrompt}</div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           <div className="mt-7 grid gap-6 lg:grid-cols-[0.95fr_1.35fr]">
             <section className="de-glass rounded-[28px] p-5">

@@ -17,7 +17,10 @@ type llmSeedConfig struct {
 }
 
 type baiduTokenSeed struct {
-	AccessToken string `json:"access_token"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
 }
 
 type semanticScholarSeed struct {
@@ -142,6 +145,7 @@ func normalizeAppConfig(config AppConfig) AppConfig {
 	if strings.TrimSpace(config.DataPath) == "" {
 		config.DataPath = defaults.DataPath
 	}
+	config.DataPath = normalizeDataPath(config.DataPath, defaults.DataPath)
 
 	config.SelectedProvider = ""
 	config.OpenAIAPIKey = ""
@@ -270,9 +274,27 @@ func normalizeSearchAPIConfig(config SearchAPIConfig) SearchAPIConfig {
 
 func normalizeBaiduCloudConfig(config BaiduCloudConfig) BaiduCloudConfig {
 	config.Token = strings.TrimSpace(config.Token)
+	config.RefreshToken = strings.TrimSpace(config.RefreshToken)
+	config.ClientID = strings.TrimSpace(config.ClientID)
+	config.ClientSecret = strings.TrimSpace(config.ClientSecret)
 	config.HasToken = config.Token != ""
 	config.ClearToken = false
 	return config
+}
+
+func normalizeDataPath(dataPath, fallback string) string {
+	dataPath = strings.TrimSpace(dataPath)
+	if dataPath == "" {
+		dataPath = fallback
+	}
+	if filepath.IsAbs(dataPath) {
+		return filepath.Clean(dataPath)
+	}
+	homeDir, err := userHomeDirFunc()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return filepath.Clean(dataPath)
+	}
+	return filepath.Join(homeDir, dataPath)
 }
 
 func mergeAppConfigSecrets(existing AppConfig, incoming AppConfig) AppConfig {
@@ -298,8 +320,20 @@ func mergeAppConfigSecrets(existing AppConfig, incoming AppConfig) AppConfig {
 
 	if incoming.BaiduCloud.ClearToken {
 		merged.BaiduCloud.Token = ""
+		merged.BaiduCloud.RefreshToken = ""
+		merged.BaiduCloud.ClientID = ""
+		merged.BaiduCloud.ClientSecret = ""
 	} else if strings.TrimSpace(incoming.BaiduCloud.Token) == "" {
 		merged.BaiduCloud.Token = existing.BaiduCloud.Token
+		if strings.TrimSpace(incoming.BaiduCloud.RefreshToken) == "" {
+			merged.BaiduCloud.RefreshToken = existing.BaiduCloud.RefreshToken
+		}
+		if strings.TrimSpace(incoming.BaiduCloud.ClientID) == "" {
+			merged.BaiduCloud.ClientID = existing.BaiduCloud.ClientID
+		}
+		if strings.TrimSpace(incoming.BaiduCloud.ClientSecret) == "" {
+			merged.BaiduCloud.ClientSecret = existing.BaiduCloud.ClientSecret
+		}
 	}
 
 	return merged
@@ -311,6 +345,9 @@ func sanitizeAppConfig(config AppConfig) AppConfig {
 	safe.WeakLLM.APIKey = ""
 	safe.Search.SemanticScholarAPIKey = ""
 	safe.BaiduCloud.Token = ""
+	safe.BaiduCloud.RefreshToken = ""
+	safe.BaiduCloud.ClientID = ""
+	safe.BaiduCloud.ClientSecret = ""
 	return safe
 }
 
@@ -374,7 +411,10 @@ func loadBootstrapConfig() AppConfig {
 
 	if token, ok := readBaiduTokenSeed(); ok {
 		config.BaiduCloud.Enabled = true
-		config.BaiduCloud.Token = token
+		config.BaiduCloud.Token = token.AccessToken
+		config.BaiduCloud.RefreshToken = token.RefreshToken
+		config.BaiduCloud.ClientID = token.ClientID
+		config.BaiduCloud.ClientSecret = token.ClientSecret
 	}
 
 	if config.Search.EnableSemanticScholar {
@@ -399,7 +439,16 @@ func mergeSeedSecrets(config AppConfig) AppConfig {
 
 	if token, ok := readBaiduTokenSeed(); ok {
 		if strings.TrimSpace(config.BaiduCloud.Token) == "" {
-			config.BaiduCloud.Token = token
+			config.BaiduCloud.Token = token.AccessToken
+		}
+		if strings.TrimSpace(config.BaiduCloud.RefreshToken) == "" {
+			config.BaiduCloud.RefreshToken = token.RefreshToken
+		}
+		if strings.TrimSpace(config.BaiduCloud.ClientID) == "" {
+			config.BaiduCloud.ClientID = token.ClientID
+		}
+		if strings.TrimSpace(config.BaiduCloud.ClientSecret) == "" {
+			config.BaiduCloud.ClientSecret = token.ClientSecret
 		}
 		if !config.BaiduCloud.Enabled {
 			config.BaiduCloud.Enabled = true
@@ -496,19 +545,28 @@ func readLLMSeed(path string) (llmSeedConfig, bool) {
 	return seed, true
 }
 
-func readBaiduTokenSeed() (string, bool) {
-	data, err := os.ReadFile("baiduyun_token.json")
+func readBaiduTokenSeed() (BaiduToken, bool) {
+	data, err := os.ReadFile(defaultBaiduTokenPath())
 	if err != nil {
-		return "", false
+		return BaiduToken{}, false
 	}
 
 	var seed baiduTokenSeed
 	if err := json.Unmarshal(data, &seed); err != nil {
-		return "", false
+		return BaiduToken{}, false
 	}
 
-	token := strings.TrimSpace(seed.AccessToken)
-	return token, token != ""
+	token := BaiduToken{
+		AccessToken:  strings.TrimSpace(seed.AccessToken),
+		RefreshToken: strings.TrimSpace(seed.RefreshToken),
+		ClientID:     strings.TrimSpace(seed.ClientID),
+		ClientSecret: strings.TrimSpace(seed.ClientSecret),
+	}
+	return token, token.AccessToken != ""
+}
+
+func defaultBaiduTokenPath() string {
+	return "baiduyun_token.json"
 }
 
 func readSemanticScholarSeed(path string) (string, bool) {

@@ -5,6 +5,8 @@ const navItems = [
   { to: '/history', label: '历史' },
   { to: '/deepstart', label: 'DeepStart' },
   { to: '/deepread', label: 'DeepRead' },
+  { to: '/screening', label: 'Screening' },
+  { to: '/sync', label: 'Sync' },
 ];
 
 export function GlobalNav() {
@@ -35,4 +37,3 @@ export function GlobalNav() {
     </div>
   );
 }
-

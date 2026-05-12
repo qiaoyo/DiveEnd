@@ -49,7 +49,10 @@ func (a *App) GetSyncStatus() (*SyncStatus, error) {
 
 	conflicts, err := a.refreshSyncConflictsIfPossible()
 	if err != nil {
-		return nil, err
+		conflicts, err = a.db.GetSyncConflicts(200)
+		if err != nil {
+			return nil, err
+		}
 	}
 	for _, conflict := range conflicts {
 		if strings.TrimSpace(conflict.Resolution) == "" {
@@ -76,9 +79,7 @@ func (a *App) TriggerSync() (*SyncProgress, error) {
 	if err := manager.SyncToCloud(); err != nil {
 		return cloneSyncProgress(manager.GetSyncProgress()), err
 	}
-	if _, err := a.refreshSyncConflictsIfPossible(); err != nil {
-		return cloneSyncProgress(manager.GetSyncProgress()), err
-	}
+	_, _ = a.refreshSyncConflictsIfPossible()
 
 	return cloneSyncProgress(manager.GetSyncProgress()), nil
 }
@@ -98,7 +99,11 @@ func (a *App) GetSyncConflicts() ([]SyncConflict, error) {
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
-	return a.refreshSyncConflictsIfPossible()
+	conflicts, err := a.refreshSyncConflictsIfPossible()
+	if err != nil {
+		return a.db.GetSyncConflicts(200)
+	}
+	return conflicts, nil
 }
 
 func (a *App) GetSyncRecords(limit int) ([]SyncRecord, error) {

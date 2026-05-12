@@ -34,11 +34,14 @@ type SearchAPIConfig struct {
 }
 
 type BaiduCloudConfig struct {
-	Enabled    bool   `json:"enabled"`
-	Token      string `json:"token,omitempty"`
-	HasToken   bool   `json:"hasToken"`
-	Quota      int    `json:"quota"`
-	ClearToken bool   `json:"clearToken,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	Token        string `json:"token,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+	HasToken     bool   `json:"hasToken"`
+	Quota        int    `json:"quota"`
+	ClearToken   bool   `json:"clearToken,omitempty"`
 }
 
 type AppConfig struct {
@@ -191,56 +194,56 @@ type Paper struct {
 }
 
 type SearchPaper struct {
-	ID               string            `json:"id"`
-	Title            string            `json:"title"`
-	Authors          string            `json:"authors"`
-	Abstract         string            `json:"abstract"`
-	Year             int               `json:"year"`
-	Journal          string            `json:"journal"`
-	PublicationVenue string            `json:"publicationVenue"`
-	PublicationYear  int               `json:"publicationYear"`
-	CitationCount    int               `json:"citationCount"`
-	URL              string            `json:"url"`
-	Category         string            `json:"category"`
-	Tags             []string          `json:"tags"`
-	Source           string            `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
-	ExternalIDs      map[string]string `json:"externalIds,omitempty"`
-	PDFCandidates    []string          `json:"pdfCandidates,omitempty"`
-	Institutions     []string          `json:"institutions"`
-	Keywords         []string          `json:"keywords"`
-	SourceLabel      string            `json:"sourceLabel"`
-	EnrichmentNote   string            `json:"enrichmentNote,omitempty"`
-	PreprocessStatus string            `json:"preprocessStatus,omitempty"` // pending | no_pdf_url | downloading | downloaded | parsing | parsed | extracting | extracted | failed
-	LocalPDFPath     string            `json:"localPdfPath,omitempty"`
-	MarkdownPath     string            `json:"markdownPath,omitempty"`
-	ParseStatus      string            `json:"parseStatus,omitempty"` // pending | success | failed | skipped
-	ParseError       string            `json:"parseError,omitempty"`
-	ExtractStatus    string            `json:"extractStatus,omitempty"` // pending | success | failed | skipped
-	ExtractError     string            `json:"extractError,omitempty"`
-	Problem          string            `json:"problem,omitempty"`
-	Method           string            `json:"method,omitempty"`
-	TopicLabel       string            `json:"topicLabel,omitempty"`
-	MethodLabel      string            `json:"methodLabel,omitempty"`
-	TaskLabel        string            `json:"taskLabel,omitempty"`
-	DomainLabel      string            `json:"domainLabel,omitempty"`
-	ClassificationConfidence float64   `json:"classificationConfidence,omitempty"`
-	ProcessingStage  string            `json:"processingStage,omitempty"`
-	ProcessingError  string            `json:"processingError,omitempty"`
+	ID                       string            `json:"id"`
+	Title                    string            `json:"title"`
+	Authors                  string            `json:"authors"`
+	Abstract                 string            `json:"abstract"`
+	Year                     int               `json:"year"`
+	Journal                  string            `json:"journal"`
+	PublicationVenue         string            `json:"publicationVenue"`
+	PublicationYear          int               `json:"publicationYear"`
+	CitationCount            int               `json:"citationCount"`
+	URL                      string            `json:"url"`
+	Category                 string            `json:"category"`
+	Tags                     []string          `json:"tags"`
+	Source                   string            `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
+	ExternalIDs              map[string]string `json:"externalIds,omitempty"`
+	PDFCandidates            []string          `json:"pdfCandidates,omitempty"`
+	Institutions             []string          `json:"institutions"`
+	Keywords                 []string          `json:"keywords"`
+	SourceLabel              string            `json:"sourceLabel"`
+	EnrichmentNote           string            `json:"enrichmentNote,omitempty"`
+	PreprocessStatus         string            `json:"preprocessStatus,omitempty"` // pending | no_pdf_url | downloading | downloaded | parsing | parsed | extracting | extracted | failed
+	LocalPDFPath             string            `json:"localPdfPath,omitempty"`
+	MarkdownPath             string            `json:"markdownPath,omitempty"`
+	ParseStatus              string            `json:"parseStatus,omitempty"` // pending | success | failed | skipped
+	ParseError               string            `json:"parseError,omitempty"`
+	ExtractStatus            string            `json:"extractStatus,omitempty"` // pending | success | failed | skipped
+	ExtractError             string            `json:"extractError,omitempty"`
+	Problem                  string            `json:"problem,omitempty"`
+	Method                   string            `json:"method,omitempty"`
+	TopicLabel               string            `json:"topicLabel,omitempty"`
+	MethodLabel              string            `json:"methodLabel,omitempty"`
+	TaskLabel                string            `json:"taskLabel,omitempty"`
+	DomainLabel              string            `json:"domainLabel,omitempty"`
+	ClassificationConfidence float64           `json:"classificationConfidence,omitempty"`
+	ProcessingStage          string            `json:"processingStage,omitempty"`
+	ProcessingError          string            `json:"processingError,omitempty"`
 }
 
 type PaperProfileExtraction struct {
-	Title         string   `json:"title"`
-	Authors       []string `json:"authors"`
-	Abstract      string   `json:"abstract"`
-	Problem       string   `json:"problem"`
-	Method        string   `json:"method"`
-	Keywords      []string `json:"keywords"`
-	RelevanceTags []string `json:"relevanceTags"`
-	TopicLabel    string   `json:"topicLabel"`
-	MethodLabel   string   `json:"methodLabel"`
-	TaskLabel     string   `json:"taskLabel"`
-	DomainLabel   string   `json:"domainLabel"`
-	ClassificationConfidence float64 `json:"classificationConfidence"`
+	Title                    string   `json:"title"`
+	Authors                  []string `json:"authors"`
+	Abstract                 string   `json:"abstract"`
+	Problem                  string   `json:"problem"`
+	Method                   string   `json:"method"`
+	Keywords                 []string `json:"keywords"`
+	RelevanceTags            []string `json:"relevanceTags"`
+	TopicLabel               string   `json:"topicLabel"`
+	MethodLabel              string   `json:"methodLabel"`
+	TaskLabel                string   `json:"taskLabel"`
+	DomainLabel              string   `json:"domainLabel"`
+	ClassificationConfidence float64  `json:"classificationConfidence"`
 }
 
 type ImportSkippedPaper struct {
@@ -299,13 +302,13 @@ type LocalStorageOverview struct {
 }
 
 type SearchRetrievalStats struct {
-	Query           string         `json:"query"`
-	OriginalQuery   string         `json:"originalQuery,omitempty"`
-	RewrittenQueries []string      `json:"rewrittenQueries,omitempty"`
-	QueryHits       map[string]int `json:"queryHits,omitempty"`
-	RawCount        int            `json:"rawCount"`
-	DedupCount      int            `json:"dedupCount"`
-	FinalCount      int            `json:"finalCount"`
+	Query            string         `json:"query"`
+	OriginalQuery    string         `json:"originalQuery,omitempty"`
+	RewrittenQueries []string       `json:"rewrittenQueries,omitempty"`
+	QueryHits        map[string]int `json:"queryHits,omitempty"`
+	RawCount         int            `json:"rawCount"`
+	DedupCount       int            `json:"dedupCount"`
+	FinalCount       int            `json:"finalCount"`
 }
 
 type SearchSourceStatus struct {
@@ -329,17 +332,17 @@ type EnhancedSearchResult struct {
 }
 
 type DeepStartSessionSummary struct {
-	ID             string    `json:"id"`
-	Title          string    `json:"title"`
-	RootPrompt     string    `json:"rootPrompt"`
-	CurrentQuery   string    `json:"currentQuery"`
-	TargetFolderID string    `json:"targetFolderId"`
-	ProcessingStatus string  `json:"processingStatus,omitempty"` // initializing | background_processing | completed
-	InitialReadyCount int    `json:"initialReadyCount,omitempty"`
-	TotalPlannedCount int    `json:"totalPlannedCount,omitempty"`
-	BackgroundRemaining int  `json:"backgroundRemaining,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID                  string    `json:"id"`
+	Title               string    `json:"title"`
+	RootPrompt          string    `json:"rootPrompt"`
+	CurrentQuery        string    `json:"currentQuery"`
+	TargetFolderID      string    `json:"targetFolderId"`
+	ProcessingStatus    string    `json:"processingStatus,omitempty"` // initializing | background_processing | completed
+	InitialReadyCount   int       `json:"initialReadyCount,omitempty"`
+	TotalPlannedCount   int       `json:"totalPlannedCount,omitempty"`
+	BackgroundRemaining int       `json:"backgroundRemaining,omitempty"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
 type DeepStartMessage struct {

@@ -78,6 +78,9 @@ declare global {
           ImportPapersWithAssets(folderId: string, papers: SearchPaper[]): Promise<ImportPapersWithAssetsResult>;
           RetryPaperDownload(paperId: string): Promise<void>;
           RetryPaperDownloadWithURL(paperId: string, manualURL: string): Promise<void>;
+          RetryFolderPendingDownloads(folderId: string): Promise<number>;
+          SelectAndAttachPaperPDF(paperId: string): Promise<Paper>;
+          AttachLocalPDFToPaper(paperId: string, sourcePath: string): Promise<Paper>;
           GetLocalStorageOverview(): Promise<LocalStorageOverview>;
           GetFolderStorageTreeOverview(): Promise<FolderStorageTreeOverview>;
           DeletePaper(id: string): Promise<void>;
@@ -93,6 +96,7 @@ declare global {
           GetDeepReadPDFBytes(paperId: string): Promise<string>;
 
           // Screening API
+          SelectScreeningPDFs(): Promise<string[]>;
           CreateScreeningSession(title: string): Promise<ScreeningSession>;
           UploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<ScreeningSessionDetail>;
           ExtractPaperContent(sessionId: string): Promise<ExtractProgress>;
@@ -1475,6 +1479,31 @@ export async function retryPaperDownloadWithURL(paperId: string, manualURL: stri
   );
 }
 
+export async function retryFolderPendingDownloads(folderId: string): Promise<number> {
+  const app = runtimeApp();
+  if (app?.RetryFolderPendingDownloads) {
+    return app.RetryFolderPendingDownloads(folderId);
+  }
+  const now = new Date().toISOString();
+  let queued = 0;
+  mockPapers = mockPapers.map((paper) => {
+    if (paper.folderId !== folderId || paper.downloadStatus === 'downloaded') {
+      return paper;
+    }
+    queued += 1;
+    return { ...paper, downloadStatus: 'queued', downloadError: '', updatedAt: now };
+  });
+  return queued;
+}
+
+export async function selectAndAttachPaperPDF(paperId: string): Promise<Paper> {
+  const app = runtimeApp();
+  if (app?.SelectAndAttachPaperPDF) {
+    return normalizePaper(await app.SelectAndAttachPaperPDF(paperId));
+  }
+  throw new Error('当前运行环境不支持选择本地 PDF');
+}
+
 export async function getLocalStorageOverview(): Promise<LocalStorageOverview> {
   const app = runtimeApp();
   if (app?.GetLocalStorageOverview) {
@@ -1692,6 +1721,18 @@ export function resolveFilePaths(files: File[]): string[] {
   }
 
   return (ResolveFilePaths(files) as unknown as string[]) ?? [];
+}
+
+export function hasNativeFilePicker(): boolean {
+  return Boolean(runtimeApp()?.SelectScreeningPDFs);
+}
+
+export async function selectScreeningPDFs(): Promise<string[]> {
+  const app = runtimeApp();
+  if (app?.SelectScreeningPDFs) {
+    return normalizeArray(await app.SelectScreeningPDFs());
+  }
+  return [];
 }
 
 export function onExtractProgress(callback: (progress: ExtractProgress) => void): () => void {

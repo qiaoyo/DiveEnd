@@ -41,14 +41,14 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 	}
 
 	sessionID := uuid.NewString()
-	taskCtx, err := a.beginDeepStartTask(sessionID)
+	taskCtx, taskToken, err := a.beginDeepStartTask(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	shouldFinishTask := true
 	defer func() {
 		if shouldFinishTask {
-			a.finishDeepStartTask(sessionID)
+			a.finishDeepStartTask(sessionID, taskToken)
 		}
 	}()
 
@@ -150,17 +150,17 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 	results = initialResults
 
 	summary := DeepStartSessionSummary{
-		ID:             sessionID,
-		Title:          normalizeDeepStartTitle("", prompt, prompt),
-		RootPrompt:     prompt,
-		CurrentQuery:   prompt,
-		TargetFolderID: targetFolderID,
-		ProcessingStatus:  "completed",
-		InitialReadyCount: len(results),
-		TotalPlannedCount: len(results) + len(backgroundResults),
+		ID:                  sessionID,
+		Title:               normalizeDeepStartTitle("", prompt, prompt),
+		RootPrompt:          prompt,
+		CurrentQuery:        prompt,
+		TargetFolderID:      targetFolderID,
+		ProcessingStatus:    "completed",
+		InitialReadyCount:   len(results),
+		TotalPlannedCount:   len(results) + len(backgroundResults),
 		BackgroundRemaining: len(backgroundResults),
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 	if len(backgroundResults) > 0 {
 		summary.ProcessingStatus = "background_processing"
@@ -272,7 +272,7 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 			Stats:                     &searchStats,
 		})
 		shouldFinishTask = false
-		a.runDeepStartBackgroundProcessing(taskCtx, sessionID, prompt, backgroundResults, searchStats)
+		a.runDeepStartBackgroundProcessing(taskCtx, sessionID, taskToken, prompt, backgroundResults, searchStats)
 	}
 	return loaded, nil
 }
@@ -420,14 +420,14 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 		return nil, err
 	}
 
-	taskCtx, err := a.beginDeepStartTask(sessionID)
+	taskCtx, taskToken, err := a.beginDeepStartTask(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	shouldFinishTask := true
 	defer func() {
 		if shouldFinishTask {
-			a.finishDeepStartTask(sessionID)
+			a.finishDeepStartTask(sessionID, taskToken)
 		}
 	}()
 
@@ -646,7 +646,7 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 			Stats:                     &searchStats,
 		})
 		shouldFinishTask = false
-		a.runDeepStartBackgroundProcessing(taskCtx, sessionID, query, backgroundResults, searchStats)
+		a.runDeepStartBackgroundProcessing(taskCtx, sessionID, taskToken, query, backgroundResults, searchStats)
 	}
 	return loaded, nil
 }

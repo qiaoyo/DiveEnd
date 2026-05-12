@@ -26,14 +26,20 @@ const (
 
 // BaiduPCSClient 百度网盘客户端
 type BaiduPCSClient struct {
-	token      *BaiduToken
-	httpClient *http.Client
+	token         *BaiduToken
+	tokenFilePath string
+	httpClient    *http.Client
 }
 
 // NewBaiduPCSClient 创建百度网盘客户端
 func NewBaiduPCSClient(token *BaiduToken) *BaiduPCSClient {
+	return NewBaiduPCSClientWithTokenPath(token, "")
+}
+
+func NewBaiduPCSClientWithTokenPath(token *BaiduToken, tokenFilePath string) *BaiduPCSClient {
 	return &BaiduPCSClient{
-		token: token,
+		token:         token,
+		tokenFilePath: strings.TrimSpace(tokenFilePath),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -108,6 +114,9 @@ func RefreshToken(token *BaiduToken) (*BaiduToken, error) {
 		ClientID:     token.ClientID,
 		ClientSecret: token.ClientSecret,
 	}
+	if strings.TrimSpace(updatedToken.RefreshToken) == "" {
+		updatedToken.RefreshToken = token.RefreshToken
+	}
 
 	return updatedToken, nil
 }
@@ -116,6 +125,9 @@ func RefreshToken(token *BaiduToken) (*BaiduToken, error) {
 func (c *BaiduPCSClient) GetAccessToken() (string, error) {
 	if c.token == nil {
 		return "", fmt.Errorf("token is nil")
+	}
+	if strings.TrimSpace(c.token.AccessToken) == "" {
+		return "", fmt.Errorf("access token is empty")
 	}
 
 	// 检查 token 是否有效
@@ -135,23 +147,49 @@ func (c *BaiduPCSClient) GetAccessToken() (string, error) {
 		return "", fmt.Errorf("failed to decode quota response: %w", err)
 	}
 
-	// errno == 0 且 expire 为空表示 token 有效
+	// Mirrors the proven Python flow: token is valid when errno == 0 and
+	// `expire` is absent/empty/false/0.
 	if errno, ok := result["errno"].(float64); ok && errno == 0 {
-		if expire, ok := result["expire"]; ok && expire == nil {
+		if tokenStillValid(result["expire"]) {
 			return c.token.AccessToken, nil
 		}
 	}
 
 	// token 过期，刷新
 	fmt.Println("[Token] 已过期，正在刷新...")
+	if strings.TrimSpace(c.token.RefreshToken) == "" || strings.TrimSpace(c.token.ClientID) == "" || strings.TrimSpace(c.token.ClientSecret) == "" {
+		return "", fmt.Errorf("baidu access token expired and refresh_token/client_id/client_secret are not configured")
+	}
 	updatedToken, err := RefreshToken(c.token)
 	if err != nil {
 		return "", fmt.Errorf("failed to refresh token: %w", err)
 	}
 
 	c.token = updatedToken
+	if c.tokenFilePath != "" {
+		if err := SaveBaiduToken(c.tokenFilePath, updatedToken); err != nil {
+			return "", fmt.Errorf("token refreshed but save failed: %w", err)
+		}
+	}
 	fmt.Println("[Token] 刷新成功")
 	return updatedToken.AccessToken, nil
+}
+
+func tokenStillValid(expire any) bool {
+	if expire == nil {
+		return true
+	}
+	switch value := expire.(type) {
+	case bool:
+		return !value
+	case float64:
+		return value == 0
+	case string:
+		value = strings.TrimSpace(value)
+		return value == "" || value == "0" || strings.EqualFold(value, "false")
+	default:
+		return false
+	}
 }
 
 // UploadFile 上传文件到百度网盘
@@ -186,7 +224,7 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 		if n == 0 {
 			break
 		}
-		chunk := buf[:n]
+		chunk := append([]byte(nil), buf[:n]...)
 		chunks = append(chunks, chunk)
 
 		hasher := md5.New()
@@ -273,12 +311,13 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to upload chunk %d: %w", i, err)
 		}
-		defer resp.Body.Close()
 
 		var chunkResult map[string]interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&chunkResult); err != nil {
+			_ = resp.Body.Close()
 			return fmt.Errorf("failed to decode chunk response: %w", err)
 		}
+		_ = resp.Body.Close()
 
 		if md5, ok := chunkResult["md5"].(string); ok {
 			match := md5 == blockList[i]
@@ -324,6 +363,9 @@ func (c *BaiduPCSClient) UploadFile(localPath, remoteName string) error {
 func (c *BaiduPCSClient) DownloadFile(remotePath, localPath string) error {
 	if localPath == "" {
 		localPath = filepath.Base(remotePath)
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0700); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	accessToken, err := c.GetAccessToken()
@@ -410,6 +452,9 @@ func (c *BaiduPCSClient) DownloadFile(remotePath, localPath string) error {
 		return fmt.Errorf("failed to download file: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("download failed: http status %d", resp.StatusCode)
+	}
 
 	out, err := os.Create(localPath)
 	if err != nil {
@@ -443,6 +488,9 @@ func (c *BaiduPCSClient) ListFiles(dir string) ([]FileInfo, error) {
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode list response: %w", err)
+	}
+	if errno, ok := result["errno"].(float64); ok && errno != 0 {
+		return nil, fmt.Errorf("list files failed: %v", result)
 	}
 
 	fileList, ok := result["list"].([]interface{})

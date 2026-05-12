@@ -194,7 +194,7 @@ describe('SessionDetailPanel', () => {
     const chatTitle = screen.getByText('AI Chat');
     const chatSection = chatTitle.closest('section');
     expect(chatSection).toBeTruthy();
-    expect(chatSection).toHaveClass('sticky');
+    expect(chatSection?.parentElement).toHaveClass('sticky');
     expect(within(chatSection as HTMLElement).getByText('embodied benchmark')).toBeInTheDocument();
 
     expect(screen.getByText('Unified Embodied Agent Benchmark')).toBeInTheDocument();

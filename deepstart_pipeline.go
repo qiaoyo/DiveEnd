@@ -13,7 +13,7 @@ import (
 )
 
 const deepStartBatchDefaultPerSourceLimit = 20
-const deepStartInitialReadyLimit = 40
+const deepStartInitialReadyLimit = 12
 
 var deepStartCacheNamePattern = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
@@ -656,11 +656,11 @@ func (a *App) SupplementDeepStartSearch(sessionID, query string, perSourceLimit 
 		return nil, err
 	}
 
-	taskCtx, err := a.beginDeepStartTask(sessionID)
+	taskCtx, taskToken, err := a.beginDeepStartTask(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	defer a.finishDeepStartTask(sessionID)
+	defer a.finishDeepStartTask(sessionID, taskToken)
 
 	startedAt := time.Now()
 	abortIfCancelled := func(message string, stats *SearchRetrievalStats) error {

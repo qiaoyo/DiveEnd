@@ -1,7 +1,7 @@
 """LLM extraction routes."""
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -22,6 +22,12 @@ class ExtractionRequest(BaseModel):
         description="Type of extraction: paper_metadata, metrics, baselines, all"
     )
     provider: str = Field(default="openai", description="LLM provider: openai or anthropic")
+    model: Optional[str] = Field(default=None, description="LLM model override")
+    api_key: Optional[str] = Field(default=None, description="LLM API key override")
+    base_url: Optional[str] = Field(default=None, description="OpenAI-compatible or Anthropic base URL")
+    max_tokens: int = Field(default=4096, description="Maximum output tokens")
+    temperature: float = Field(default=0.0, description="Sampling temperature")
+    timeout: int = Field(default=120, description="Request timeout in seconds")
 
 
 class PaperMetadata(BaseModel):
@@ -113,6 +119,27 @@ Return a JSON object with:
 Relevance tags should categorize the paper (e.g., "sim-to-real", "locomotion", "diffusion-policy", etc.)"""
 
 
+def _loads_llm_json(response: str) -> Any:
+    """Parse JSON from LLM output, tolerating fences and trailing prose."""
+    text = response.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char not in "[{":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(text[index:])
+            return parsed
+        except json.JSONDecodeError:
+            continue
+
+    raise json.JSONDecodeError("No JSON object found in LLM response", text, 0)
+
+
 @router.post(
     "/",
     response_model=ExtractionResponse,
@@ -132,9 +159,17 @@ async def extract_data(request: ExtractionRequest):
     """
     try:
         # Initialize LLM client
+        model = request.model or (
+            "gpt-4o-mini" if request.provider == "openai" else "claude-sonnet-4-20250514"
+        )
         llm_config = LLMConfig(
             provider=request.provider,
-            model="gpt-4o-mini" if request.provider == "openai" else "claude-sonnet-4-20250514",
+            model=model,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            timeout=request.timeout,
         )
         llm_client = LLMClient(llm_config)
 
@@ -147,7 +182,7 @@ async def extract_data(request: ExtractionRequest):
 
         # Parse metadata
         try:
-            metadata_dict = json.loads(metadata_response)
+            metadata_dict = _loads_llm_json(metadata_response)
             metadata = PaperMetadata(**metadata_dict)
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Failed to parse metadata: {e}")
@@ -169,7 +204,7 @@ async def extract_data(request: ExtractionRequest):
         relevance_tags = []
 
         try:
-            metrics_dict = json.loads(metrics_response)
+            metrics_dict = _loads_llm_json(metrics_response)
             metrics = [Metric(**m) for m in metrics_dict.get("metrics", [])]
             baselines = [Baseline(**b) for b in metrics_dict.get("baselines", [])]
             relevance_tags = metrics_dict.get("relevance_tags", [])

@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	syncApp = "diveend"
+	// The OAuth app name must match the Baidu app folder name used by the proven
+	// token/upload script in this repo.
+	syncApp = "pcstest_oauth"
 )
 
 // migrateSync 创建同步相关的数据库表
@@ -243,11 +245,11 @@ func NewSyncManager(db *DB, config AppConfig) *SyncManager {
 	if config.BaiduCloud.Enabled && config.BaiduCloud.Token != "" {
 		token := &BaiduToken{
 			AccessToken:  config.BaiduCloud.Token,
-			RefreshToken: config.BaiduCloud.Token,
-			ClientID:     "",
-			ClientSecret: "",
+			RefreshToken: config.BaiduCloud.RefreshToken,
+			ClientID:     config.BaiduCloud.ClientID,
+			ClientSecret: config.BaiduCloud.ClientSecret,
 		}
-		baiduClient = NewBaiduPCSClient(token)
+		baiduClient = NewBaiduPCSClientWithTokenPath(token, defaultBaiduTokenPath())
 	}
 
 	return &SyncManager{
@@ -295,7 +297,7 @@ func (sm *SyncManager) SyncOnStartup() error {
 			continue
 		}
 
-		_, exists := localFiles[remoteFile.Path]
+		_, exists := localFiles[localSyncKeyForRemote(remoteFile.Path)]
 		if !exists {
 			// 云端有，本地没有 → 下载
 			sm.progress.CurrentFile = remoteFile.Path
@@ -349,7 +351,8 @@ func (sm *SyncManager) SyncToCloud() error {
 	sm.progress.Total = len(localFiles)
 	sm.progress.Completed = 0
 
-	for localPath, localFile := range localFiles {
+	for _, localFile := range localFiles {
+		localPath := localFile.Path
 		sm.progress.CurrentFile = localPath
 		sm.progress.Status = "uploading"
 		fmt.Printf("[Sync] 上传文件: %s\n", localPath)
@@ -402,6 +405,16 @@ func (sm *SyncManager) GetSyncProgress() *SyncProgress {
 func (sm *SyncManager) getLocalDataFiles() (map[string]FileInfo, error) {
 	files := make(map[string]FileInfo)
 
+	dbPath := filepath.Join(sm.config.DataPath, "diveend.db")
+	if info, err := os.Stat(dbPath); err == nil && !info.IsDir() {
+		files[localSyncKeyForLocal(dbPath)] = FileInfo{
+			Path:     dbPath,
+			Size:     info.Size(),
+			Modified: info.ModTime(),
+			IsDir:    false,
+		}
+	}
+
 	papers, err := sm.db.GetPapers("")
 	if err != nil {
 		return nil, err
@@ -410,7 +423,7 @@ func (sm *SyncManager) getLocalDataFiles() (map[string]FileInfo, error) {
 	for _, paper := range papers {
 		if paper.PDFPath != "" {
 			if info, err := os.Stat(paper.PDFPath); err == nil {
-				files[paper.PDFPath] = FileInfo{
+				files[localSyncKeyForLocal(paper.PDFPath)] = FileInfo{
 					Path:     paper.PDFPath,
 					Size:     info.Size(),
 					Modified: info.ModTime(),
@@ -453,7 +466,7 @@ func (sm *SyncManager) DetectConflicts() ([]SyncConflict, error) {
 			continue
 		}
 
-		localFile, exists := localFiles[remoteFile.Path]
+		localFile, exists := localFiles[localSyncKeyForRemote(remoteFile.Path)]
 		if exists {
 			// 两边都有文件，比较修改时间
 			if remoteFile.Modified.After(localFile.Modified) {
@@ -471,4 +484,12 @@ func (sm *SyncManager) DetectConflicts() ([]SyncConflict, error) {
 	}
 
 	return conflicts, nil
+}
+
+func localSyncKeyForLocal(path string) string {
+	return filepath.Base(path)
+}
+
+func localSyncKeyForRemote(path string) string {
+	return filepath.Base(path)
 }

@@ -78,6 +78,16 @@ type PDFExtractResponse struct {
 	Model    string          `json:"model"`
 }
 
+type PDFExtractionLLMConfig struct {
+	Provider    string  `json:"provider"`
+	Model       string  `json:"model"`
+	APIKey      string  `json:"api_key,omitempty"`
+	BaseURL     string  `json:"base_url,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	Timeout     int     `json:"timeout,omitempty"`
+}
+
 func (c *PDFServiceClient) ParsePDF(filePath string) (*PDFParseResponse, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -129,15 +139,19 @@ func (c *PDFServiceClient) ParsePDF(filePath string) (*PDFParseResponse, error) 
 	return &result, nil
 }
 
-func (c *PDFServiceClient) ExtractContent(markdown, provider string) (*PDFExtractResponse, error) {
-	if strings.TrimSpace(provider) == "" {
-		provider = "openai"
-	}
+func (c *PDFServiceClient) ExtractContent(markdown string, llmConfig PDFExtractionLLMConfig) (*PDFExtractResponse, error) {
+	llmConfig = normalizePDFExtractionLLMConfig(llmConfig)
 
 	requestBody := map[string]any{
 		"markdown":        markdown,
 		"extraction_type": "all",
-		"provider":        provider,
+		"provider":        llmConfig.Provider,
+		"model":           llmConfig.Model,
+		"api_key":         llmConfig.APIKey,
+		"base_url":        llmConfig.BaseURL,
+		"max_tokens":      llmConfig.MaxTokens,
+		"temperature":     llmConfig.Temperature,
+		"timeout":         llmConfig.Timeout,
 	}
 	jsonBody, err := json.Marshal(requestBody)
 	if err != nil {
@@ -172,6 +186,30 @@ func (c *PDFServiceClient) ExtractContent(markdown, provider string) (*PDFExtrac
 	}
 
 	return &result, nil
+}
+
+func normalizePDFExtractionLLMConfig(config PDFExtractionLLMConfig) PDFExtractionLLMConfig {
+	config.Provider = strings.TrimSpace(strings.ToLower(config.Provider))
+	if config.Provider != "anthropic" {
+		config.Provider = "openai"
+	}
+	config.Model = strings.TrimSpace(config.Model)
+	if config.Model == "" {
+		if config.Provider == "anthropic" {
+			config.Model = "claude-sonnet-4-20250514"
+		} else {
+			config.Model = "gpt-4o-mini"
+		}
+	}
+	config.APIKey = strings.TrimSpace(config.APIKey)
+	config.BaseURL = strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
+	if config.MaxTokens <= 0 {
+		config.MaxTokens = 4096
+	}
+	if config.Timeout <= 0 {
+		config.Timeout = 120
+	}
+	return config
 }
 
 func classifyPDFServiceCallError(baseURL, operation string, err error) error {

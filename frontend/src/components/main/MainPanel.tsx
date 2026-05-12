@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Compass, History } from 'lucide-react';
+import { BookOpen, Cloud, Compass, Filter, History } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 
 export function MainPanel() {
@@ -22,7 +22,7 @@ export function MainPanel() {
             </p>
           </div>
 
-          <div className="mt-10 grid grid-cols-1 gap-5 md:grid-cols-3">
+          <div className="mt-10 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5">
             <button
               onClick={() => navigate('/history')}
               disabled={!hasHistory}
@@ -51,6 +51,24 @@ export function MainPanel() {
               <BookOpen className="h-7 w-7 text-indigo-500" />
               <h3 className="mt-4 text-lg font-semibold">DeepRead</h3>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">沉浸式论文阅读</p>
+            </button>
+
+            <button
+              onClick={() => navigate('/screening')}
+              className="de-glass group rounded-2xl p-6 text-left transition hover:-translate-y-0.5 hover:shadow-xl"
+            >
+              <Filter className="h-7 w-7 text-violet-500" />
+              <h3 className="mt-4 text-lg font-semibold">Screening</h3>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">批量论文筛选</p>
+            </button>
+
+            <button
+              onClick={() => navigate('/sync')}
+              className="de-glass group rounded-2xl p-6 text-left transition hover:-translate-y-0.5 hover:shadow-xl"
+            >
+              <Cloud className="h-7 w-7 text-emerald-500" />
+              <h3 className="mt-4 text-lg font-semibold">Sync</h3>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">云同步与冲突</p>
             </button>
           </div>
         </div>

@@ -50,6 +50,15 @@ func TestPDFServiceClientParseAndExtractContracts(t *testing.T) {
 			if payload["provider"] != "openai" {
 				t.Fatalf("expected provider=openai, got %#v", payload["provider"])
 			}
+			if payload["model"] != "ark-code-latest" {
+				t.Fatalf("expected configured model, got %#v", payload["model"])
+			}
+			if payload["api_key"] != "weak-key" {
+				t.Fatalf("expected configured api key, got %#v", payload["api_key"])
+			}
+			if payload["base_url"] != "https://ark.cn-beijing.volces.com/api/coding/v3" {
+				t.Fatalf("expected configured base_url, got %#v", payload["base_url"])
+			}
 
 			_ = json.NewEncoder(w).Encode(PDFExtractResponse{
 				Success: true,
@@ -86,7 +95,12 @@ func TestPDFServiceClientParseAndExtractContracts(t *testing.T) {
 		t.Fatalf("unexpected parse result: %+v", parseResult)
 	}
 
-	extractResult, err := client.ExtractContent(parseResult.Markdown, "openai")
+	extractResult, err := client.ExtractContent(parseResult.Markdown, PDFExtractionLLMConfig{
+		Provider: "openai",
+		Model:    "ark-code-latest",
+		APIKey:   "weak-key",
+		BaseURL:  "https://ark.cn-beijing.volces.com/api/coding/v3",
+	})
 	if err != nil {
 		t.Fatalf("ExtractContent() error = %v", err)
 	}
@@ -105,7 +119,7 @@ func TestPDFServiceClientExtractContentRejectsBadPayload(t *testing.T) {
 	defer server.Close()
 
 	client := NewPDFServiceClient(server.URL)
-	_, err := client.ExtractContent("# Example", "openai")
+	_, err := client.ExtractContent("# Example", PDFExtractionLLMConfig{Provider: "openai", Model: "gpt-4o-mini", APIKey: "key"})
 	if err == nil {
 		t.Fatal("expected ExtractContent() to fail on empty data payload")
 	}

@@ -478,6 +478,12 @@ export function SessionDetailPanel() {
       }
 
       if (progress.phase === 'cancelled') {
+        if (
+          (busyAction === 'rerunning' || busyAction === 'supplementing') &&
+          (progress.message || '').includes('后台补全已停止')
+        ) {
+          return;
+        }
         setChatRuntime({
           status: 'cancelled',
           phase: progress.phase,
@@ -531,6 +537,7 @@ export function SessionDetailPanel() {
   }, [
     activeDeepStartSession?.summary.id,
     activeDeepStartSession?.summary.processingStatus,
+    busyAction,
     setActiveFolderId,
     setError,
     upsertDeepStartSession,
@@ -1293,9 +1300,9 @@ export function SessionDetailPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28 pt-5">
-        <div className="mx-auto max-w-7xl">
-          <section className="de-glass sticky top-4 z-20 rounded-2xl border border-indigo-200/70 p-4 dark:border-indigo-500/30">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28">
+        <div className="sticky top-0 z-30 -mx-6 border-b border-indigo-100 bg-slate-50/95 px-6 py-4 shadow-sm backdrop-blur-md dark:border-slate-700 dark:bg-slate-950/95">
+          <section className="mx-auto max-w-7xl rounded-2xl border border-indigo-200/70 bg-white p-4 shadow-sm dark:border-indigo-500/30 dark:bg-slate-900">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Chat</h3>
               <button
@@ -1409,12 +1416,20 @@ export function SessionDetailPanel() {
                     <div className="flex items-center gap-1">
                       <span className="text-[11px] text-slate-500 dark:text-slate-300">每源</span>
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
                         min={5}
                         max={100}
                         value={supplementPerSourceLimit}
-                        onChange={(event) => setSupplementPerSourceLimit(Number(event.target.value) || 20)}
-                        className="w-14 rounded-lg border border-slate-200 bg-white/80 px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-900/80"
+                        onFocus={(event) => event.currentTarget.select()}
+                        onChange={(event) => {
+                          const digits = event.target.value.replace(/\D/g, '').slice(0, 3);
+                          setSupplementPerSourceLimit(digits === '' ? 0 : Number(digits));
+                        }}
+                        onBlur={() => {
+                          setSupplementPerSourceLimit((value) => Math.max(5, Math.min(100, Number(value) || 20)));
+                        }}
+                        className="w-20 rounded-lg border border-slate-200 bg-white/80 px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-900/80"
                       />
                     </div>
                     <button
@@ -1437,7 +1452,9 @@ export function SessionDetailPanel() {
               </div>
             )}
           </section>
+        </div>
 
+        <div className="mx-auto max-w-7xl pt-5">
           <div className="mt-5 grid gap-6 xl:grid-cols-[320px_1px_1fr]">
             <aside className="space-y-4">
               <section className="de-glass rounded-2xl p-4">
@@ -1578,12 +1595,12 @@ export function SessionDetailPanel() {
             className="fixed inset-0 z-30 bg-slate-950/35 backdrop-blur-[1px]"
             aria-label="关闭详情抽屉"
           />
-          <aside className="fixed right-0 top-0 z-40 flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white/98 p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-950/98">
+          <aside className="fixed right-0 top-0 z-40 flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-950">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Paper Detail</p>
-                <h3 className="mt-2 text-lg font-semibold leading-7">{activePaper.title}</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+                <h3 className="mt-2 text-lg font-semibold leading-7 text-slate-950 dark:text-slate-50">{activePaper.title}</h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                   {publicationLabel(activePaper)}
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">

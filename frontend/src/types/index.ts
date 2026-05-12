@@ -30,6 +30,9 @@ export interface SearchAPIConfig {
 export interface BaiduCloudConfig {
   enabled: boolean;
   token: string;
+  refreshToken?: string;
+  clientId?: string;
+  clientSecret?: string;
   hasToken: boolean;
   quota: number;
   clearToken: boolean;

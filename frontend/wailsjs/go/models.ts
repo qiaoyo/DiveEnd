@@ -3,6 +3,9 @@ export namespace main {
 	export class BaiduCloudConfig {
 	    enabled: boolean;
 	    token?: string;
+	    refreshToken?: string;
+	    clientId?: string;
+	    clientSecret?: string;
 	    hasToken: boolean;
 	    quota: number;
 	    clearToken?: boolean;
@@ -15,6 +18,9 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
 	        this.token = source["token"];
+	        this.refreshToken = source["refreshToken"];
+	        this.clientId = source["clientId"];
+	        this.clientSecret = source["clientSecret"];
 	        this.hasToken = source["hasToken"];
 	        this.quota = source["quota"];
 	        this.clearToken = source["clearToken"];

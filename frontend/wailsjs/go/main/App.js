@@ -10,6 +10,10 @@ export function ApplyScreeningChoice(arg1, arg2) {
   return window['go']['main']['App']['ApplyScreeningChoice'](arg1, arg2);
 }
 
+export function AttachLocalPDFToPaper(arg1, arg2) {
+  return window['go']['main']['App']['AttachLocalPDFToPaper'](arg1, arg2);
+}
+
 export function CancelDeepStartTask(arg1) {
   return window['go']['main']['App']['CancelDeepStartTask'](arg1);
 }
@@ -154,6 +158,10 @@ export function ResolveSyncConflict(arg1, arg2) {
   return window['go']['main']['App']['ResolveSyncConflict'](arg1, arg2);
 }
 
+export function RetryFolderPendingDownloads(arg1) {
+  return window['go']['main']['App']['RetryFolderPendingDownloads'](arg1);
+}
+
 export function RetryPaperDownload(arg1) {
   return window['go']['main']['App']['RetryPaperDownload'](arg1);
 }
@@ -172,6 +180,14 @@ export function SaveDeepReadNote(arg1, arg2, arg3) {
 
 export function SearchPapers(arg1, arg2) {
   return window['go']['main']['App']['SearchPapers'](arg1, arg2);
+}
+
+export function SelectAndAttachPaperPDF(arg1) {
+  return window['go']['main']['App']['SelectAndAttachPaperPDF'](arg1);
+}
+
+export function SelectScreeningPDFs() {
+  return window['go']['main']['App']['SelectScreeningPDFs']();
 }
 
 export function StartDeepStartSession(arg1, arg2) {

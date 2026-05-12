@@ -99,3 +99,62 @@ def test_extract_route_returns_expected_schema():
     assert payload["data"]["metrics"][0]["metric_name"] == "Accuracy"
     assert payload["data"]["baselines"][0]["method_name"] == "Baseline"
     assert payload["data"]["relevance_tags"] == ["screening", "pdf-service"]
+
+
+def test_extract_route_tolerates_llm_json_wrappers_and_trailing_text():
+    app = create_app()
+
+    class FakeLLMClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def chat(self, system_prompt: str, user_prompt: str) -> str:
+            if "Required fields" in system_prompt:
+                return """```json
+{
+  "title": "Wrapped Paper",
+  "authors": ["Author One"],
+  "affiliations": [],
+  "abstract": "Abstract text.",
+  "problem": "Problem text.",
+  "method": "Method text.",
+  "github_url": null,
+  "arxiv_url": null,
+  "keywords": ["wrapped-json"]
+}
+```
+"""
+
+            return """{
+  "metrics": [
+    {
+      "metric_name": "Success Rate",
+      "dataset_or_task": "RealBench",
+      "ours_value": "88",
+      "unit": "%"
+    }
+  ],
+  "baselines": [],
+  "relevance_tags": ["robust-json"]
+}
+
+Additional explanation that should be ignored."""
+
+    with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+        with patch("app.routes.extract.LLMClient", FakeLLMClient):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/extract/",
+                    json={
+                        "markdown": "# Wrapped Paper\n\n## Abstract\nAbstract text.",
+                        "extraction_type": "all",
+                        "provider": "openai",
+                    },
+                )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["metadata"]["title"] == "Wrapped Paper"
+    assert payload["data"]["metrics"][0]["metric_name"] == "Success Rate"
+    assert payload["data"]["relevance_tags"] == ["robust-json"]

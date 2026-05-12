@@ -627,7 +627,7 @@ export function SettingsPanel() {
             )}
 
             <div className="rounded-2xl border border-stone-200 bg-white/80 p-4 text-xs leading-6 text-stone-500 dark:border-stone-800 dark:bg-stone-900/70 dark:text-stone-400">
-              当前项目的 Sync 页面仍处于过渡阶段：这里只保存云同步所需凭据，不会自动发起真实同步任务。
+              保存百度网盘凭据后，可以在 Sync 页面查看真实同步状态并手动触发同步；自动启动同步和退出提醒会单独完善。
             </div>
           </div>
         )}

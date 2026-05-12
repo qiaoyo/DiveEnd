@@ -133,7 +133,7 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 	}
 	a.storeExtractProgress(progress)
 
-	provider := pdfProviderForConfig(a.config)
+	extractionLLMConfig := pdfExtractionLLMConfigForApp(a.config)
 	var firstErr error
 	var failedCount int
 
@@ -169,7 +169,7 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 			continue
 		}
 
-		extractResult, err := a.pdfService.ExtractContent(parseResult.Markdown, provider)
+		extractResult, err := a.pdfService.ExtractContent(parseResult.Markdown, extractionLLMConfig)
 		if err != nil {
 			failedCount++
 			if firstErr == nil {
@@ -839,11 +839,26 @@ func decodeStoredScreeningContent(raw string) storedScreeningContent {
 	return payload
 }
 
-func pdfProviderForConfig(config AppConfig) string {
-	if normalizeLLMConfig(config.WeakLLM).ProviderType == "anthropic" {
-		return "anthropic"
+func pdfExtractionLLMConfigForApp(config AppConfig) PDFExtractionLLMConfig {
+	llmConfig := normalizeLLMConfig(config.WeakLLM)
+	if strings.TrimSpace(llmConfig.APIKey) == "" {
+		llmConfig = normalizeLLMConfig(config.LLM)
 	}
-	return "openai"
+
+	provider := "openai"
+	if llmConfig.ProviderType == "anthropic" {
+		provider = "anthropic"
+	}
+
+	return PDFExtractionLLMConfig{
+		Provider:    provider,
+		Model:       llmConfig.Model,
+		APIKey:      llmConfig.APIKey,
+		BaseURL:     llmConfig.BaseURL,
+		MaxTokens:   4096,
+		Temperature: 0,
+		Timeout:     120,
+	}
 }
 
 func metadataString(metadata map[string]any, key string) string {

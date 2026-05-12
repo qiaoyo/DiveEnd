@@ -68,6 +68,13 @@ func TestAppScreeningFlowImportsSelectedPapers(t *testing.T) {
 				Sections: []string{"Example", "  Abstract"},
 			})
 		case "/extract/":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			if payload["api_key"] != "weak-test-key" {
+				t.Fatalf("expected weak llm api key to be forwarded, got %#v", payload["api_key"])
+			}
 			_ = json.NewEncoder(w).Encode(PDFExtractResponse{
 				Success: true,
 				Data: &PDFExtractData{
@@ -88,6 +95,9 @@ func TestAppScreeningFlowImportsSelectedPapers(t *testing.T) {
 	defer server.Close()
 
 	app.pdfService = NewPDFServiceClient(server.URL)
+	app.config.WeakLLM = defaultOpenAICompatibleLLMConfig()
+	app.config.WeakLLM.APIKey = "weak-test-key"
+	app.config.WeakLLM.Model = "weak-model"
 	app.llm = screeningLLMStub{}
 
 	var filePaths []string

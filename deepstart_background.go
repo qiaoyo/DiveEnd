@@ -10,6 +10,7 @@ import (
 func (a *App) runDeepStartBackgroundProcessing(
 	taskCtx context.Context,
 	sessionID string,
+	taskToken string,
 	query string,
 	backgroundResults []SearchPaper,
 	searchStats SearchRetrievalStats,
@@ -20,12 +21,12 @@ func (a *App) runDeepStartBackgroundProcessing(
 	}
 	pending := append([]SearchPaper{}, backgroundResults...)
 	if len(pending) == 0 {
-		a.finishDeepStartTask(sessionID)
+		a.finishDeepStartTask(sessionID, taskToken)
 		return
 	}
 
 	go func() {
-		defer a.finishDeepStartTask(sessionID)
+		defer a.finishDeepStartTask(sessionID, taskToken)
 
 		startedAt := time.Now()
 		abortIfCancelled := func(message string) bool {

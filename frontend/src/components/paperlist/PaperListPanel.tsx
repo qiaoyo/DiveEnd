@@ -28,6 +28,8 @@ export function PaperListPanel() {
     toggleRightPanel,
   } = useAppStore();
   const [searchTerm, setSearchTerm] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
 
   const filteredPapers = papers.filter(
     (paper) =>
@@ -46,8 +48,11 @@ export function PaperListPanel() {
   };
 
   const handleCreateFolder = async () => {
-    const name = window.prompt('输入文件夹名称');
-    if (!name?.trim()) return;
+    const name = newFolderName.trim();
+    if (!name) {
+      setCreatingFolder(true);
+      return;
+    }
 
     try {
       const folder = await createFolder(name.trim());
@@ -55,6 +60,8 @@ export function PaperListPanel() {
         a.createdAt.localeCompare(b.createdAt)
       );
       setFolders(nextFolders);
+      setNewFolderName('');
+      setCreatingFolder(false);
     } catch (error) {
       setError(error instanceof Error ? error.message : '创建文件夹失败');
     }
@@ -111,7 +118,7 @@ export function PaperListPanel() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => void handleCreateFolder()}
+              onClick={() => setCreatingFolder((value) => !value)}
               className="rounded-xl border border-stone-200 p-2 text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
               title="新建文件夹"
             >
@@ -129,6 +136,41 @@ export function PaperListPanel() {
       </div>
 
       <div className="border-b border-stone-200 p-3 dark:border-stone-800">
+        {creatingFolder && (
+          <form
+            className="mb-3 rounded-2xl border border-emerald-200 bg-white/80 p-2 dark:border-emerald-500/40 dark:bg-stone-900/80"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateFolder();
+            }}
+          >
+            <input
+              value={newFolderName}
+              onChange={(event) => setNewFolderName(event.target.value)}
+              autoFocus
+              placeholder="新文件夹名称"
+              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-950"
+            />
+            <div className="mt-2 flex gap-2">
+              <button
+                type="submit"
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+              >
+                创建
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingFolder(false);
+                  setNewFolderName('');
+                }}
+                className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-600 hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+              >
+                取消
+              </button>
+            </div>
+          </form>
+        )}
         <div className="mb-3 flex flex-wrap gap-2">
           {folders.map((folder) => (
             <button

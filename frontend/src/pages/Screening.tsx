@@ -144,6 +144,16 @@ export const Screening: React.FC = () => {
     }
   };
 
+  const handleNativePicker = async () => {
+    setError(null);
+    try {
+      const paths = await backend.selectScreeningPDFs();
+      await startScreeningWithPaths(paths);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '选择 PDF 文件失败');
+    }
+  };
+
   const handleInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     const paths = await resolveInputPaths(files);
@@ -269,7 +279,17 @@ export const Screening: React.FC = () => {
           拖拽 PDF 到这里，或者使用文件选择器。
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
-          <label className="cursor-pointer rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">
+          {backend.hasNativeFilePicker() ? (
+            <button
+              type="button"
+              onClick={() => void handleNativePicker()}
+              disabled={isBusy}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
+            >
+              {isBusy ? '处理中...' : '选择 PDF 文件'}
+            </button>
+          ) : (
+            <label className="cursor-pointer rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">
             <input
               type="file"
               multiple
@@ -278,7 +298,8 @@ export const Screening: React.FC = () => {
               onChange={(event) => void handleInputChange(event)}
             />
             {isBusy ? '处理中...' : '选择 PDF 文件'}
-          </label>
+            </label>
+          )}
           {!canResolvePaths && (
             <button
               onClick={() => void startScreeningWithPaths(['/mock/survey.pdf', '/mock/benchmark.pdf'])}
