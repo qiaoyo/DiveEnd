@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"testing"
@@ -169,6 +170,146 @@ func TestLLMClientTranslateSectionUsesChatCompletions(t *testing.T) {
 	}
 	if summary != "聊天摘要" {
 		t.Fatalf("expected summary, got %q", summary)
+	}
+}
+
+func TestLLMClientRejectsOversizedResponseBody(t *testing.T) {
+	previousLimit := externalHTTPBodyLimitBytes
+	externalHTTPBodyLimitBytes = 32
+	t.Cleanup(func() { externalHTTPBodyLimitBytes = previousLimit })
+
+	config := defaultAppConfig()
+	config.LLM = defaultOpenAICompatibleLLMConfig()
+	config.LLM.BaseURL = "https://example.com/v1"
+	config.LLM.WireAPI = "chat_completions"
+	config.LLM.APIKey = "sk-chat"
+	config.LLM.Model = "gpt-test"
+
+	client := NewLLMClient(config)
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", 33))),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	_, _, err := client.TranslateSection("Intro", "Hello")
+	if err == nil {
+		t.Fatal("expected oversized LLM response to fail")
+	}
+	if !strings.Contains(err.Error(), "response body exceeds 32 byte limit") {
+		t.Fatalf("expected response body limit error, got %v", err)
+	}
+}
+
+func TestLLMClientRedactsErrorResponseBody(t *testing.T) {
+	config := defaultAppConfig()
+	config.LLM = defaultOpenAICompatibleLLMConfig()
+	config.LLM.BaseURL = "https://example.com/v1"
+	config.LLM.WireAPI = "chat_completions"
+	config.LLM.APIKey = "sk-chat"
+	config.LLM.Model = "gpt-test"
+
+	client := NewLLMClient(config)
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized,
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"error":"upstream rejected api_key=sk-upstream-secret token=provider-token Authorization: Bearer bearer-secret-12345"}`,
+				)),
+				Request: r,
+			}, nil
+		}),
+	}
+
+	_, _, err := client.TranslateSection("Intro", "Hello")
+	if err == nil {
+		t.Fatal("expected LLM error")
+	}
+	message := err.Error()
+	for _, leaked := range []string{"sk-upstream-secret", "provider-token", "bearer-secret-12345"} {
+		if strings.Contains(message, leaked) {
+			t.Fatalf("expected %q to be redacted from %q", leaked, message)
+		}
+	}
+	if !strings.Contains(message, redactedValue) {
+		t.Fatalf("expected redacted marker in %q", message)
+	}
+}
+
+func TestLLMClientRedactsProviderLabelAndURLQueriesFromNetworkErrors(t *testing.T) {
+	const (
+		labelSecret = "sk-llm-label-secret"
+		urlSecret   = "llm-url-token-secret"
+		querySecret = "private-llm-query"
+	)
+
+	cases := []struct {
+		name      string
+		configure func(*AppConfig)
+	}{
+		{
+			name: "responses",
+			configure: func(config *AppConfig) {
+				config.LLM = defaultOpenAICompatibleLLMConfig()
+				config.LLM.WireAPI = "responses"
+				config.LLM.RequiresOpenAIAuth = true
+				config.LLM.APIKey = "sk-test"
+			},
+		},
+		{
+			name: "chat completions",
+			configure: func(config *AppConfig) {
+				config.LLM = defaultOpenAICompatibleLLMConfig()
+				config.LLM.WireAPI = "chat_completions"
+				config.LLM.RequiresOpenAIAuth = true
+				config.LLM.APIKey = "sk-test"
+			},
+		},
+		{
+			name: "anthropic",
+			configure: func(config *AppConfig) {
+				config.LLM = defaultAnthropicLLMConfig()
+				config.LLM.APIKey = "anthropic-test"
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := defaultAppConfig()
+			tc.configure(&config)
+			config.LLM.ProviderName = "Provider api_key=" + labelSecret
+			config.LLM.BaseURL = "https://example.test/v1"
+			config.LLM.Model = "model-test"
+
+			client := NewLLMClient(config)
+			client.httpClient = &http.Client{
+				Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					return nil, fmt.Errorf("network failed for %s?query=%s&access_token=%s", r.URL.String(), querySecret, urlSecret)
+				}),
+			}
+
+			_, err := client.chatWithContext(context.Background(), []llmMessage{{Role: "user", Content: "hello"}})
+			if err == nil {
+				t.Fatal("expected LLM network error")
+			}
+			message := err.Error()
+			for _, leaked := range []string{labelSecret, urlSecret, querySecret} {
+				if strings.Contains(message, leaked) {
+					t.Fatalf("expected %q to be redacted from %q", leaked, message)
+				}
+			}
+			if !strings.Contains(message, redactedValue) {
+				t.Fatalf("expected redacted marker in %q", message)
+			}
+		})
 	}
 }
 
@@ -447,6 +588,148 @@ func TestSearchClientUsesPerSourceLimitWhenOverallLimitIs200(t *testing.T) {
 	}
 }
 
+func TestSearchClientRedactsProviderErrorBodies(t *testing.T) {
+	config := defaultAppConfig()
+	client := NewSearchClient(config)
+	client.retryMax = 1
+	client.retryInterval = 0
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`provider failed api_key=sk-search-secret access_token=search-token Authorization: Bearer bearer-secret-12345`,
+				)),
+				Request: r,
+			}, nil
+		}),
+	}
+
+	for name, run := range map[string]func() error{
+		"semantic": func() error {
+			_, err := client.searchSemanticScholar(context.Background(), "robot papers", 1, nil)
+			return err
+		},
+		"arxiv": func() error {
+			_, err := client.searchArXiv(context.Background(), "robot papers", 1, nil)
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := run()
+			if err == nil {
+				t.Fatal("expected provider error")
+			}
+			message := err.Error()
+			for _, leaked := range []string{"sk-search-secret", "search-token", "bearer-secret-12345"} {
+				if strings.Contains(message, leaked) {
+					t.Fatalf("expected %q to be redacted from %q", leaked, message)
+				}
+			}
+			if !strings.Contains(message, redactedValue) {
+				t.Fatalf("expected redacted marker in %q", message)
+			}
+		})
+	}
+}
+
+func TestDeepStartEnricherRedactsMetadataRequestNetworkErrors(t *testing.T) {
+	const (
+		querySecret = "private-enrichment-query"
+		tokenSecret = "enrichment-token-secret"
+	)
+	enricher := &DeepStartEnricher{
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("network failed for %s", req.URL.String())
+		})},
+	}
+
+	_, err := enricher.getJSON(
+		context.Background(),
+		"https://example.test/works?query="+querySecret+"&access_token="+tokenSecret,
+		"application/json",
+	)
+	if err == nil {
+		t.Fatal("expected metadata request network error")
+	}
+	message := err.Error()
+	for _, leaked := range []string{querySecret, tokenSecret} {
+		if strings.Contains(message, leaked) {
+			t.Fatalf("expected %q to be redacted from %q", leaked, message)
+		}
+	}
+	if !strings.Contains(message, redactedValue) && !strings.Contains(message, "%5Bredacted%5D") {
+		t.Fatalf("expected redacted marker in %q", message)
+	}
+}
+
+func TestEnhancedSearchReportsOnlyActiveSources(t *testing.T) {
+	config := defaultAppConfig()
+	client := NewSearchClient(config)
+	client.retryMax = 1
+
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch {
+			case strings.Contains(r.URL.Host, "api.semanticscholar.org"):
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(bytes.NewBufferString(`{
+  "data": [
+    {
+      "paperId": "sem-enhanced",
+      "title": "Semantic Enhanced",
+      "authors": [{"name":"Author A"}],
+      "abstract": "Abstract",
+      "year": 2026,
+      "venue": "ICLR",
+      "openAccessPdf": {"url":"https://example.com/semantic.pdf"}
+    }
+  ]
+}`)),
+					Request: r,
+				}, nil
+			case strings.Contains(r.URL.Host, "export.arxiv.org"):
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(bytes.NewBufferString(`
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2601.00001v1</id>
+    <title>ArXiv Enhanced</title>
+    <summary>Arxiv abstract</summary>
+    <published>2026-01-01T00:00:00Z</published>
+    <author><name>Author B</name></author>
+  </entry>
+</feed>
+`)),
+					Request: r,
+				}, nil
+			case strings.Contains(r.URL.Host, "arxiv-sanity-lite.com"):
+				return nil, fmt.Errorf("unexpected call to arxiv-sanity-lite")
+			default:
+				return nil, fmt.Errorf("unexpected host: %s", r.URL.Host)
+			}
+		}),
+	}
+
+	result, err := client.EnhancedSearch("vla", 20, 0, 0, 0, "relevance")
+	if err != nil {
+		t.Fatalf("EnhancedSearch() error = %v", err)
+	}
+	if len(result.Sources) != 2 {
+		t.Fatalf("expected exactly two active sources, got %+v", result.Sources)
+	}
+	for _, source := range result.Sources {
+		if strings.Contains(strings.ToLower(source.Name), "sanity") {
+			t.Fatalf("unexpected inactive source in enhanced search response: %+v", result.Sources)
+		}
+	}
+}
+
 func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.T) {
 	config := defaultAppConfig()
 	client := NewSearchClient(config)
@@ -546,6 +829,61 @@ func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.
 	}
 	if len(finalEvent.Sources) != 2 {
 		t.Fatalf("expected two source entries, got %d", len(finalEvent.Sources))
+	}
+}
+
+func TestSearchClientRedactsProgressLogsAndAggregatedErrors(t *testing.T) {
+	const (
+		accessToken = "search-access-secret"
+		bearerToken = "search-bearer-secret"
+		query       = "private robotics query"
+	)
+	config := defaultAppConfig()
+	client := NewSearchClient(config)
+	client.retryMax = 1
+	client.retryInterval = 0
+	client.overallTimeout = time.Second
+	client.attemptTimeout = time.Second
+
+	progressEvents := make([]SearchProgressEvent, 0, 4)
+	client.SetProgressReporter(func(progress SearchProgressEvent) {
+		progressEvents = append(progressEvents, progress)
+	})
+
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("network failed for %s&access_token=%s with Authorization: Bearer %s", r.URL.String(), accessToken, bearerToken)
+		}),
+	}
+
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+	}()
+
+	_, err := client.Search(query, 10)
+	if err == nil {
+		t.Fatal("expected search failure")
+	}
+
+	combined := err.Error() + "\n" + logs.String()
+	for _, event := range progressEvents {
+		for _, source := range event.Sources {
+			combined += "\n" + source.Error
+		}
+	}
+	for _, leaked := range []string{accessToken, bearerToken, "private+robotics+query", query} {
+		if strings.Contains(combined, leaked) {
+			t.Fatalf("expected %q to be redacted from %q", leaked, combined)
+		}
+	}
+	if !strings.Contains(combined, redactedValue) {
+		t.Fatalf("expected redacted marker in %q", combined)
 	}
 }
 

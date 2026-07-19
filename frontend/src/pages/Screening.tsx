@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, FileUp, Filter, Loader2, Sparkles } from 'lucide-react';
 import type { ExtractProgress, Paper, ScreeningDecisionNode, ScreeningSessionDetail } from '../types';
 import * as backend from '../lib/backend';
+import { errorToUserMessage } from '../lib/errors';
 import { useAppStore } from '../stores/appStore';
 
 type ScreeningStage = 'upload' | 'extract' | 'screen' | 'results';
@@ -36,6 +37,8 @@ export const Screening: React.FC = () => {
   }, [sessionId]);
 
   const canResolvePaths = backend.canResolveFilePaths();
+  const hasNativePicker = backend.hasNativeFilePicker();
+  const showDemoSamples = import.meta.env.DEV && !hasNativePicker && !canResolvePaths;
   const papers = detail?.papers ?? [];
   const history = detail?.pathHistory ?? [];
 
@@ -100,8 +103,7 @@ export const Screening: React.FC = () => {
 
       await proceedToAnalysis(nextSessionId);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'PDF 抽取失败';
-      setError(message);
+      setError(errorToUserMessage(cause, 'PDF 抽取失败'));
       setCurrentStage('extract');
       const latest = await backend.getScreeningSession(nextSessionId).catch(() => null);
       if (latest) {
@@ -114,7 +116,7 @@ export const Screening: React.FC = () => {
 
   const startScreeningWithPaths = async (filePaths: string[]) => {
     if (filePaths.length === 0) {
-      setError(canResolvePaths ? '没有拿到可用的 PDF 路径。' : '浏览器预览模式下只能用演示样本或本地 mock 路径。');
+      setError(canResolvePaths ? '没有拿到可用的 PDF 路径。' : '当前环境无法读取真实本地路径，请使用桌面文件选择器或拖拽真实 PDF。');
       return;
     }
 
@@ -139,7 +141,7 @@ export const Screening: React.FC = () => {
 
       await runExtraction(session.id);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '初始化 Screening 失败');
+      setError(errorToUserMessage(cause, '初始化 Screening 失败'));
       setIsBusy(false);
     }
   };
@@ -150,23 +152,32 @@ export const Screening: React.FC = () => {
       const paths = await backend.selectScreeningPDFs();
       await startScreeningWithPaths(paths);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '选择 PDF 文件失败');
+      setError(errorToUserMessage(cause, '选择 PDF 文件失败'));
     }
   };
 
   const handleInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
-    const paths = await resolveInputPaths(files);
-    await startScreeningWithPaths(paths);
-    event.target.value = '';
+    try {
+      const paths = await resolveInputPaths(files);
+      await startScreeningWithPaths(paths);
+    } catch (cause) {
+      setError(errorToUserMessage(cause, '解析 PDF 文件路径失败'));
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
     setDropActive(false);
-    const paths = await resolveInputPaths(Array.from(event.dataTransfer.files ?? []));
-    await startScreeningWithPaths(paths);
+    try {
+      const paths = await resolveInputPaths(Array.from(event.dataTransfer.files ?? []));
+      await startScreeningWithPaths(paths);
+    } catch (cause) {
+      setError(errorToUserMessage(cause, '解析拖拽 PDF 文件失败'));
+    }
   };
 
   const toggleOption = (optionKey: string) => {
@@ -194,7 +205,7 @@ export const Screening: React.FC = () => {
       setDetail(nextDetail);
       setCurrentStage(nextNode.nodeType === 'complete' ? 'results' : 'screen');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '提交筛选选择失败');
+      setError(errorToUserMessage(cause, '提交筛选选择失败'));
     } finally {
       setIsBusy(false);
     }
@@ -221,7 +232,7 @@ export const Screening: React.FC = () => {
       setDetail(nextDetail);
       setCurrentStage('results');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '导入论文库失败');
+      setError(errorToUserMessage(cause, '导入论文库失败'));
     } finally {
       setIsBusy(false);
     }
@@ -279,7 +290,7 @@ export const Screening: React.FC = () => {
           拖拽 PDF 到这里，或者使用文件选择器。
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
-          {backend.hasNativeFilePicker() ? (
+          {hasNativePicker ? (
             <button
               type="button"
               onClick={() => void handleNativePicker()}
@@ -300,10 +311,12 @@ export const Screening: React.FC = () => {
             {isBusy ? '处理中...' : '选择 PDF 文件'}
             </label>
           )}
-          {!canResolvePaths && (
+          {showDemoSamples && (
             <button
+              type="button"
               onClick={() => void startScreeningWithPaths(['/mock/survey.pdf', '/mock/benchmark.pdf'])}
-              className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              disabled={isBusy}
+              className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               使用演示样本
             </button>

@@ -4,11 +4,15 @@ import {main} from '../models';
 
 export function AnalyzePapers(arg1:string):Promise<main.ScreeningDecisionNode>;
 
+export function ApplyPendingDatabaseRestore():Promise<main.DatabaseRestoreStatus>;
+
 export function ApplyScreeningChoice(arg1:string,arg2:Array<string>):Promise<main.ScreeningDecisionNode>;
 
 export function AttachLocalPDFToPaper(arg1:string,arg2:string):Promise<main.Paper>;
 
 export function CancelDeepStartTask(arg1:string):Promise<void>;
+
+export function CancelPendingDatabaseRestore():Promise<void>;
 
 export function CancelScreening(arg1:string):Promise<void>;
 
@@ -30,6 +34,8 @@ export function ExtractPaperContent(arg1:string):Promise<main.ExtractProgress>;
 
 export function GetDeepReadPDFBytes(arg1:string):Promise<string>;
 
+export function GetDeepReadPDFURL(arg1:string):Promise<string>;
+
 export function GetDeepReadState(arg1:string):Promise<main.DeepReadState>;
 
 export function GetDeepStartSession(arg1:string):Promise<main.DeepStartSessionDetail>;
@@ -46,7 +52,11 @@ export function GetInitialState():Promise<main.InitialState>;
 
 export function GetLocalStorageOverview():Promise<main.LocalStorageOverview>;
 
+export function GetPDFServiceStatus():Promise<main.PDFServiceStatus>;
+
 export function GetPapers(arg1:string):Promise<Array<main.Paper>>;
+
+export function GetPendingDatabaseRestore():Promise<main.DatabaseRestoreStatus>;
 
 export function GetScreeningSession(arg1:string):Promise<main.ScreeningSessionDetail>;
 
@@ -54,9 +64,13 @@ export function GetSecretPrefill():Promise<main.ConfigSecretPrefill>;
 
 export function GetSyncConflicts():Promise<Array<main.SyncConflict>>;
 
+export function GetSyncPreview():Promise<main.SyncPreview>;
+
 export function GetSyncProgress():Promise<main.SyncProgress>;
 
 export function GetSyncRecords(arg1:number):Promise<Array<main.SyncRecord>>;
+
+export function GetSyncSettings():Promise<main.SyncSettings>;
 
 export function GetSyncStatus():Promise<main.SyncStatus>;
 
@@ -72,7 +86,17 @@ export function ListDeepStartSessions():Promise<Array<main.DeepStartSessionSumma
 
 export function ListScreeningSessions():Promise<Array<main.ScreeningSession>>;
 
+export function MoveFolderNode(arg1:main.MoveFolderNodeRequest):Promise<main.Folder>;
+
+export function MovePaperToFolder(arg1:string,arg2:string):Promise<main.Paper>;
+
+export function MovePapersToFolder(arg1:Array<string>,arg2:string):Promise<Array<main.Paper>>;
+
 export function PrepareDeepReadPaper(arg1:string):Promise<main.DeepReadState>;
+
+export function RefreshBaiduToken():Promise<main.BaiduTokenRefreshStatus>;
+
+export function RenameFolderNode(arg1:main.RenameFolderNodeRequest):Promise<main.Folder>;
 
 export function ReplyDeepStartSession(arg1:string,arg2:string):Promise<main.DeepStartSessionDetail>;
 
@@ -89,6 +113,8 @@ export function RetryPaperDownloadWithURL(arg1:string,arg2:string):Promise<void>
 export function SaveConfig(arg1:main.AppConfig):Promise<main.SaveConfigResult>;
 
 export function SaveDeepReadNote(arg1:string,arg2:string,arg3:string):Promise<main.DeepReadNote>;
+
+export function SaveSyncSettings(arg1:main.SyncSettings):Promise<main.SyncSettings>;
 
 export function SearchPapers(arg1:string,arg2:number):Promise<Array<main.SearchPaper>>;
 

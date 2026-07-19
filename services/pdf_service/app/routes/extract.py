@@ -8,15 +8,22 @@ from pydantic import BaseModel, Field
 
 from core.logger import setup_logging
 from core.llm_client import LLMClient, LLMConfig
+from core.redaction import redact_sensitive_text
 
 router = APIRouter()
 logger = setup_logging()
+MAX_EXTRACTION_MARKDOWN_CHARS = 2 * 1024 * 1024
 
 
 class ExtractionRequest(BaseModel):
     """Extraction request."""
 
-    markdown: str = Field(..., description="Markdown text to extract from")
+    markdown: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_EXTRACTION_MARKDOWN_CHARS,
+        description="Markdown text to extract from",
+    )
     extraction_type: str = Field(
         default="paper_metadata",
         description="Type of extraction: paper_metadata, metrics, baselines, all"
@@ -25,9 +32,9 @@ class ExtractionRequest(BaseModel):
     model: Optional[str] = Field(default=None, description="LLM model override")
     api_key: Optional[str] = Field(default=None, description="LLM API key override")
     base_url: Optional[str] = Field(default=None, description="OpenAI-compatible or Anthropic base URL")
-    max_tokens: int = Field(default=4096, description="Maximum output tokens")
-    temperature: float = Field(default=0.0, description="Sampling temperature")
-    timeout: int = Field(default=120, description="Request timeout in seconds")
+    max_tokens: int = Field(default=4096, ge=1, le=8192, description="Maximum output tokens")
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0, description="Sampling temperature")
+    timeout: int = Field(default=120, ge=1, le=300, description="Request timeout in seconds")
 
 
 class PaperMetadata(BaseModel):
@@ -140,6 +147,17 @@ def _loads_llm_json(response: str) -> Any:
     raise json.JSONDecodeError("No JSON object found in LLM response", text, 0)
 
 
+def public_extraction_error(error: Exception) -> str:
+    """Return a client-safe extraction error."""
+    message = str(error).strip()
+    if isinstance(error, ValueError) and (
+        message.startswith("API key not found")
+        or message.startswith("Unsupported provider")
+    ):
+        return redact_sensitive_text(message)
+    return "Extraction failed"
+
+
 @router.post(
     "/",
     response_model=ExtractionResponse,
@@ -185,7 +203,7 @@ async def extract_data(request: ExtractionRequest):
             metadata_dict = _loads_llm_json(metadata_response)
             metadata = PaperMetadata(**metadata_dict)
         except (json.JSONDecodeError, Exception) as e:
-            logger.error(f"Failed to parse metadata: {e}")
+            logger.error("Failed to parse metadata: %s", type(e).__name__)
             metadata = PaperMetadata(
                 title="",
                 problem="Failed to parse metadata",
@@ -209,7 +227,7 @@ async def extract_data(request: ExtractionRequest):
             baselines = [Baseline(**b) for b in metrics_dict.get("baselines", [])]
             relevance_tags = metrics_dict.get("relevance_tags", [])
         except (json.JSONDecodeError, Exception) as e:
-            logger.error(f"Failed to parse metrics: {e}")
+            logger.error("Failed to parse metrics: %s", type(e).__name__)
 
         # Build result
         result = ExtractionResult(
@@ -228,11 +246,11 @@ async def extract_data(request: ExtractionRequest):
         )
 
     except Exception as e:
-        logger.exception(f"Error during extraction: {e}")
+        logger.warning("Error during extraction: %s", type(e).__name__)
         return ExtractionResponse(
             success=False,
             data=None,
-            error=str(e),
-            provider=request.provider,
+            error=public_extraction_error(e),
+            provider=redact_sensitive_text(request.provider),
             model="unknown",
         )

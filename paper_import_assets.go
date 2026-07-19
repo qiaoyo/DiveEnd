@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,14 +23,22 @@ const (
 	pdfDownloadTimeout       = 25 * time.Second
 	pdfDownloadMaxRetry      = 3
 	pdfDownloadQueueCapacity = 512
+	pdfDownloadMaxRedirects  = 5
 )
 
 var arxivIDPattern = regexp.MustCompile(`^\d{4}\.\d{4,5}(v\d+)?$`)
+var pdfDownloadMaxBytes int64 = 100 * 1024 * 1024
+
+// Tests use httptest loopback servers for deterministic PDF downloads. Keep the
+// production default fail-closed for local/private hosts.
+var allowPrivatePDFDownloadHostsForTest bool
+var pdfDownloadHTTPTransport http.RoundTripper = http.DefaultTransport
 
 type paperDownloadJob struct {
 	PaperID       string
 	FolderID      string
 	FolderPath    string
+	DataPath      string
 	SourceURL     string
 	SourcePaperID string
 	ExternalIDs   map[string]string
@@ -60,27 +69,22 @@ func (a *App) ImportPapersWithAssets(folderID string, papers []SearchPaper) (*Im
 		return nil, err
 	}
 
-	folderID = strings.TrimSpace(folderID)
-	if folderID == "" {
-		folders, err := a.db.GetFolders()
-		if err != nil {
-			return nil, err
-		}
-		if len(folders) == 0 {
-			return nil, fmt.Errorf("no folder available")
-		}
-		folderID = folders[0].ID
+	resolvedFolderID, err := a.resolveFolderID(folderID)
+	if err != nil {
+		return nil, err
 	}
+	folderID = resolvedFolderID
 
 	result := &ImportPapersWithAssetsResult{
 		Imported: make([]Paper, 0, len(papers)),
 		Skipped:  make([]ImportSkippedPaper, 0),
 	}
 
-	targetFolderPath := ""
-	if folder, err := a.db.GetFolderByID(folderID); err == nil {
-		targetFolderPath = normalizeFolderPath(folder.Path)
+	folder, err := a.db.GetFolderByID(folderID)
+	if err != nil {
+		return nil, err
 	}
+	targetFolderPath := normalizeFolderPath(folder.Path)
 
 	for _, searchPaper := range papers {
 		sourcePaperID := normalizeSourcePaperID(searchPaper)
@@ -124,6 +128,7 @@ func (a *App) ImportPapersWithAssets(folderID string, papers []SearchPaper) (*Im
 			PaperID:       paper.ID,
 			FolderID:      paper.FolderID,
 			FolderPath:    targetFolderPath,
+			DataPath:      a.config.DataPath,
 			SourceURL:     strings.TrimSpace(searchPaper.URL),
 			SourcePaperID: sourcePaperID,
 			ExternalIDs:   normalizeExternalIDMap(searchPaper.ExternalIDs),
@@ -240,6 +245,9 @@ func (a *App) enqueuePaperDownload(job paperDownloadJob) {
 	if job.PaperID == "" {
 		return
 	}
+	if strings.TrimSpace(job.DataPath) == "" {
+		job.DataPath = a.config.DataPath
+	}
 
 	a.downloadMu.Lock()
 	queue := a.downloadQueue
@@ -283,30 +291,30 @@ func (a *App) processDownloadJob(ctx context.Context, job paperDownloadJob) {
 		return
 	}
 
-	targetFolderPath := normalizeFolderPath(job.FolderPath)
-	if targetFolderPath == "" {
-		if folder, err := a.db.GetFolderByID(job.FolderID); err == nil {
-			targetFolderPath = normalizeFolderPath(folder.Path)
-		}
+	if strings.TrimSpace(job.DataPath) == "" {
+		job.DataPath = a.config.DataPath
 	}
-	if targetFolderPath == "" {
-		targetFolderPath = job.FolderID
-	}
-
+	targetFolderPath := a.resolvePaperDownloadFolderPath(job.FolderID, job.FolderPath)
+	papersRoot := filepath.Join(job.DataPath, "papers")
 	targetPath := filepath.Join(
-		a.config.DataPath,
-		"papers",
+		papersRoot,
 		filepath.FromSlash(targetFolderPath),
-		job.PaperID+".pdf",
+		safePaperPDFFileName(job.PaperID),
 	)
+	managedTargetPath, ok := managedPathInsideRoot(papersRoot, targetPath)
+	if !ok {
+		_ = a.db.UpdatePaperDownloadState(job.PaperID, "failed", "", "download target is outside managed papers directory")
+		return
+	}
+	targetPath = managedTargetPath
+	targetPath, err := ensureManagedFileParent(papersRoot, targetPath)
+	if err != nil {
+		_ = a.db.UpdatePaperDownloadState(job.PaperID, "failed", "", err.Error())
+		return
+	}
 	candidates := buildPDFCandidateURLs(job.SourceURL, job.SourcePaperID, job.ExternalIDs, job.PDFCandidates)
 	if len(candidates) == 0 {
 		_ = a.db.UpdatePaperDownloadState(job.PaperID, "failed", "", "no downloadable pdf url")
-		return
-	}
-
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
-		_ = a.db.UpdatePaperDownloadState(job.PaperID, "failed", "", err.Error())
 		return
 	}
 
@@ -337,10 +345,33 @@ func (a *App) processDownloadJob(ctx context.Context, job paperDownloadJob) {
 	_ = a.db.UpdatePaperDownloadState(job.PaperID, "failed", "", lastErr.Error())
 }
 
+func (a *App) resolvePaperDownloadFolderPath(folderID, folderPath string) string {
+	if normalized := normalizeFolderPath(folderPath); normalized != "" {
+		return normalized
+	}
+	if a != nil && a.db != nil {
+		if folder, err := a.db.GetFolderByID(folderID); err == nil {
+			if normalized := normalizeFolderPath(folder.Path); normalized != "" {
+				return normalized
+			}
+			if normalized := normalizeFolderPath(folder.Name); normalized != "" {
+				return normalized
+			}
+			return safeSyncSegment(folder.ID)
+		}
+	}
+	return safeSyncSegment(folderID)
+}
+
 func downloadPDFToFile(ctx context.Context, rawURL, targetPath string) error {
-	parsedURL := strings.TrimSpace(rawURL)
-	if parsedURL == "" {
-		return fmt.Errorf("empty url")
+	parsedURL, err := validatePDFDownloadURL(ctx, rawURL)
+	if err != nil {
+		return err
+	}
+
+	targetDir := filepath.Dir(targetPath)
+	if err := ensurePlainDirectory(targetDir); err != nil {
+		return err
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, pdfDownloadTimeout)
@@ -348,63 +379,144 @@ func downloadPDFToFile(ctx context.Context, rawURL, targetPath string) error {
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, parsedURL, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create pdf download request: %s", redactURLQueryValuesInText(err.Error()))
 	}
 	req.Header.Set("User-Agent", "DiveEnd/1.0 (+https://github.com)")
 	req.Header.Set("Accept", "application/pdf,*/*;q=0.8")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Transport: pdfDownloadHTTPTransport,
+		CheckRedirect: func(redirectReq *http.Request, via []*http.Request) error {
+			if len(via) >= pdfDownloadMaxRedirects {
+				return fmt.Errorf("too many pdf url redirects")
+			}
+			validatedRedirectURL, err := validatePDFDownloadURL(redirectReq.Context(), redirectReq.URL.String())
+			if err != nil {
+				return err
+			}
+			parsedRedirectURL, err := url.Parse(validatedRedirectURL)
+			if err != nil {
+				return err
+			}
+			redirectReq.URL = parsedRedirectURL
+			redirectReq.Header.Set("User-Agent", "DiveEnd/1.0 (+https://github.com)")
+			redirectReq.Header.Set("Accept", "application/pdf,*/*;q=0.8")
+			return nil
+		},
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to download pdf: %s", redactURLQueryValuesInText(err.Error()))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
-
-	tmpPath := targetPath + ".tmp"
-	file, err := os.Create(tmpPath)
-	if err != nil {
-		return err
-	}
-
-	firstChunk := make([]byte, 1024)
-	n, readErr := resp.Body.Read(firstChunk)
-	if n > 0 {
-		if _, err := file.Write(firstChunk[:n]); err != nil {
-			_ = file.Close()
-			_ = os.Remove(tmpPath)
-			return err
-		}
-	}
-	if readErr != nil && readErr != io.EOF {
-		_ = file.Close()
-		_ = os.Remove(tmpPath)
-		return readErr
-	}
-
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
+	if resp.ContentLength > pdfDownloadMaxBytes {
+		return fmt.Errorf("pdf is too large: %d bytes exceeds %d bytes limit", resp.ContentLength, pdfDownloadMaxBytes)
 	}
 
 	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
-	if !looksLikePDF(contentType, firstChunk[:n]) {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("response is not a valid pdf")
+	return writeFileAtomicWithWriter(targetPath, 0600, func(file *os.File) error {
+		limitedBody := io.LimitReader(resp.Body, pdfDownloadMaxBytes+1)
+		firstChunk := make([]byte, 1024)
+		n, readErr := limitedBody.Read(firstChunk)
+		totalWritten := int64(n)
+		if n > 0 {
+			if _, err := file.Write(firstChunk[:n]); err != nil {
+				return err
+			}
+		}
+		if readErr != nil && readErr != io.EOF {
+			return readErr
+		}
+		if !looksLikePDF(contentType, firstChunk[:n]) {
+			return fmt.Errorf("response is not a valid pdf")
+		}
+
+		copied, err := io.Copy(file, limitedBody)
+		totalWritten += copied
+		if err != nil {
+			return err
+		}
+		if totalWritten > pdfDownloadMaxBytes {
+			return fmt.Errorf("pdf is too large: exceeds %d bytes limit", pdfDownloadMaxBytes)
+		}
+		return nil
+	}, func(file *os.File, _ string) error {
+		return validateOpenLocalPDFFile(file)
+	})
+}
+
+func validatePDFDownloadURL(ctx context.Context, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("empty url")
 	}
 
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed == nil {
+		return "", fmt.Errorf("pdf url must be a valid http/https url")
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("pdf url must be a valid http/https url")
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return "", fmt.Errorf("pdf url must include a host")
+	}
+	if err := rejectPrivateDownloadHost(ctx, host); err != nil {
+		return "", err
+	}
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func rejectPrivateDownloadHost(ctx context.Context, host string) error {
+	host = strings.TrimSpace(strings.TrimSuffix(strings.ToLower(host), "."))
+	if host == "" {
+		return fmt.Errorf("pdf url must include a host")
+	}
+	if allowPrivatePDFDownloadHostsForTest {
+		return nil
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return fmt.Errorf("pdf url host is not allowed: %s", host)
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedDownloadIP(ip) {
+			return fmt.Errorf("pdf url host resolves to a private or local address: %s", host)
+		}
+		return nil
+	}
+
+	lookupCtx, cancel := context.WithTimeout(appContext(ctx), 2*time.Second)
+	defer cancel()
+	addresses, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve pdf url host %s: %w", host, err)
+	}
+	if len(addresses) == 0 {
+		return fmt.Errorf("failed to resolve pdf url host %s", host)
+	}
+	for _, address := range addresses {
+		if isBlockedDownloadIP(address.IP) {
+			return fmt.Errorf("pdf url host resolves to a private or local address: %s", host)
+		}
 	}
 	return nil
+}
+
+func isBlockedDownloadIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified()
 }
 
 func looksLikePDF(contentType string, prefix []byte) bool {
@@ -519,10 +631,14 @@ func countStoredPDFFiles(folderPath string) int {
 
 	count := 0
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
 		if strings.HasSuffix(strings.ToLower(entry.Name()), ".pdf") {
+			info, err := entry.Info()
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			if err := validateLocalPDFFile(filepath.Join(folderPath, entry.Name())); err != nil {
+				continue
+			}
 			count++
 		}
 	}
@@ -557,6 +673,7 @@ func (a *App) RetryPaperDownload(paperID string) error {
 		PaperID:       paper.ID,
 		FolderID:      paper.FolderID,
 		FolderPath:    folderPath,
+		DataPath:      a.config.DataPath,
 		SourceURL:     strings.TrimSpace(paper.URL),
 		SourcePaperID: strings.TrimSpace(paper.SourcePaperID),
 	})
@@ -564,24 +681,7 @@ func (a *App) RetryPaperDownload(paperID string) error {
 }
 
 func validateManualDownloadURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("manual url cannot be empty")
-	}
-
-	parsed, err := url.ParseRequestURI(raw)
-	if err != nil || parsed == nil {
-		return "", fmt.Errorf("manual url must be a valid http/https url")
-	}
-	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
-	if scheme != "http" && scheme != "https" {
-		return "", fmt.Errorf("manual url must be a valid http/https url")
-	}
-	if strings.TrimSpace(parsed.Host) == "" {
-		return "", fmt.Errorf("manual url must be a valid http/https url")
-	}
-	parsed.Fragment = ""
-	return parsed.String(), nil
+	return validatePDFDownloadURL(context.Background(), raw)
 }
 
 func (a *App) RetryPaperDownloadWithURL(paperID, manualURL string) error {
@@ -623,6 +723,7 @@ func (a *App) RetryPaperDownloadWithURL(paperID, manualURL string) error {
 		PaperID:       paper.ID,
 		FolderID:      paper.FolderID,
 		FolderPath:    folderPath,
+		DataPath:      a.config.DataPath,
 		SourceURL:     validatedURL,
 		SourcePaperID: strings.TrimSpace(paper.SourcePaperID),
 	})

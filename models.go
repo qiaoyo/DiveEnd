@@ -49,6 +49,7 @@ type AppConfig struct {
 	WeakLLM               LLMConfig        `json:"weakLLM"`
 	Search                SearchAPIConfig  `json:"search"`
 	BaiduCloud            BaiduCloudConfig `json:"baiduCloud"`
+	Sync                  SyncSettings     `json:"sync"`
 	Theme                 string           `json:"theme"`
 	LeftPanelWidth        int              `json:"leftPanelWidth"`
 	RightPanelWidth       int              `json:"rightPanelWidth"`
@@ -99,8 +100,8 @@ type ScreeningPaper struct {
 	Selection      string    `json:"selection,omitempty"`
 	Reason         string    `json:"reason,omitempty"`
 	TargetFolderID string    `json:"targetFolderId,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	CreatedAt      time.Time `json:"createdAt" ts_type:"string"`
+	UpdatedAt      time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type ScreeningSession struct {
@@ -111,8 +112,8 @@ type ScreeningSession struct {
 	CurrentNodeJSON     string    `json:"currentNodeJson,omitempty"`
 	SelectedOptionsJSON string    `json:"selectedOptionsJson,omitempty"`
 	PathHistoryJSON     string    `json:"pathHistoryJson,omitempty"`
-	CreatedAt           time.Time `json:"createdAt"`
-	UpdatedAt           time.Time `json:"updatedAt"`
+	CreatedAt           time.Time `json:"createdAt" ts_type:"string"`
+	UpdatedAt           time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type ScreeningDecisionOption struct {
@@ -160,7 +161,7 @@ type Folder struct {
 	ParentID  string    `json:"parentId,omitempty"`
 	Path      string    `json:"path"`
 	IsSystem  bool      `json:"isSystem"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt" ts_type:"string"`
 }
 
 type FolderNode struct {
@@ -172,6 +173,16 @@ type CreateFolderNodeRequest struct {
 	ParentID string `json:"parentId,omitempty"`
 	Path     string `json:"path,omitempty"`
 	Name     string `json:"name,omitempty"`
+}
+
+type RenameFolderNodeRequest struct {
+	FolderID string `json:"folderId"`
+	Name     string `json:"name"`
+}
+
+type MoveFolderNodeRequest struct {
+	FolderID string `json:"folderId"`
+	ParentID string `json:"parentId,omitempty"`
 }
 
 type Paper struct {
@@ -189,8 +200,8 @@ type Paper struct {
 	FolderID       string    `json:"folderId"`
 	Category       string    `json:"category"`
 	Tags           []string  `json:"tags"`
-	AddedAt        time.Time `json:"addedAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	AddedAt        time.Time `json:"addedAt" ts_type:"string"`
+	UpdatedAt      time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type SearchPaper struct {
@@ -286,7 +297,7 @@ type FolderStorageTreeNode struct {
 type FolderStorageTreeOverview struct {
 	RootPath    string                  `json:"rootPath"`
 	Directories []FolderStorageTreeNode `json:"directories"`
-	GeneratedAt time.Time               `json:"generatedAt"`
+	GeneratedAt time.Time               `json:"generatedAt" ts_type:"string"`
 }
 
 type LocalStorageOverview struct {
@@ -298,7 +309,7 @@ type LocalStorageOverview struct {
 	Downloaded   int                          `json:"downloaded"`
 	Failed       int                          `json:"failed"`
 	Folders      []LocalStorageFolderOverview `json:"folders"`
-	GeneratedAt  time.Time                    `json:"generatedAt"`
+	GeneratedAt  time.Time                    `json:"generatedAt" ts_type:"string"`
 }
 
 type SearchRetrievalStats struct {
@@ -341,8 +352,8 @@ type DeepStartSessionSummary struct {
 	InitialReadyCount   int       `json:"initialReadyCount,omitempty"`
 	TotalPlannedCount   int       `json:"totalPlannedCount,omitempty"`
 	BackgroundRemaining int       `json:"backgroundRemaining,omitempty"`
-	CreatedAt           time.Time `json:"createdAt"`
-	UpdatedAt           time.Time `json:"updatedAt"`
+	CreatedAt           time.Time `json:"createdAt" ts_type:"string"`
+	UpdatedAt           time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type DeepStartMessage struct {
@@ -350,7 +361,7 @@ type DeepStartMessage struct {
 	SessionID string    `json:"sessionId"`
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `json:"createdAt" ts_type:"string"`
 }
 
 type DeepStartDirection struct {
@@ -429,8 +440,8 @@ type TranslationRecord struct {
 	OriginalText   string    `json:"originalText"`
 	TranslatedText string    `json:"translatedText"`
 	Summary        string    `json:"summary"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	CreatedAt      time.Time `json:"createdAt" ts_type:"string"`
+	UpdatedAt      time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type DeepReadSection struct {
@@ -447,7 +458,7 @@ type DeepReadParseCache struct {
 	ErrorMessage   string            `json:"errorMessage,omitempty"`
 	Markdown       string            `json:"markdown,omitempty"`
 	Sections       []DeepReadSection `json:"sections"`
-	LastPreparedAt time.Time         `json:"lastPreparedAt"`
+	LastPreparedAt time.Time         `json:"lastPreparedAt" ts_type:"string"`
 }
 
 type DeepReadNote struct {
@@ -455,8 +466,8 @@ type DeepReadNote struct {
 	PaperID   string    `json:"paperId"`
 	Section   string    `json:"section"`
 	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"createdAt" ts_type:"string"`
+	UpdatedAt time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type DeepReadState struct {
@@ -469,7 +480,7 @@ type DeepReadState struct {
 	Markdown       string              `json:"markdown,omitempty"`
 	Translations   []TranslationRecord `json:"translations"`
 	Notes          []DeepReadNote      `json:"notes"`
-	LastPreparedAt time.Time           `json:"lastPreparedAt"`
+	LastPreparedAt time.Time           `json:"lastPreparedAt" ts_type:"string"`
 }
 
 // ========== Phase 6: Baidu Cloud Sync 相关数据模型 ==========
@@ -492,29 +503,34 @@ type SyncRecord struct {
 	RemotePath   string    `json:"remotePath"`
 	LocalPath    string    `json:"localPath"`
 	Status       string    `json:"status"` // "pending", "success", "failed"
+	Message      string    `json:"message,omitempty"`
 	ErrorMessage string    `json:"errorMessage,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	CompletedAt  time.Time `json:"completedAt,omitempty"`
+	CreatedAt    time.Time `json:"createdAt" ts_type:"string"`
+	CompletedAt  time.Time `json:"completedAt,omitempty" ts_type:"string"`
 }
 
 // SyncConflict 同步冲突
 type SyncConflict struct {
 	ID         string    `json:"id"`
 	FileName   string    `json:"fileName"`
+	FileKind   string    `json:"fileKind,omitempty"`
 	LocalPath  string    `json:"localPath"`
-	LocalTime  time.Time `json:"localTime"`
+	LocalSize  int64     `json:"localSize"`
+	LocalTime  time.Time `json:"localTime" ts_type:"string"`
 	RemotePath string    `json:"remotePath"`
-	RemoteTime time.Time `json:"remoteTime"`
-	Resolution string    `json:"resolution"` // "local", "remote", "skipped"
-	ResolvedAt time.Time `json:"resolvedAt,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	RemoteSize int64     `json:"remoteSize"`
+	RemoteTime time.Time `json:"remoteTime" ts_type:"string"`
+	NewerSide  string    `json:"newerSide,omitempty"` // "local", "remote", "equal"
+	Resolution string    `json:"resolution"`          // "local", "remote", "skipped"
+	ResolvedAt time.Time `json:"resolvedAt,omitempty" ts_type:"string"`
+	CreatedAt  time.Time `json:"createdAt" ts_type:"string"`
 }
 
 // SyncStatus 同步状态
 type SyncStatus struct {
 	Enabled        bool       `json:"enabled"`
 	Provider       string     `json:"provider"`
-	LastSync       *time.Time `json:"lastSync,omitempty"`
+	LastSync       *time.Time `json:"lastSync,omitempty" ts_type:"string"`
 	SyncInProgress bool       `json:"syncInProgress"`
 	PendingFiles   int        `json:"pendingFiles"`
 	Conflicts      int        `json:"conflicts"`
@@ -526,6 +542,7 @@ type SyncStatus struct {
 type SyncSettings struct {
 	AutoSync           bool   `json:"autoSync"`
 	SyncOnStartup      bool   `json:"syncOnStartup"`
+	SyncBeforeExit     bool   `json:"syncBeforeExit"`
 	SyncInterval       int    `json:"syncInterval"`       // minutes
 	ConflictResolution string `json:"conflictResolution"` // "timestamp" (always use newest)
 }
@@ -539,11 +556,68 @@ type SyncProgress struct {
 	Message     string `json:"message,omitempty"`
 }
 
+type BaiduTokenRefreshStatus struct {
+	Enabled         bool      `json:"enabled"`
+	TokenFile       string    `json:"tokenFile"`
+	HasAccessToken  bool      `json:"hasAccessToken"`
+	HasRefreshToken bool      `json:"hasRefreshToken"`
+	HasClientID     bool      `json:"hasClientId"`
+	HasClientSecret bool      `json:"hasClientSecret"`
+	Refreshed       bool      `json:"refreshed"`
+	CheckedAt       time.Time `json:"checkedAt" ts_type:"string"`
+	Message         string    `json:"message,omitempty"`
+}
+
+type SyncPreviewFile struct {
+	Key        string `json:"key"`
+	FileName   string `json:"fileName"`
+	Kind       string `json:"kind"`
+	Size       int64  `json:"size"`
+	RemotePath string `json:"remotePath"`
+}
+
+type SyncPreview struct {
+	Enabled       bool              `json:"enabled"`
+	DataPath      string            `json:"dataPath"`
+	RemoteRoot    string            `json:"remoteRoot"`
+	TokenFile     string            `json:"tokenFile"`
+	TotalFiles    int               `json:"totalFiles"`
+	TotalBytes    int64             `json:"totalBytes"`
+	DatabaseBytes int64             `json:"databaseBytes"`
+	PaperPDFCount int               `json:"paperPdfCount"`
+	PaperPDFBytes int64             `json:"paperPdfBytes"`
+	OtherFiles    int               `json:"otherFiles"`
+	Files         []SyncPreviewFile `json:"files"`
+	CheckedAt     time.Time         `json:"checkedAt" ts_type:"string"`
+	Warning       string            `json:"warning,omitempty"`
+}
+
+type PDFServiceStatus struct {
+	Enabled   bool              `json:"enabled"`
+	URL       string            `json:"url"`
+	Healthy   bool              `json:"healthy"`
+	Ready     bool              `json:"ready"`
+	Checks    map[string]string `json:"checks,omitempty"`
+	CheckedAt time.Time         `json:"checkedAt" ts_type:"string"`
+	Message   string            `json:"message,omitempty"`
+}
+
+type DatabaseRestoreStatus struct {
+	Pending     bool      `json:"pending"`
+	Applied     bool      `json:"applied"`
+	StagedPath  string    `json:"stagedPath,omitempty"`
+	BackupPath  string    `json:"backupPath,omitempty"`
+	RemotePath  string    `json:"remotePath,omitempty"`
+	ScheduledAt time.Time `json:"scheduledAt,omitempty" ts_type:"string"`
+	AppliedAt   time.Time `json:"appliedAt,omitempty" ts_type:"string"`
+	Message     string    `json:"message,omitempty"`
+}
+
 // FileInfo 文件信息
 type FileInfo struct {
 	Path     string    `json:"path"`
 	Size     int64     `json:"size"`
 	IsDir    bool      `json:"isDir"`
-	Modified time.Time `json:"modified"`
+	Modified time.Time `json:"modified" ts_type:"string"`
 	MD5      string    `json:"md5,omitempty"`
 }

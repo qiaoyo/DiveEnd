@@ -1,17 +1,35 @@
 """PDF parsing routes (PyMuPDF4LLM backend)."""
 
+import ipaddress
+import os
+import socket
 import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urljoin, urlparse
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
+from core.config import get_config
 from core.logger import setup_logging
 
 router = APIRouter()
 logger = setup_logging()
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+MAX_PDF_REDIRECTS = 5
+
+
+def secure_temp_pdf_file():
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    os.chmod(tmp_file.name, 0o600)
+    return tmp_file
+
+
+def flush_temp_pdf(tmp_file) -> None:
+    tmp_file.flush()
+    os.fsync(tmp_file.fileno())
 
 
 @lru_cache(maxsize=1)
@@ -71,36 +89,60 @@ async def parse_upload(
     Returns:
         ParseResponse with extracted content
     """
+    display_filename = safe_upload_filename_for_log(file.filename)
     # Validate file type
-    if not file.filename.endswith(".pdf"):
+    if not display_filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are supported",
         )
 
+    tmp_path = None
     try:
         # Save uploaded file to temp location
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
+        with secure_temp_pdf_file() as tmp_file:
             tmp_path = tmp_file.name
+            size = 0
+            first_chunk = b""
+            while True:
+                chunk = await file.read(DOWNLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                if not first_chunk:
+                    first_chunk = chunk[:1024]
+                size += len(chunk)
+                if size > get_config().max_pdf_size:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="PDF exceeds configured size limit",
+                    )
+                tmp_file.write(chunk)
+            flush_temp_pdf(tmp_file)
 
-        logger.info(f"Processing PDF: {file.filename}, size: {len(content)} bytes")
+        if not looks_like_pdf(first_chunk):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded file is not a PDF",
+            )
+
+        logger.info("Processing uploaded PDF: %s, size: %d bytes", display_filename, size)
 
         # Parse PDF using PyMuPDF4LLM
         result = parse_pdf_with_pymupdf4llm(tmp_path, extract_sections)
 
-        # Cleanup temp file
-        Path(tmp_path).unlink(missing_ok=True)
-
         return ParseResponse(**result)
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.exception(f"Error parsing PDF: {e}")
+        logger.error("Error parsing uploaded PDF: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse PDF: {str(e)}",
+            detail="Failed to parse PDF",
         )
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
 
 
 @router.post(
@@ -124,41 +166,155 @@ async def parse_url(
     """
     import httpx
 
+    tmp_path = None
     try:
-        # Download PDF from URL
-        logger.info(f"Downloading PDF from: {request.url}")
+        validated_url = validate_public_pdf_url(request.url)
+        request_host = safe_url_host_for_log(validated_url)
+        # Download PDF from URL. Keep query strings out of logs; signed PDF URLs
+        # often carry short-lived credentials.
+        logger.info("Downloading PDF from host: %s", request_host)
+        config = get_config()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(request.url, timeout=60.0)
-            response.raise_for_status()
+        size = 0
+        first_chunk = b""
+        async with httpx.AsyncClient(follow_redirects=False, timeout=float(config.pdf_timeout)) as client:
+            current_url = validated_url
+            for redirect_count in range(MAX_PDF_REDIRECTS + 1):
+                async with client.stream("GET", current_url) as response:
+                    if response.is_redirect:
+                        if redirect_count >= MAX_PDF_REDIRECTS:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Too many PDF URL redirects",
+                            )
+                        location = response.headers.get("location")
+                        if not location:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="PDF URL redirect is missing a Location header",
+                            )
+                        redirected_url = urljoin(str(response.url), location)
+                        current_url = validate_public_pdf_url(redirected_url)
+                        continue
 
-            # Save to temp file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(response.content)
-                tmp_path = tmp_file.name
+                    response.raise_for_status()
+                    content_length = response.headers.get("content-length")
+                    if content_length:
+                        try:
+                            declared_size = int(content_length)
+                        except ValueError as exc:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Invalid Content-Length header",
+                            ) from exc
+                        if declared_size > config.max_pdf_size:
+                            raise HTTPException(
+                                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                detail="PDF exceeds configured size limit",
+                            )
 
-        logger.info(f"Downloaded PDF, size: {len(response.content)} bytes")
+                    # Save to temp file
+                    with secure_temp_pdf_file() as tmp_file:
+                        tmp_path = tmp_file.name
+                        async for chunk in response.aiter_bytes(DOWNLOAD_CHUNK_SIZE):
+                            if not chunk:
+                                continue
+                            if not first_chunk:
+                                first_chunk = chunk[:1024]
+                            size += len(chunk)
+                            if size > config.max_pdf_size:
+                                raise HTTPException(
+                                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                    detail="PDF exceeds configured size limit",
+                                )
+                            tmp_file.write(chunk)
+                        flush_temp_pdf(tmp_file)
+                    break
+
+        if not looks_like_pdf(first_chunk):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Downloaded response is not a PDF",
+            )
+
+        logger.info("Downloaded PDF from host: %s, size: %d bytes", request_host, size)
 
         # Parse PDF using PyMuPDF4LLM
         result = parse_pdf_with_pymupdf4llm(tmp_path, extract_sections)
 
-        # Cleanup temp file
-        Path(tmp_path).unlink(missing_ok=True)
-
         return ParseResponse(**result)
 
+    except HTTPException:
+        raise
     except httpx.HTTPError as e:
-        logger.exception(f"HTTP error downloading PDF: {e}")
+        logger.warning("HTTP error downloading PDF from host %s: %s", safe_url_host_for_log(request.url), type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to download PDF: {str(e)}",
+            detail="Failed to download PDF",
         )
     except Exception as e:
-        logger.exception(f"Error parsing PDF from URL: {e}")
+        logger.error("Error parsing PDF from URL host %s: %s", safe_url_host_for_log(request.url), type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse PDF: {str(e)}",
+            detail="Failed to parse PDF",
         )
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+def validate_public_pdf_url(raw: str) -> str:
+    raw = raw.strip()
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL must be a valid http/https URL",
+        )
+
+    host = parsed.hostname.rstrip(".").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Local/private PDF URLs are not allowed",
+        )
+
+    try:
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            addresses = [
+                ipaddress.ip_address(info[4][0])
+                for info in socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+            ]
+        except socket.gaierror as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to resolve URL host: {exc}",
+            ) from exc
+
+    for address in addresses:
+        if address.is_private or address.is_loopback or address.is_link_local or address.is_unspecified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Local/private PDF URLs are not allowed",
+            )
+
+    return raw
+
+
+def safe_url_host_for_log(raw: str) -> str:
+    parsed = urlparse(raw.strip())
+    return parsed.hostname or "unknown"
+
+
+def safe_upload_filename_for_log(raw: Optional[str]) -> str:
+    filename = Path(raw or "upload.pdf").name.strip()
+    return filename or "upload.pdf"
+
+
+def looks_like_pdf(prefix: bytes) -> bool:
+    return prefix.lstrip().startswith(b"%PDF-")
 
 
 def parse_pdf_with_pymupdf4llm(pdf_path: str, extract_sections: bool = True) -> dict:
@@ -205,22 +361,22 @@ def parse_pdf_with_pymupdf4llm(pdf_path: str, extract_sections: bool = True) -> 
         return result
 
     except ImportError as e:
-        logger.error(f"PyMuPDF4LLM library not available: {e}")
+        logger.error("PyMuPDF4LLM library not available: %s", type(e).__name__)
         return {
             "success": False,
             "markdown": None,
             "metadata": {},
             "sections": [],
-            "error": f"PDF parsing library not available: {str(e)}",
+            "error": "PDF parsing library not available",
         }
     except Exception as e:
-        logger.exception(f"Error parsing PDF: {e}")
+        logger.error("Error parsing PDF: %s", type(e).__name__)
         return {
             "success": False,
             "markdown": None,
             "metadata": {},
             "sections": [],
-            "error": str(e),
+            "error": "PDF parsing failed",
         }
 
 

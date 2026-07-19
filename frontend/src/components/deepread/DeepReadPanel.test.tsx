@@ -6,6 +6,7 @@ import { defaultConfig } from '../../types';
 
 const backendMocks = vi.hoisted(() => ({
   getDeepReadState: vi.fn(),
+  getPDFServiceStatus: vi.fn(),
   getFolderTree: vi.fn(),
   getPapers: vi.fn(),
   prepareDeepReadPaper: vi.fn(),
@@ -16,6 +17,7 @@ const backendMocks = vi.hoisted(() => ({
   saveDeepReadNote: vi.fn(),
   selectAndAttachPaperPDF: vi.fn(),
   translatePaperSection: vi.fn(),
+  getDeepReadPDFURL: vi.fn(),
   getDeepReadPDFBytes: vi.fn(),
 }));
 
@@ -27,7 +29,14 @@ vi.mock('react-pdf', () => ({
       workerSrc: '',
     },
   },
-  Document: ({ children }: { children: ReactNode }) => <div data-testid="mock-pdf-document">{children}</div>,
+  Document: ({ children, file }: { children: ReactNode; file?: unknown }) => {
+    const fileKind = typeof file === 'object' && file && 'data' in file ? 'bytes' : typeof file === 'string' ? file : 'empty';
+    return (
+      <div data-testid="mock-pdf-document" data-file-kind={fileKind}>
+        {children}
+      </div>
+    );
+  },
   Page: ({ pageNumber }: { pageNumber: number }) => <div data-testid="mock-pdf-page">page-{pageNumber}</div>,
 }));
 
@@ -139,6 +148,17 @@ describe('DeepReadPanel', () => {
     backendMocks.retryPaperDownload.mockResolvedValue(undefined);
     backendMocks.retryFolderPendingDownloads.mockResolvedValue(1);
     backendMocks.retryPaperDownloadWithURL.mockResolvedValue(undefined);
+    backendMocks.getDeepReadPDFURL.mockResolvedValue('');
+    backendMocks.getDeepReadPDFBytes.mockResolvedValue('');
+    backendMocks.getPDFServiceStatus.mockResolvedValue({
+      enabled: true,
+      url: 'http://127.0.0.1:50051',
+      healthy: true,
+      ready: true,
+      checks: { pdf_parser: 'up' },
+      checkedAt: new Date().toISOString(),
+      message: 'PDF 服务 ready',
+    });
     backendMocks.selectAndAttachPaperPDF.mockResolvedValue({
       id: 'paper-2',
       sourcePaperId: 'paper-2',
@@ -234,6 +254,40 @@ describe('DeepReadPanel', () => {
     });
   });
 
+  it('falls back to backend pdf bytes when the deepread asset url is unavailable', async () => {
+    backendMocks.getDeepReadState.mockResolvedValueOnce({
+      paperId: 'paper-1',
+      hasPdf: true,
+      pdfPath: '/managed/papers/paper-1.pdf',
+      parseStatus: 'idle',
+      parseError: '',
+      sections: [
+        {
+          id: 'abstract',
+          title: 'Abstract',
+          content: 'abstract text',
+          level: 1,
+          index: 0,
+        },
+      ],
+      markdown: '# Abstract\n\nabstract text',
+      translations: [],
+      notes: [],
+      lastPreparedAt: new Date().toISOString(),
+    });
+    backendMocks.getDeepReadPDFURL.mockRejectedValueOnce(new Error('asset server unavailable'));
+    backendMocks.getDeepReadPDFBytes.mockResolvedValueOnce(window.btoa('%PDF-1.4 fallback'));
+
+    render(<DeepReadPanel />);
+
+    await waitFor(() => {
+      expect(backendMocks.getDeepReadPDFURL).toHaveBeenCalledWith('paper-1');
+      expect(backendMocks.getDeepReadPDFBytes).toHaveBeenCalledWith('paper-1');
+    });
+
+    expect(await screen.findByTestId('mock-pdf-document')).toHaveAttribute('data-file-kind', 'bytes');
+  });
+
   it('saves deepread note via backend api', async () => {
     render(<DeepReadPanel />);
 
@@ -245,6 +299,40 @@ describe('DeepReadPanel', () => {
       expect(backendMocks.saveDeepReadNote).toHaveBeenCalledWith('paper-1', 'Untitled Section', 'important insight');
     });
     expect(await screen.findByText('important insight')).toBeInTheDocument();
+  });
+
+  it('redacts sensitive values in local translation errors', async () => {
+    backendMocks.translatePaperSection.mockRejectedValueOnce(
+      new Error('translation failed api_key=sk-translation-secret and access_token=translation-token-secret')
+    );
+
+    render(<DeepReadPanel />);
+
+    expect(await screen.findByDisplayValue('abstract')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '生成翻译与摘要' }));
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('api_key=[redacted]');
+      expect(document.body.textContent).toContain('access_token=[redacted]');
+    });
+    expect(document.body.textContent).not.toContain('sk-translation-secret');
+    expect(document.body.textContent).not.toContain('translation-token-secret');
+  });
+
+  it('redacts sensitive values in initial library load errors', async () => {
+    backendMocks.getFolderTree.mockRejectedValueOnce(
+      new Error('folder load failed api_key=sk-library-secret and access_token=library-token-secret')
+    );
+
+    render(<DeepReadPanel />);
+
+    await waitFor(() => {
+      const error = useAppStore.getState().error ?? '';
+      expect(error).toContain('api_key=[redacted]');
+      expect(error).toContain('access_token=[redacted]');
+      expect(error).not.toContain('sk-library-secret');
+      expect(error).not.toContain('library-token-secret');
+    });
   });
 
   it('supports folder switching and retrying failed downloads in deepread library', async () => {

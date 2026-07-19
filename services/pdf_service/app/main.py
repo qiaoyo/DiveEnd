@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from app.routes import health, parse, extract
 from core.config import get_config
 from core.logger import setup_logging
+from core.redaction import redact_sensitive_value
 
 # Setup logging
 logger = setup_logging()
@@ -59,10 +60,11 @@ def create_app() -> FastAPI:
     # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # TODO: Configure for production
+        allow_origins=[],
+        allow_origin_regex=config.cors_allow_origin_regex,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     # Include routers
@@ -73,15 +75,16 @@ def create_app() -> FastAPI:
     # Global exception handlers
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request, exc):
-        logger.error(f"HTTP Exception: {exc.status_code} - {exc.detail}")
+        safe_detail = redact_sensitive_value(exc.detail)
+        logger.error("HTTP Exception: %s - %s", exc.status_code, safe_detail)
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": exc.detail, "status_code": exc.status_code},
+            content={"error": safe_detail, "status_code": exc.status_code},
         )
 
     @app.exception_handler(Exception)
     async def general_exception_handler(request, exc):
-        logger.error(f"Unhandled Exception: {str(exc)}", exc_info=True)
+        logger.error("Unhandled Exception: %s", type(exc).__name__)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": "Internal server error", "status_code": 500},

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,7 +26,7 @@ type DeepStartSearchRoundRecord struct {
 }
 
 func NewDB(dataPath string) (*DB, error) {
-	if err := os.MkdirAll(dataPath, 0700); err != nil {
+	if err := ensurePlainDirectory(dataPath); err != nil {
 		return nil, err
 	}
 

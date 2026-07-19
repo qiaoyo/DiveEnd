@@ -1,6 +1,7 @@
 import type {
   AppConfig,
   ConfigSecretPrefill,
+  DatabaseRestoreStatus,
   DeepStartAnalysis,
   DeepStartProgressEvent,
   DeepStartSessionDetail,
@@ -13,26 +14,31 @@ import type {
   FolderStorageTreeOverview,
   Folder,
   CreateFolderNodeRequest,
+  RenameFolderNodeRequest,
+  MoveFolderNodeRequest,
   ImportPapersWithAssetsResult,
   InitialState,
   LocalStorageOverview,
   Paper,
+  PDFServiceStatus,
   SaveConfigResult,
   ScreeningDecisionNode,
   ScreeningSession,
   ScreeningSessionDetail,
   SearchPaper,
   SearchProgressEvent,
+  BaiduTokenRefreshStatus,
   SyncConflict,
+  SyncPreview,
   SyncProgress,
   SyncRecord,
+  SyncSettings,
   SyncStatus,
   TranslationRecord,
 } from '../types';
 import { defaultConfig, defaultInitialState } from '../types';
-import { CanResolveFilePaths, EventsOff, EventsOn, ResolveFilePaths } from '../../wailsjs/runtime/runtime';
-
-declare const __DIVEEND_ROOT__: string;
+import { CanResolveFilePaths, EventsOn, ResolveFilePaths } from '../../wailsjs/runtime/runtime';
+import { sanitizeUserVisibleError } from './errors';
 
 declare global {
   interface Window {
@@ -41,6 +47,7 @@ declare global {
         App?: {
           GetInitialState(): Promise<InitialState>;
           GetSecretPrefill(): Promise<ConfigSecretPrefill>;
+          GetPDFServiceStatus(): Promise<PDFServiceStatus>;
           SaveConfig(config: AppConfig): Promise<SaveConfigResult>;
           SearchPapers(query: string, limit: number): Promise<SearchPaper[]>;
           EnhancedSearchPapers(
@@ -72,6 +79,8 @@ declare global {
           CreateFolder(name: string): Promise<Folder>;
           GetFolderTree(): Promise<FolderNode[]>;
           CreateFolderNode(request: CreateFolderNodeRequest): Promise<Folder>;
+          RenameFolderNode(request: RenameFolderNodeRequest): Promise<Folder>;
+          MoveFolderNode(request: MoveFolderNodeRequest): Promise<Folder>;
           DeleteFolderNode(folderId: string): Promise<void>;
           GetPapers(folderId: string): Promise<Paper[]>;
           ImportPapers(folderId: string, papers: SearchPaper[]): Promise<Paper[]>;
@@ -83,6 +92,8 @@ declare global {
           AttachLocalPDFToPaper(paperId: string, sourcePath: string): Promise<Paper>;
           GetLocalStorageOverview(): Promise<LocalStorageOverview>;
           GetFolderStorageTreeOverview(): Promise<FolderStorageTreeOverview>;
+          MovePaperToFolder(paperId: string, targetFolderId: string): Promise<Paper>;
+          MovePapersToFolder(paperIds: string[], targetFolderId: string): Promise<Paper[]>;
           DeletePaper(id: string): Promise<void>;
           TranslatePaperSection(
             paperId: string,
@@ -93,6 +104,7 @@ declare global {
           GetDeepReadState(paperId: string): Promise<DeepReadState>;
           PrepareDeepReadPaper(paperId: string): Promise<DeepReadState>;
           SaveDeepReadNote(paperId: string, section: string, content: string): Promise<DeepReadNote>;
+          GetDeepReadPDFURL(paperId: string): Promise<string>;
           GetDeepReadPDFBytes(paperId: string): Promise<string>;
 
           // Screening API
@@ -112,9 +124,16 @@ declare global {
           GetSyncStatus(): Promise<SyncStatus>;
           TriggerSync(): Promise<SyncProgress>;
           GetSyncProgress(): Promise<SyncProgress>;
+          GetSyncPreview(): Promise<SyncPreview>;
+          RefreshBaiduToken(): Promise<BaiduTokenRefreshStatus>;
           GetSyncConflicts(): Promise<SyncConflict[]>;
           GetSyncRecords(limit: number): Promise<SyncRecord[]>;
-          ResolveSyncConflict(conflictId: string, resolution: 'local' | 'remote'): Promise<void>;
+          ResolveSyncConflict(conflictId: string, resolution: 'local' | 'remote' | 'skipped' | 'timestamp'): Promise<void>;
+          GetSyncSettings(): Promise<SyncSettings>;
+          SaveSyncSettings(settings: SyncSettings): Promise<SyncSettings>;
+          GetPendingDatabaseRestore(): Promise<DatabaseRestoreStatus>;
+          ApplyPendingDatabaseRestore(): Promise<DatabaseRestoreStatus>;
+          CancelPendingDatabaseRestore(): Promise<void>;
         };
       };
     };
@@ -130,6 +149,12 @@ declare global {
 const runtimeApp = () => window.go?.main?.App;
 const hasWailsRuntime = () => Boolean(window.go?.main?.App && window.runtime);
 
+function assertMockFallbackAllowed(app: ReturnType<typeof runtimeApp>, methodName: string): void {
+  if (app) {
+    throw new Error(`Wails backend method ${methodName} is unavailable. Please rebuild DiveEnd so frontend bindings match backend.`);
+  }
+}
+
 const emptySecretPrefill: ConfigSecretPrefill = {
   strongLLMApiKey: '',
   hasStrongLLMApiKey: false,
@@ -137,17 +162,6 @@ const emptySecretPrefill: ConfigSecretPrefill = {
   hasWeakLLMApiKey: false,
   baiduToken: '',
   hasBaiduToken: false,
-};
-
-type MockLLMSeed = {
-  provider?: string;
-  model?: string;
-  api_key?: string;
-  base_url?: string;
-};
-
-type MockBaiduSeed = {
-  access_token?: string;
 };
 
 function normalizeArray<T>(value: T[] | null | undefined): T[] {
@@ -217,7 +231,7 @@ function normalizePaper(paper: Partial<Paper> | null | undefined): Paper {
     url: paper?.url ?? '',
     pdfPath: paper?.pdfPath ?? '',
     downloadStatus: paper?.downloadStatus ?? 'queued',
-    downloadError: paper?.downloadError ?? '',
+    downloadError: sanitizeUserVisibleError(paper?.downloadError ?? ''),
     folderId: paper?.folderId ?? '',
     category: paper?.category ?? '',
     tags: normalizeArray(paper?.tags),
@@ -292,9 +306,9 @@ function normalizeSearchPaper(paper: Partial<SearchPaper> | null | undefined): S
     localPdfPath: paper?.localPdfPath ?? '',
     markdownPath: paper?.markdownPath ?? '',
     parseStatus: paper?.parseStatus ?? '',
-    parseError: paper?.parseError ?? '',
+    parseError: sanitizeUserVisibleError(paper?.parseError ?? ''),
     extractStatus: paper?.extractStatus ?? '',
-    extractError: paper?.extractError ?? '',
+    extractError: sanitizeUserVisibleError(paper?.extractError ?? ''),
     problem: paper?.problem ?? '',
     method: paper?.method ?? '',
     topicLabel: paper?.topicLabel ?? '',
@@ -303,7 +317,7 @@ function normalizeSearchPaper(paper: Partial<SearchPaper> | null | undefined): S
     domainLabel: paper?.domainLabel ?? '',
     classificationConfidence: Number(paper?.classificationConfidence ?? 0) || 0,
     processingStage: paper?.processingStage ?? '',
-    processingError: paper?.processingError ?? '',
+    processingError: sanitizeUserVisibleError(paper?.processingError ?? ''),
   };
 }
 
@@ -342,7 +356,7 @@ function normalizeDeepReadState(state: Partial<DeepReadState> | null | undefined
     hasPdf: Boolean(state?.hasPdf),
     pdfPath: state?.pdfPath ?? '',
     parseStatus: state?.parseStatus ?? 'idle',
-    parseError: state?.parseError ?? '',
+    parseError: sanitizeUserVisibleError(state?.parseError ?? ''),
     sections: normalizeArray(state?.sections).map((section, index) => ({
       id: section?.id ?? `section-${index + 1}`,
       title: section?.title ?? `Section ${index + 1}`,
@@ -427,6 +441,48 @@ function normalizeConfig(config: Partial<AppConfig> | null | undefined): AppConf
       ...defaultConfig.baiduCloud,
       ...config?.baiduCloud,
     },
+    sync: normalizeSyncSettings(config?.sync),
+  };
+}
+
+function normalizeSyncSettings(settings: Partial<SyncSettings> | null | undefined): SyncSettings {
+  const conflictResolution = settings?.conflictResolution || defaultConfig.sync.conflictResolution;
+  return {
+    ...defaultConfig.sync,
+    ...settings,
+    syncInterval: Math.max(1, Number(settings?.syncInterval || defaultConfig.sync.syncInterval)),
+    conflictResolution: ['timestamp', 'local', 'remote', 'manual'].includes(conflictResolution)
+      ? conflictResolution
+      : defaultConfig.sync.conflictResolution,
+  };
+}
+
+function normalizeOptionalTimestamp(value: unknown): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  const date = new Date(value as string | number | Date);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  return date.toISOString();
+}
+
+function normalizeDatabaseRestoreStatus(
+  status: Partial<DatabaseRestoreStatus> | null | undefined,
+): DatabaseRestoreStatus {
+  return {
+    pending: Boolean(status?.pending),
+    applied: Boolean(status?.applied),
+    stagedPath: status?.stagedPath ?? '',
+    backupPath: status?.backupPath ?? '',
+    remotePath: status?.remotePath ?? '',
+    scheduledAt: normalizeOptionalTimestamp(status?.scheduledAt),
+    appliedAt: normalizeOptionalTimestamp(status?.appliedAt),
+    message: sanitizeUserVisibleError(status?.message ?? ''),
   };
 }
 
@@ -434,11 +490,11 @@ function normalizeSecretPrefill(
   prefill: Partial<ConfigSecretPrefill> | null | undefined,
 ): ConfigSecretPrefill {
   return {
-    strongLLMApiKey: prefill?.strongLLMApiKey?.trim() ?? '',
+    strongLLMApiKey: '',
     hasStrongLLMApiKey: Boolean(prefill?.hasStrongLLMApiKey || prefill?.strongLLMApiKey?.trim()),
-    weakLLMApiKey: prefill?.weakLLMApiKey?.trim() ?? '',
+    weakLLMApiKey: '',
     hasWeakLLMApiKey: Boolean(prefill?.hasWeakLLMApiKey || prefill?.weakLLMApiKey?.trim()),
-    baiduToken: prefill?.baiduToken?.trim() ?? '',
+    baiduToken: '',
     hasBaiduToken: Boolean(prefill?.hasBaiduToken || prefill?.baiduToken?.trim()),
   };
 }
@@ -510,7 +566,7 @@ function normalizeExtractProgress(
     completed: progress?.completed ?? 0,
     currentFile: progress?.currentFile ?? '',
     status: progress?.status === 'completed' || progress?.status === 'error' ? progress.status : 'processing',
-    errorMessage: progress?.errorMessage ?? '',
+    errorMessage: sanitizeUserVisibleError(progress?.errorMessage ?? ''),
   };
 }
 
@@ -528,12 +584,29 @@ function normalizeSyncStatus(status: Partial<SyncStatus> | null | undefined): Sy
 }
 
 function normalizeSyncProgress(progress: Partial<SyncProgress> | null | undefined): SyncProgress {
+  const status = progress?.status === 'completed' ? 'complete' : progress?.status;
   return {
     total: progress?.total ?? 0,
     completed: progress?.completed ?? 0,
     currentFile: progress?.currentFile ?? '',
-    status: progress?.status ?? 'idle',
-    message: progress?.message ?? '',
+    status: status ?? 'idle',
+    message: sanitizeUserVisibleError(progress?.message ?? ''),
+  };
+}
+
+function normalizeSyncRecord(record: Partial<SyncRecord> | null | undefined): SyncRecord {
+  return {
+    id: record?.id ?? '',
+    type: record?.type === 'download' || record?.type === 'conflict' ? record.type : 'upload',
+    fileName: record?.fileName ?? '',
+    fileSize: Number(record?.fileSize ?? 0) || 0,
+    remotePath: record?.remotePath ?? '',
+    localPath: record?.localPath ?? '',
+    status: record?.status === 'success' || record?.status === 'failed' ? record.status : 'pending',
+    message: sanitizeUserVisibleError(record?.message ?? ''),
+    errorMessage: sanitizeUserVisibleError(record?.errorMessage ?? ''),
+    createdAt: record?.createdAt ?? new Date().toISOString(),
+    completedAt: record?.completedAt,
   };
 }
 
@@ -618,6 +691,9 @@ function redactConfig(config: AppConfig): AppConfig {
     baiduCloud: {
       ...config.baiduCloud,
       token: '',
+      refreshToken: '',
+      clientId: '',
+      clientSecret: '',
       hasToken: config.baiduCloud.token.trim().length > 0 || config.baiduCloud.hasToken,
       clearToken: false,
     },
@@ -681,162 +757,12 @@ function mockInitialState(): InitialState {
   };
 }
 
-function normalizeMockConfigWithSeeds(
-  config: AppConfig,
-  strongSeed: MockLLMSeed | null,
-  weakSeed: MockLLMSeed | null,
-  baiduSeed: MockBaiduSeed | null,
-): AppConfig {
-  const nextConfig: AppConfig = {
-    ...config,
-    llm: {
-      ...config.llm,
-    },
-    weakLLM: {
-      ...config.weakLLM,
-    },
-    search: {
-      ...config.search,
-    },
-    baiduCloud: {
-      ...config.baiduCloud,
-    },
-  };
-
-  if (strongSeed) {
-    const baseUrl = strongSeed.base_url?.trim() ?? '';
-    const model = strongSeed.model?.trim() ?? '';
-    const apiKey = strongSeed.api_key?.trim() ?? '';
-    const provider = strongSeed.provider?.trim().toLowerCase() ?? '';
-
-    if (provider === 'anthropic') {
-      nextConfig.llm.providerType = 'anthropic';
-      nextConfig.llm.providerId = 'anthropic';
-      nextConfig.llm.providerName = 'Anthropic';
-      nextConfig.llm.wireApi = 'anthropic_messages';
-      nextConfig.llm.requiresOpenAIAuth = false;
-    } else {
-      nextConfig.llm.providerType = 'openai_compatible';
-      nextConfig.llm.wireApi = 'responses';
-      nextConfig.llm.requiresOpenAIAuth = true;
-
-      if (baseUrl.includes('duckcoding.ai')) {
-        nextConfig.llm.providerId = 'duckcoding';
-        nextConfig.llm.providerName = 'DuckCoding';
-      } else if (baseUrl.includes('ark.cn-beijing.volces.com')) {
-        nextConfig.llm.providerId = 'volcengine-coding';
-        nextConfig.llm.providerName = 'Volcengine Coding';
-      }
-    }
-
-    if (baseUrl) {
-      nextConfig.llm.baseUrl = baseUrl;
-    }
-    if (model) {
-      nextConfig.llm.model = model;
-    }
-    if (apiKey) {
-      nextConfig.llm.apiKey = apiKey;
-      nextConfig.llm.hasApiKey = true;
-    }
-  }
-
-  if (weakSeed) {
-    const baseUrl = weakSeed.base_url?.trim() ?? '';
-    const model = weakSeed.model?.trim() ?? '';
-    const apiKey = weakSeed.api_key?.trim() ?? '';
-    const provider = weakSeed.provider?.trim().toLowerCase() ?? '';
-
-    if (provider === 'anthropic') {
-      nextConfig.weakLLM.providerType = 'anthropic';
-      nextConfig.weakLLM.providerId = 'weak-anthropic';
-      nextConfig.weakLLM.providerName = 'Weak Anthropic';
-      nextConfig.weakLLM.wireApi = 'anthropic_messages';
-      nextConfig.weakLLM.requiresOpenAIAuth = false;
-    } else {
-      nextConfig.weakLLM.providerType = 'openai_compatible';
-      nextConfig.weakLLM.wireApi = 'responses';
-      nextConfig.weakLLM.requiresOpenAIAuth = true;
-
-      if (baseUrl.includes('duckcoding.ai')) {
-        nextConfig.weakLLM.providerId = 'weak-duckcoding';
-        nextConfig.weakLLM.providerName = 'Weak DuckCoding';
-      } else if (baseUrl.includes('ark.cn-beijing.volces.com')) {
-        nextConfig.weakLLM.providerId = 'weak-volcengine-coding';
-        nextConfig.weakLLM.providerName = 'Weak Volcengine Coding';
-      }
-    }
-
-    if (baseUrl) {
-      nextConfig.weakLLM.baseUrl = baseUrl;
-    }
-    if (model) {
-      nextConfig.weakLLM.model = model;
-    }
-    if (apiKey) {
-      nextConfig.weakLLM.apiKey = apiKey;
-      nextConfig.weakLLM.hasApiKey = true;
-    }
-  }
-
-  const baiduToken = baiduSeed?.access_token?.trim() ?? '';
-  if (baiduToken) {
-    nextConfig.baiduCloud.enabled = true;
-    nextConfig.baiduCloud.token = baiduToken;
-    nextConfig.baiduCloud.hasToken = true;
-  }
-
-  return normalizeConfig(nextConfig);
-}
-
-async function fetchMockJSON<T>(relativePath: string): Promise<T | null> {
-  if (!import.meta.env.DEV || !__DIVEEND_ROOT__) {
-    return null;
-  }
-
-  const root = __DIVEEND_ROOT__.replace(/\\/g, '/').replace(/\/$/, '');
-  const url = `/@fs${encodeURI(`${root}/${relativePath}`)}`;
-
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as T;
-  } catch {
-    return null;
-  }
-}
-
-async function loadMockSecretPrefill(): Promise<ConfigSecretPrefill> {
-  const [strongSeed, weakSeed, baiduSeed] = await Promise.all([
-    fetchMockJSON<MockLLMSeed>('config/strong_llm.json'),
-    fetchMockJSON<MockLLMSeed>('config/weak_llm.json'),
-    fetchMockJSON<MockBaiduSeed>('baiduyun_token.json'),
-  ]);
-
-  return normalizeSecretPrefill({
-    strongLLMApiKey: strongSeed?.api_key ?? '',
-    hasStrongLLMApiKey: Boolean(strongSeed?.api_key?.trim()),
-    weakLLMApiKey: weakSeed?.api_key ?? '',
-    hasWeakLLMApiKey: Boolean(weakSeed?.api_key?.trim()),
-    baiduToken: baiduSeed?.access_token ?? '',
-    hasBaiduToken: Boolean(baiduSeed?.access_token?.trim()),
-  });
-}
-
 export async function getInitialState(): Promise<InitialState> {
   const app = runtimeApp();
   if (app?.GetInitialState) {
     return normalizeInitialState(await app.GetInitialState());
   }
 
-  const [strongSeed, weakSeed, baiduSeed] = await Promise.all([
-    fetchMockJSON<MockLLMSeed>('config/strong_llm.json'),
-    fetchMockJSON<MockLLMSeed>('config/weak_llm.json'),
-    fetchMockJSON<MockBaiduSeed>('baiduyun_token.json'),
-  ]);
-  mockConfig = normalizeMockConfigWithSeeds(mockConfig, strongSeed, weakSeed, baiduSeed);
   return mockInitialState();
 }
 
@@ -846,7 +772,16 @@ export async function getSecretPrefill(): Promise<ConfigSecretPrefill> {
     return normalizeSecretPrefill(await app.GetSecretPrefill());
   }
 
-  return loadMockSecretPrefill();
+  return emptySecretPrefill;
+}
+
+export async function getPDFServiceStatus(): Promise<PDFServiceStatus> {
+  const app = runtimeApp();
+  if (app?.GetPDFServiceStatus) {
+    return app.GetPDFServiceStatus();
+  }
+  assertMockFallbackAllowed(app, 'GetPDFServiceStatus');
+  return { enabled: false, url: '', healthy: false, ready: false, checkedAt: new Date().toISOString(), message: 'PDF service status is only available in the desktop app.' };
 }
 
 export async function saveConfig(config: AppConfig): Promise<SaveConfigResult> {
@@ -1354,6 +1289,95 @@ export async function createFolderNode(request: CreateFolderNodeRequest): Promis
   return normalizeFolder(folder);
 }
 
+export async function renameFolderNode(request: RenameFolderNodeRequest): Promise<Folder> {
+  const app = runtimeApp();
+  if (app?.RenameFolderNode) {
+    return normalizeFolder(await app.RenameFolderNode(request));
+  }
+
+  const folderId = (request.folderId ?? '').trim();
+  const name = (request.name ?? '').trim();
+  const target = mockFolders.find((folder) => folder.id === folderId);
+  if (!target) {
+    throw new Error('文件夹不存在');
+  }
+  if (target.isSystem) {
+    throw new Error('系统目录不可重命名');
+  }
+
+  const normalizedName = normalizeFolderPathForMock(name);
+  if (!normalizedName || normalizedName.includes('/')) {
+    throw new Error('文件夹名称不能为空');
+  }
+  const oldPath = normalizeFolderPathForMock(target.path || target.name);
+  const parent = target.parentId ? mockFolders.find((folder) => folder.id === target.parentId) : undefined;
+  const parentPath = parent ? normalizeFolderPathForMock(parent.path || parent.name) : '';
+  const newPath = parentPath ? normalizeFolderPathForMock(`${parentPath}/${normalizedName}`) : normalizedName;
+  const duplicate = mockFolders.find((folder) => folder.id !== folderId && normalizeFolderPathForMock(folder.path) === newPath);
+  if (duplicate) {
+    throw new Error('文件夹路径已存在');
+  }
+
+  for (const folder of mockFolders) {
+    const currentPath = normalizeFolderPathForMock(folder.path || folder.name);
+    if (folder.id === folderId) {
+      folder.name = normalizedName;
+      folder.path = newPath;
+    } else if (currentPath.startsWith(`${oldPath}/`)) {
+      folder.path = normalizeFolderPathForMock(`${newPath}/${currentPath.slice(oldPath.length + 1)}`);
+    }
+  }
+
+  return normalizeFolder(target);
+}
+
+export async function moveFolderNode(request: MoveFolderNodeRequest): Promise<Folder> {
+  const app = runtimeApp();
+  if (app?.MoveFolderNode) {
+    return normalizeFolder(await app.MoveFolderNode(request));
+  }
+
+  const folderId = (request.folderId ?? '').trim();
+  const parentId = (request.parentId ?? '').trim();
+  const target = mockFolders.find((folder) => folder.id === folderId);
+  if (!target) {
+    throw new Error('文件夹不存在');
+  }
+  if (target.isSystem) {
+    throw new Error('系统目录不可移动');
+  }
+  if (folderId === parentId) {
+    throw new Error('文件夹不能移动到自身');
+  }
+  const oldPath = normalizeFolderPathForMock(target.path || target.name);
+  const parent = parentId ? mockFolders.find((folder) => folder.id === parentId) : undefined;
+  if (parentId && !parent) {
+    throw new Error('目标父文件夹不存在');
+  }
+  const parentPath = parent ? normalizeFolderPathForMock(parent.path || parent.name) : '';
+  if (parentPath === oldPath || parentPath.startsWith(`${oldPath}/`)) {
+    throw new Error('文件夹不能移动到其子目录');
+  }
+
+  const newPath = parentPath ? normalizeFolderPathForMock(`${parentPath}/${target.name}`) : normalizeFolderPathForMock(target.name);
+  const duplicate = mockFolders.find((folder) => folder.id !== folderId && normalizeFolderPathForMock(folder.path) === newPath);
+  if (duplicate) {
+    throw new Error('文件夹路径已存在');
+  }
+
+  for (const folder of mockFolders) {
+    const currentPath = normalizeFolderPathForMock(folder.path || folder.name);
+    if (folder.id === folderId) {
+      folder.parentId = parentId;
+      folder.path = newPath;
+    } else if (currentPath.startsWith(`${oldPath}/`)) {
+      folder.path = normalizeFolderPathForMock(`${newPath}/${currentPath.slice(oldPath.length + 1)}`);
+    }
+  }
+
+  return normalizeFolder(target);
+}
+
 export async function deleteFolderNode(folderId: string): Promise<void> {
   const app = runtimeApp();
   if (app?.DeleteFolderNode) {
@@ -1609,6 +1633,99 @@ export async function deletePaper(id: string): Promise<void> {
   mockTranslations.delete(id);
 }
 
+export async function movePaperToFolder(paperId: string, targetFolderId: string): Promise<Paper> {
+  const app = runtimeApp();
+  if (app?.MovePaperToFolder) {
+    return normalizePaper(await app.MovePaperToFolder(paperId, targetFolderId));
+  }
+  assertMockFallbackAllowed(app, 'MovePaperToFolder');
+
+  const paper = mockPapers.find((item) => item.id === paperId);
+  if (!paper) {
+    throw new Error('论文不存在');
+  }
+  const targetFolder = mockFolders.find((folder) => folder.id === targetFolderId);
+  if (!targetFolder) {
+    throw new Error('文件夹不存在');
+  }
+  if (paper.folderId === targetFolderId) {
+    return normalizePaper(paper);
+  }
+  const sourcePaperId = (paper.sourcePaperId ?? '').trim();
+  if (sourcePaperId) {
+    const duplicate = mockPapers.find(
+      (item) => item.id !== paperId && item.folderId === targetFolderId && item.sourcePaperId === sourcePaperId,
+    );
+    if (duplicate) {
+      throw new Error('目标文件夹已存在这篇论文');
+    }
+  }
+
+  const updated: Paper = {
+    ...paper,
+    folderId: targetFolderId,
+    updatedAt: new Date().toISOString(),
+  };
+  mockPapers = mockPapers.map((item) => (item.id === paperId ? updated : item));
+  return normalizePaper(updated);
+}
+
+export async function movePapersToFolder(paperIds: string[], targetFolderId: string): Promise<Paper[]> {
+  const app = runtimeApp();
+  if (app?.MovePapersToFolder) {
+    return normalizeArray(await app.MovePapersToFolder(paperIds, targetFolderId)).map((paper) => normalizePaper(paper));
+  }
+  assertMockFallbackAllowed(app, 'MovePapersToFolder');
+
+  const ids = [...new Set(paperIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) {
+    return [];
+  }
+  const targetFolder = mockFolders.find((folder) => folder.id === targetFolderId);
+  if (!targetFolder) {
+    throw new Error('文件夹不存在');
+  }
+
+  const selectedIds = new Set(ids);
+  const papersToMove = ids.map((id) => {
+    const paper = mockPapers.find((item) => item.id === id);
+    if (!paper) {
+      throw new Error('论文不存在');
+    }
+    return paper;
+  });
+  const sourceOwners = new Map<string, string>();
+  for (const paper of papersToMove) {
+    const sourcePaperId = (paper.sourcePaperId ?? '').trim();
+    if (!sourcePaperId) {
+      continue;
+    }
+    const existingSelection = sourceOwners.get(sourcePaperId);
+    if (existingSelection && existingSelection !== paper.id) {
+      throw new Error('选中的论文包含重复来源');
+    }
+    sourceOwners.set(sourcePaperId, paper.id);
+    const duplicate = mockPapers.find(
+      (item) => !selectedIds.has(item.id) && item.folderId === targetFolderId && item.sourcePaperId === sourcePaperId,
+    );
+    if (duplicate) {
+      throw new Error('目标文件夹已存在这篇论文');
+    }
+  }
+
+  const now = new Date().toISOString();
+  const movedById = new Map<string, Paper>();
+  for (const paper of papersToMove) {
+    movedById.set(paper.id, {
+      ...paper,
+      folderId: targetFolderId,
+      updatedAt: now,
+    });
+  }
+  mockPapers = mockPapers.map((paper) => movedById.get(paper.id) ?? paper);
+  return ids.map((id) => normalizePaper(movedById.get(id)));
+}
+
 export async function translatePaperSection(
   paperId: string,
   section: string,
@@ -1706,6 +1823,14 @@ export async function getDeepReadPDFBytes(paperId: string): Promise<string> {
   throw new Error('当前运行环境不支持直接读取本地 PDF 字节流');
 }
 
+export async function getDeepReadPDFURL(paperId: string): Promise<string> {
+  const app = runtimeApp();
+  if (app?.GetDeepReadPDFURL) {
+    return app.GetDeepReadPDFURL(paperId);
+  }
+  return '';
+}
+
 // ============ Screening API ============
 
 export function canResolveFilePaths(): boolean {
@@ -1732,6 +1857,7 @@ export async function selectScreeningPDFs(): Promise<string[]> {
   if (app?.SelectScreeningPDFs) {
     return normalizeArray(await app.SelectScreeningPDFs());
   }
+  assertMockFallbackAllowed(app, 'SelectScreeningPDFs');
   return [];
 }
 
@@ -1746,7 +1872,20 @@ export function onExtractProgress(callback: (progress: ExtractProgress) => void)
 
   return () => {
     unsubscribe?.();
-    EventsOff('extract-progress');
+  };
+}
+
+export function onSyncProgress(callback: (progress: SyncProgress) => void): () => void {
+  if (!hasWailsRuntime()) {
+    return () => undefined;
+  }
+
+  const unsubscribe = EventsOn('sync-progress', (progress: SyncProgress) => {
+    callback(normalizeSyncProgress(progress));
+  });
+
+  return () => {
+    unsubscribe?.();
   };
 }
 
@@ -1761,7 +1900,7 @@ function normalizeSearchProgressEvent(progress: Partial<SearchProgressEvent> | n
     success: Boolean(source.success),
     done: Boolean(source.done),
     resultCount: Number(source.resultCount ?? 0) || 0,
-    error: source.error ?? '',
+    error: sanitizeUserVisibleError(source.error ?? ''),
   }));
 
   return {
@@ -1772,7 +1911,7 @@ function normalizeSearchProgressEvent(progress: Partial<SearchProgressEvent> | n
     totalSources: Number(progress?.totalSources ?? sources.length) || sources.length,
     sources,
     phase: progress?.phase === 'completed' ? 'completed' : 'searching',
-    message: progress?.message ?? '',
+    message: sanitizeUserVisibleError(progress?.message ?? ''),
   };
 }
 
@@ -1799,7 +1938,7 @@ function normalizeDeepStartProgressEvent(
       progress?.phase === 'completed'
         ? progress.phase
         : 'searching',
-    message: progress?.message ?? '',
+    message: sanitizeUserVisibleError(progress?.message ?? ''),
     elapsedSeconds: Math.max(0, Number(progress?.elapsedSeconds ?? 0) || 0),
     estimatedRemainingSeconds: Math.max(0, Number(progress?.estimatedRemainingSeconds ?? 0) || 0),
     total,
@@ -1839,7 +1978,6 @@ export function onSearchProgress(callback: (progress: SearchProgressEvent) => vo
 
   return () => {
     unsubscribe?.();
-    EventsOff('search-progress');
   };
 }
 
@@ -1854,7 +1992,6 @@ export function onDeepStartProgress(callback: (progress: DeepStartProgressEvent)
 
   return () => {
     unsubscribe?.();
-    EventsOff('deepstart-progress');
   };
 }
 
@@ -1863,6 +2000,7 @@ export async function createScreeningSession(title: string): Promise<ScreeningSe
   if (app?.CreateScreeningSession) {
     return app.CreateScreeningSession(title);
   }
+  assertMockFallbackAllowed(app, 'CreateScreeningSession');
   return {
     id: `mock-session-${Date.now()}`,
     title,
@@ -1878,6 +2016,7 @@ export async function uploadScreeningFiles(sessionId: string, filePaths: string[
   if (app?.UploadScreeningFiles) {
     return normalizeScreeningSessionDetail(await app.UploadScreeningFiles(sessionId, filePaths));
   }
+  assertMockFallbackAllowed(app, 'UploadScreeningFiles');
 
   return normalizeScreeningSessionDetail({
     session: {
@@ -1908,6 +2047,7 @@ export async function extractPaperContent(sessionId: string): Promise<ExtractPro
   if (app?.ExtractPaperContent) {
     return normalizeExtractProgress(await app.ExtractPaperContent(sessionId));
   }
+  assertMockFallbackAllowed(app, 'ExtractPaperContent');
 
   return new Promise((resolve) => {
     setTimeout(() => {
@@ -1929,6 +2069,7 @@ export async function getExtractProgress(sessionId: string): Promise<ExtractProg
   if (app?.GetExtractProgress) {
     return normalizeExtractProgress(await app.GetExtractProgress(sessionId));
   }
+  assertMockFallbackAllowed(app, 'GetExtractProgress');
   return normalizeExtractProgress({ sessionId, total: 0, completed: 0, currentFile: '', status: 'processing' });
 }
 
@@ -1937,6 +2078,7 @@ export async function analyzePapers(sessionId: string): Promise<ScreeningDecisio
   if (app?.AnalyzePapers) {
     return normalizeScreeningDecisionNode(await app.AnalyzePapers(sessionId)) as ScreeningDecisionNode;
   }
+  assertMockFallbackAllowed(app, 'AnalyzePapers');
 
   return normalizeScreeningDecisionNode({
     id: 'node-1',
@@ -1961,6 +2103,7 @@ export async function applyScreeningChoice(
   if (app?.ApplyScreeningChoice) {
     return normalizeScreeningDecisionNode(await app.ApplyScreeningChoice(sessionId, selectedOptions)) as ScreeningDecisionNode;
   }
+  assertMockFallbackAllowed(app, 'ApplyScreeningChoice');
 
   return normalizeScreeningDecisionNode({
     id: 'node-complete',
@@ -1979,6 +2122,7 @@ export async function completeScreening(sessionId: string, targetFolderId: strin
   if (app?.CompleteScreening) {
     return normalizeArray(await app.CompleteScreening(sessionId, targetFolderId)).map((paper) => normalizePaper(paper));
   }
+  assertMockFallbackAllowed(app, 'CompleteScreening');
   return [];
 }
 
@@ -1987,6 +2131,7 @@ export async function listScreeningSessions(): Promise<ScreeningSession[]> {
   if (app?.ListScreeningSessions) {
     return normalizeArray(await app.ListScreeningSessions());
   }
+  assertMockFallbackAllowed(app, 'ListScreeningSessions');
   return [];
 }
 
@@ -1995,6 +2140,7 @@ export async function getScreeningSession(sessionId: string): Promise<ScreeningS
   if (app?.GetScreeningSession) {
     return normalizeScreeningSessionDetail(await app.GetScreeningSession(sessionId));
   }
+  assertMockFallbackAllowed(app, 'GetScreeningSession');
   return normalizeScreeningSessionDetail({
     session: {
       id: sessionId,
@@ -2015,6 +2161,7 @@ export async function cancelScreening(sessionId: string): Promise<void> {
   if (app?.CancelScreening) {
     return app.CancelScreening(sessionId);
   }
+  assertMockFallbackAllowed(app, 'CancelScreening');
 }
 
 // ============ Sync API ============
@@ -2024,6 +2171,7 @@ export async function getSyncStatus(): Promise<SyncStatus> {
   if (app?.GetSyncStatus) {
     return normalizeSyncStatus(await app.GetSyncStatus());
   }
+  assertMockFallbackAllowed(app, 'GetSyncStatus');
   return normalizeSyncStatus({ enabled: false, provider: 'baidu_cloud', lastSync: null });
 }
 
@@ -2032,7 +2180,8 @@ export async function triggerSync(): Promise<SyncProgress> {
   if (app?.TriggerSync) {
     return normalizeSyncProgress(await app.TriggerSync());
   }
-  return normalizeSyncProgress({ status: 'completed', total: 0, completed: 0, currentFile: '' });
+  assertMockFallbackAllowed(app, 'TriggerSync');
+  return normalizeSyncProgress({ status: 'complete', total: 0, completed: 0, currentFile: '' });
 }
 
 export async function getSyncProgress(): Promise<SyncProgress> {
@@ -2040,7 +2189,40 @@ export async function getSyncProgress(): Promise<SyncProgress> {
   if (app?.GetSyncProgress) {
     return normalizeSyncProgress(await app.GetSyncProgress());
   }
+  assertMockFallbackAllowed(app, 'GetSyncProgress');
   return normalizeSyncProgress({ total: 0, completed: 0, currentFile: '', status: 'idle' });
+}
+
+export async function refreshBaiduToken(): Promise<BaiduTokenRefreshStatus> {
+  const app = runtimeApp();
+  if (app?.RefreshBaiduToken) {
+    return app.RefreshBaiduToken();
+  }
+  assertMockFallbackAllowed(app, 'RefreshBaiduToken');
+  return { enabled: false, tokenFile: 'baiduyun_token.json', hasAccessToken: false, hasRefreshToken: false, hasClientId: false, hasClientSecret: false, refreshed: false, checkedAt: new Date().toISOString(), message: 'Baidu token refresh is only available in the desktop app.' };
+}
+
+export async function getSyncPreview(): Promise<SyncPreview> {
+  const app = runtimeApp();
+  if (app?.GetSyncPreview) {
+    return app.GetSyncPreview();
+  }
+  assertMockFallbackAllowed(app, 'GetSyncPreview');
+  return {
+    enabled: false,
+    dataPath: '',
+    remoteRoot: '',
+    tokenFile: 'baiduyun_token.json',
+    totalFiles: 0,
+    totalBytes: 0,
+    databaseBytes: 0,
+    paperPdfCount: 0,
+    paperPdfBytes: 0,
+    otherFiles: 0,
+    files: [],
+    checkedAt: new Date().toISOString(),
+    warning: 'Sync preview is only available in the desktop app.',
+  };
 }
 
 export async function getSyncConflicts(): Promise<SyncConflict[]> {
@@ -2048,20 +2230,68 @@ export async function getSyncConflicts(): Promise<SyncConflict[]> {
   if (app?.GetSyncConflicts) {
     return normalizeArray(await app.GetSyncConflicts());
   }
+  assertMockFallbackAllowed(app, 'GetSyncConflicts');
   return [];
 }
 
 export async function getSyncRecords(limit = 20): Promise<SyncRecord[]> {
   const app = runtimeApp();
   if (app?.GetSyncRecords) {
-    return normalizeArray(await app.GetSyncRecords(limit));
+    return normalizeArray(await app.GetSyncRecords(limit)).map((record) => normalizeSyncRecord(record));
   }
+  assertMockFallbackAllowed(app, 'GetSyncRecords');
   return [];
 }
 
-export async function resolveSyncConflict(conflictId: string, resolution: 'local' | 'remote'): Promise<void> {
+export async function resolveSyncConflict(conflictId: string, resolution: 'local' | 'remote' | 'skipped' | 'timestamp'): Promise<void> {
   const app = runtimeApp();
   if (app?.ResolveSyncConflict) {
     return app.ResolveSyncConflict(conflictId, resolution);
   }
+  assertMockFallbackAllowed(app, 'ResolveSyncConflict');
+}
+
+export async function getSyncSettings(): Promise<SyncSettings> {
+  const app = runtimeApp();
+  if (app?.GetSyncSettings) {
+    return normalizeSyncSettings(await app.GetSyncSettings());
+  }
+  assertMockFallbackAllowed(app, 'GetSyncSettings');
+  return defaultConfig.sync;
+}
+
+export async function saveSyncSettings(settings: SyncSettings): Promise<SyncSettings> {
+  const normalized = normalizeSyncSettings(settings);
+  const app = runtimeApp();
+  if (app?.SaveSyncSettings) {
+    return normalizeSyncSettings(await app.SaveSyncSettings(normalized));
+  }
+  assertMockFallbackAllowed(app, 'SaveSyncSettings');
+  return normalized;
+}
+
+export async function getPendingDatabaseRestore(): Promise<DatabaseRestoreStatus> {
+  const app = runtimeApp();
+  if (app?.GetPendingDatabaseRestore) {
+    return normalizeDatabaseRestoreStatus(await app.GetPendingDatabaseRestore());
+  }
+  assertMockFallbackAllowed(app, 'GetPendingDatabaseRestore');
+  return normalizeDatabaseRestoreStatus(null);
+}
+
+export async function applyPendingDatabaseRestore(): Promise<DatabaseRestoreStatus> {
+  const app = runtimeApp();
+  if (app?.ApplyPendingDatabaseRestore) {
+    return normalizeDatabaseRestoreStatus(await app.ApplyPendingDatabaseRestore());
+  }
+  assertMockFallbackAllowed(app, 'ApplyPendingDatabaseRestore');
+  return normalizeDatabaseRestoreStatus({ pending: false, applied: false });
+}
+
+export async function cancelPendingDatabaseRestore(): Promise<void> {
+  const app = runtimeApp();
+  if (app?.CancelPendingDatabaseRestore) {
+    return app.CancelPendingDatabaseRestore();
+  }
+  assertMockFallbackAllowed(app, 'CancelPendingDatabaseRestore');
 }

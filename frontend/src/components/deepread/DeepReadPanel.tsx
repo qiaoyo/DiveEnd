@@ -17,7 +17,9 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   getDeepReadPDFBytes,
+  getDeepReadPDFURL,
   getDeepReadState,
+  getPDFServiceStatus,
   getFolderTree,
   getPapers,
   prepareDeepReadPaper,
@@ -29,7 +31,8 @@ import {
   selectAndAttachPaperPDF,
   translatePaperSection,
 } from '../../lib/backend';
-import type { DeepReadState, Folder as FolderRecord, FolderNode, Paper } from '../../types';
+import { errorToUserMessage } from '../../lib/errors';
+import type { DeepReadState, Folder as FolderRecord, FolderNode, Paper, PDFServiceStatus } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
@@ -65,6 +68,24 @@ function decodeBase64PDFBytes(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+async function loadDeepReadPDFSource(paperId: string): Promise<{ resourceURL: string; bytes: Uint8Array | null }> {
+  try {
+    const resourceURL = (await getDeepReadPDFURL(paperId)).trim();
+    if (resourceURL) {
+      return { resourceURL, bytes: null };
+    }
+  } catch {
+    // Fall through to byte fallback for older bridges or temporary asset-server failures.
+  }
+
+  try {
+    const bytes = decodeBase64PDFBytes(await getDeepReadPDFBytes(paperId));
+    return { resourceURL: '', bytes: bytes.length > 0 ? bytes : null };
+  } catch {
+    return { resourceURL: '', bytes: null };
+  }
 }
 
 function flattenFolderNodes(nodes: FolderNode[]): FolderRecord[] {
@@ -162,11 +183,13 @@ export function DeepReadPanel() {
   const [pdfZoom, setPDFZoom] = useState(0.9);
   const [pdfViewportWidth, setPDFViewportWidth] = useState(780);
   const [pdfLoadError, setPDFLoadError] = useState('');
+  const [pdfResourceURL, setPDFResourceURL] = useState('');
   const [pdfBytes, setPDFBytes] = useState<Uint8Array | null>(null);
   const [translationError, setTranslationError] = useState('');
   const [manualURLDrafts, setManualURLDrafts] = useState<Record<string, string>>({});
   const [manualURLPanelPaperId, setManualURLPanelPaperId] = useState<string | null>(null);
   const [submittingManualURLPaperId, setSubmittingManualURLPaperId] = useState('');
+  const [pdfServiceStatus, setPDFServiceStatus] = useState<PDFServiceStatus | null>(null);
   const manualURLInputRef = useRef<HTMLInputElement | null>(null);
   const pdfViewportRef = useRef<HTMLDivElement | null>(null);
   const pdfPageRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -178,6 +201,9 @@ export function DeepReadPanel() {
   );
   const pdfSrc = useMemo(() => fileURLFromPath(deepReadState?.pdfPath ?? ''), [deepReadState?.pdfPath]);
   const pdfFileInput = useMemo(() => {
+    if (pdfResourceURL) {
+      return pdfResourceURL;
+    }
     if (pdfBytes && pdfBytes.length > 0) {
       const data = pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength);
       return { data };
@@ -186,7 +212,7 @@ export function DeepReadPanel() {
       return pdfSrc;
     }
     return '';
-  }, [pdfBytes, pdfSrc]);
+  }, [pdfBytes, pdfResourceURL, pdfSrc]);
   const translationHistory = deepReadState?.translations ?? [];
   const noteHistory = deepReadState?.notes ?? [];
   const latestTranslation = translationHistory[0];
@@ -214,6 +240,20 @@ export function DeepReadPanel() {
     const maxAllowed = Math.round(available * 1.35);
     return Math.max(280, Math.min(maxAllowed, scaled));
   }, [pdfViewportWidth, pdfZoom]);
+  const estimatedPDFPageHeight = Math.round(readerPageWidth * 1.36 + 28);
+  const renderedPDFPages = useMemo(() => {
+    if (numPages <= 0) {
+      return [] as number[];
+    }
+    const buffer = 2;
+    const start = Math.max(1, pageNumber - buffer);
+    const end = Math.min(numPages, pageNumber + buffer);
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  }, [numPages, pageNumber]);
+  const firstRenderedPDFPage = renderedPDFPages[0] ?? 1;
+  const lastRenderedPDFPage = renderedPDFPages[renderedPDFPages.length - 1] ?? 0;
+  const pdfTopSpacerHeight = Math.max(0, firstRenderedPDFPage - 1) * estimatedPDFPageHeight;
+  const pdfBottomSpacerHeight = Math.max(0, numPages - lastRenderedPDFPage) * estimatedPDFPageHeight;
 
   const setPDFPageRef = (page: number, element: HTMLDivElement | null) => {
     if (element) {
@@ -229,15 +269,17 @@ export function DeepReadPanel() {
     }
     const normalized = Math.min(Math.max(page, 1), numPages);
     setPageNumber(normalized);
-    const viewport = pdfViewportRef.current;
-    const target = pdfPageRefs.current[normalized];
-    if (!viewport || !target) {
-      return;
-    }
-    viewport.scrollTo({
-      top: Math.max(target.offsetTop - 8, 0),
-      behavior,
-    });
+    window.setTimeout(() => {
+      const viewport = pdfViewportRef.current;
+      const target = pdfPageRefs.current[normalized];
+      if (!viewport) {
+        return;
+      }
+      viewport.scrollTo({
+        top: target ? Math.max(target.offsetTop - 8, 0) : Math.max((normalized - 1) * estimatedPDFPageHeight, 0),
+        behavior,
+      });
+    }, 0);
   };
 
   const handlePDFViewportScroll = () => {
@@ -245,20 +287,8 @@ export function DeepReadPanel() {
     if (!viewport || numPages <= 0) {
       return;
     }
-    const anchor = viewport.scrollTop + viewport.clientHeight * 0.25;
-    let nearestPage = pageNumber;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    for (let page = 1; page <= numPages; page += 1) {
-      const node = pdfPageRefs.current[page];
-      if (!node) {
-        continue;
-      }
-      const distance = Math.abs(node.offsetTop - anchor);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestPage = page;
-      }
-    }
+    const estimatedPage = Math.floor((viewport.scrollTop + viewport.clientHeight * 0.18) / estimatedPDFPageHeight) + 1;
+    const nearestPage = Math.min(Math.max(estimatedPage, 1), numPages);
     if (nearestPage !== pageNumber) {
       setPageNumber(nearestPage);
     }
@@ -285,6 +315,31 @@ export function DeepReadPanel() {
     setSelectedPaper(nextPapers[0]);
     return nextPapers;
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    getPDFServiceStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setPDFServiceStatus(status);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPDFServiceStatus({
+            enabled: false,
+            url: '',
+            healthy: false,
+            ready: false,
+            checkedAt: new Date().toISOString(),
+            message: errorToUserMessage(error, '读取 PDF 服务状态失败'),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (manualURLPanelPaperId) {
@@ -317,7 +372,7 @@ export function DeepReadPanel() {
         }
       } catch (error) {
         if (!cancelled) {
-          setError(error instanceof Error ? error.message : '加载目录失败');
+          setError(errorToUserMessage(error, '加载目录失败'));
         }
       } finally {
         if (!cancelled) {
@@ -366,6 +421,7 @@ export function DeepReadPanel() {
       setPageNumber(1);
       setNumPages(0);
       setPDFLoadError('');
+      setPDFResourceURL('');
       setPDFBytes(null);
       return;
     }
@@ -373,6 +429,7 @@ export function DeepReadPanel() {
     let cancelled = false;
     setLoadingState(true);
     setPDFLoadError('');
+    setPDFResourceURL('');
     setPDFBytes(null);
     void getDeepReadState(selectedPaperId)
       .then(async (state) => {
@@ -386,30 +443,22 @@ export function DeepReadPanel() {
         setPageNumber(1);
         setNumPages(0);
 
-        // 在 Wails 环境优先走后端字节流读取，避免 file:// 在 WebView 中被拦截导致 Missing PDF。
+        // 在 Wails 环境优先走同源 asset URL，避免 file:// 被 WebView 拦截；
+        // asset URL 不可用时再回退到后端字节流。
         if (state.hasPdf && state.pdfPath.trim()) {
-          try {
-            const base64 = await getDeepReadPDFBytes(selectedPaperId);
-            if (cancelled) {
-              return;
-            }
-            const bytes = decodeBase64PDFBytes(base64);
-            if (bytes.length > 0) {
-              setPDFBytes(bytes);
-            } else {
-              setPDFBytes(null);
-            }
-          } catch {
-            if (!cancelled) {
-              setPDFBytes(null);
-            }
+          const source = await loadDeepReadPDFSource(selectedPaperId);
+          if (cancelled) {
+            return;
           }
+          setPDFResourceURL(source.resourceURL);
+          setPDFBytes(source.bytes);
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setError(error instanceof Error ? error.message : '读取 DeepRead 状态失败');
+          setError(errorToUserMessage(error, '读取 DeepRead 状态失败'));
           setDeepReadState(null);
+          setPDFResourceURL('');
           setPDFBytes(null);
         }
       })
@@ -457,6 +506,7 @@ export function DeepReadPanel() {
     }
     setPreparing(true);
     setPDFLoadError('');
+    setPDFResourceURL('');
     setPDFBytes(null);
     try {
       const state = await prepareDeepReadPaper(selectedPaper.id);
@@ -465,18 +515,12 @@ export function DeepReadPanel() {
         setSelectedSectionId(state.sections[0].id);
       }
       if (state.hasPdf && state.pdfPath.trim()) {
-        try {
-          const base64 = await getDeepReadPDFBytes(selectedPaper.id);
-          const bytes = decodeBase64PDFBytes(base64);
-          if (bytes.length > 0) {
-            setPDFBytes(bytes);
-          }
-        } catch {
-          setPDFBytes(null);
-        }
+        const source = await loadDeepReadPDFSource(selectedPaper.id);
+        setPDFResourceURL(source.resourceURL);
+        setPDFBytes(source.bytes);
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : '准备 DeepRead 内容失败');
+      setError(errorToUserMessage(error, '准备 DeepRead 内容失败'));
     } finally {
       setPreparing(false);
     }
@@ -510,7 +554,7 @@ export function DeepReadPanel() {
         };
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '翻译失败';
+      const message = errorToUserMessage(error, '翻译失败');
       setTranslationError(message);
       setError(message);
     } finally {
@@ -541,7 +585,7 @@ export function DeepReadPanel() {
       });
       setNoteDraft('');
     } catch (error) {
-      setError(error instanceof Error ? error.message : '保存笔记失败');
+      setError(errorToUserMessage(error, '保存笔记失败'));
     } finally {
       setSavingNote(false);
     }
@@ -560,7 +604,7 @@ export function DeepReadPanel() {
       });
       setConfig(result.config);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '切换主题失败');
+      setError(errorToUserMessage(error, '切换主题失败'));
     } finally {
       setSwitchingTheme(false);
     }
@@ -592,7 +636,7 @@ export function DeepReadPanel() {
         setManualURLPanelPaperId(null);
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : '重试下载失败');
+      setError(errorToUserMessage(error, '重试下载失败'));
     } finally {
       setRetryingPaperId('');
     }
@@ -610,7 +654,7 @@ export function DeepReadPanel() {
         setError('当前文件夹没有需要重新下载的论文');
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : '批量重新下载失败');
+      setError(errorToUserMessage(error, '批量重新下载失败'));
     } finally {
       setRetryingFolder(false);
     }
@@ -631,13 +675,13 @@ export function DeepReadPanel() {
         setSelectedPaper(updated);
         const state = await getDeepReadState(paper.id);
         setDeepReadState(state);
-        const base64 = await getDeepReadPDFBytes(paper.id);
-        const bytes = decodeBase64PDFBytes(base64);
-        setPDFBytes(bytes.length > 0 ? bytes : null);
+        const source = await loadDeepReadPDFSource(paper.id);
+        setPDFResourceURL(source.resourceURL);
+        setPDFBytes(source.bytes);
       }
       setManualURLPanelPaperId(null);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '导入本地 PDF 失败');
+      setError(errorToUserMessage(error, '导入本地 PDF 失败'));
     } finally {
       setAttachingPaperId('');
     }
@@ -665,7 +709,7 @@ export function DeepReadPanel() {
       }
       setManualURLPanelPaperId(null);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '手动链接重试失败');
+      setError(errorToUserMessage(error, '手动链接重试失败'));
     } finally {
       setSubmittingManualURLPaperId('');
     }
@@ -705,6 +749,11 @@ export function DeepReadPanel() {
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">DeepRead Workspace</p>
             <h2 className="truncate text-sm font-semibold">{selectedPaper?.title || '选择右侧论文开始阅读'}</h2>
+            {pdfServiceStatus && (
+              <p className={`mt-1 text-xs ${pdfServiceStatus.ready ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
+                PDF 服务：{pdfServiceStatus.ready ? 'ready' : '需要检查'}{pdfServiceStatus.message ? ` · ${pdfServiceStatus.message}` : ''}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -720,7 +769,7 @@ export function DeepReadPanel() {
               <a
                 href={selectedPaperURL}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 transition hover:border-indigo-400 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:text-indigo-100"
               >
                 打开网页
@@ -810,7 +859,7 @@ export function DeepReadPanel() {
                       setNumPages(totalPages || 0);
                       setPDFLoadError('');
                     }}
-                    onLoadError={(error) => setPDFLoadError(error instanceof Error ? error.message : '加载失败')}
+                    onLoadError={(error) => setPDFLoadError(errorToUserMessage(error, '加载失败'))}
                   >
                     <div className="grid grid-cols-3 gap-2">
                       {Array.from({ length: Math.min(numPages || 0, 18) }, (_, index) => {
@@ -975,11 +1024,11 @@ export function DeepReadPanel() {
                         setPageNumber((value) => Math.min(Math.max(value, 1), totalPages || 1));
                         setPDFLoadError('');
                       }}
-                      onLoadError={(error) => setPDFLoadError(error instanceof Error ? error.message : '加载失败')}
+                      onLoadError={(error) => setPDFLoadError(errorToUserMessage(error, '加载失败'))}
                     >
                       <div className="space-y-3">
-                        {Array.from({ length: numPages || 0 }, (_, index) => {
-                          const page = index + 1;
+                        {pdfTopSpacerHeight > 0 ? <div style={{ height: pdfTopSpacerHeight }} aria-hidden="true" /> : null}
+                        {renderedPDFPages.map((page) => {
                           const isCurrent = page === pageNumber;
                           return (
                             <div
@@ -1002,6 +1051,7 @@ export function DeepReadPanel() {
                             </div>
                           );
                         })}
+                        {pdfBottomSpacerHeight > 0 ? <div style={{ height: pdfBottomSpacerHeight }} aria-hidden="true" /> : null}
                       </div>
                     </Document>
                   </div>

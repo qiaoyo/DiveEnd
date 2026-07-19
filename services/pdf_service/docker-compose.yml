@@ -16,13 +16,16 @@ services:
     container_name: diveend-pdf-service
     restart: unless-stopped
     ports:
-      - "50051:50051"
+      # Bind the host side to loopback only. The container still listens on
+      # 0.0.0.0 internally so Docker port forwarding can reach the service.
+      - "127.0.0.1:50051:50051"
     environment:
       # LLM API Keys (required)
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 
       # PDF Service Configuration
+      # Keep 0.0.0.0 inside Docker; do not publish it beyond localhost above.
       - PDF_HOST=0.0.0.0
       - PDF_PORT=50051
       - PDF_WORKERS=1

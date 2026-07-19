@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,6 +27,72 @@ type fakeWeakLLM struct {
 	profile        *PaperProfileExtraction
 	rewrittenQuery []string
 	rewriteErr     error
+}
+
+func TestStartupAppliesPendingDatabaseRestoreWithoutLoggingBackupPath(t *testing.T) {
+	tempDir := useTestConfigPath(t)
+	dataPath := filepath.Join(tempDir, "DiveEndData")
+
+	localDB, err := NewDB(dataPath)
+	if err != nil {
+		t.Fatalf("NewDB(local) error = %v", err)
+	}
+	if _, err := localDB.conn.Exec(`CREATE TABLE local_startup_marker (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create local marker error = %v", err)
+	}
+	if err := localDB.Close(); err != nil {
+		t.Fatalf("Close(localDB) error = %v", err)
+	}
+
+	stagedDir := filepath.Join(databaseRestoreDir(dataPath), "startup-staged")
+	stagedDB, err := NewDB(stagedDir)
+	if err != nil {
+		t.Fatalf("NewDB(staged) error = %v", err)
+	}
+	if _, err := stagedDB.conn.Exec(`CREATE TABLE cloud_startup_marker (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create staged marker error = %v", err)
+	}
+	if err := stagedDB.Close(); err != nil {
+		t.Fatalf("Close(stagedDB) error = %v", err)
+	}
+
+	scheduled, err := scheduleDatabaseRestore(dataPath, filepath.Join(stagedDir, "diveend.db"), "/apps/pcstest_oauth/diveend-v1/data/diveend.db")
+	if err != nil {
+		t.Fatalf("scheduleDatabaseRestore() error = %v", err)
+	}
+
+	config := defaultAppConfig()
+	config.DataPath = dataPath
+	if err := SaveAppConfig(config); err != nil {
+		t.Fatalf("SaveAppConfig() error = %v", err)
+	}
+
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+	}()
+
+	app := NewApp()
+	app.startup(context.Background())
+	t.Cleanup(func() {
+		app.stopDownloadWorkers()
+		if app.db != nil {
+			_ = app.db.Close()
+		}
+	})
+
+	output := logs.String()
+	if !strings.Contains(output, "Applied pending database restore") {
+		t.Fatalf("expected startup restore log, got %q", output)
+	}
+	if strings.Contains(output, scheduled.BackupPath) {
+		t.Fatalf("startup logs exposed restore backup path %q in %q", scheduled.BackupPath, output)
+	}
 }
 
 func (f fakeLLM) TranslateSection(section, originalText string) (string, string, error) {
@@ -283,6 +351,46 @@ func TestAppSaveConfigPersistsAndSignalsRestart(t *testing.T) {
 	if loaded.DataPath != nextConfig.DataPath {
 		t.Fatalf("expected config file to persist data path %q, got %q", nextConfig.DataPath, loaded.DataPath)
 	}
+	if result.Config.DataPath != nextConfig.DataPath {
+		t.Fatalf("expected returned config to expose pending data path %q, got %q", nextConfig.DataPath, result.Config.DataPath)
+	}
+	if app.config.DataPath != initialConfig.DataPath {
+		t.Fatalf("expected runtime data path to remain %q until restart, got %q", initialConfig.DataPath, app.config.DataPath)
+	}
+	if app.syncManager == nil || app.syncManager.config.DataPath != initialConfig.DataPath {
+		t.Fatalf("expected sync manager to keep runtime data path %q until restart, got %+v", initialConfig.DataPath, app.syncManager)
+	}
+	initialStateAfterPendingSave, err := app.GetInitialState()
+	if err != nil {
+		t.Fatalf("GetInitialState() after pending data path save error = %v", err)
+	}
+	if initialStateAfterPendingSave.Config.DataPath != nextConfig.DataPath {
+		t.Fatalf("expected GetInitialState to expose pending data path %q, got %q", nextConfig.DataPath, initialStateAfterPendingSave.Config.DataPath)
+	}
+
+	syncSettings, err := app.SaveSyncSettings(SyncSettings{
+		AutoSync:           true,
+		SyncOnStartup:      true,
+		SyncBeforeExit:     true,
+		SyncInterval:       7,
+		ConflictResolution: "manual",
+	})
+	if err != nil {
+		t.Fatalf("SaveSyncSettings() error = %v", err)
+	}
+	if !syncSettings.AutoSync || !syncSettings.SyncOnStartup || !syncSettings.SyncBeforeExit || syncSettings.SyncInterval != 7 || syncSettings.ConflictResolution != "manual" {
+		t.Fatalf("unexpected sync settings: %+v", syncSettings)
+	}
+	loadedAfterSyncSettings, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() after SaveSyncSettings error = %v", err)
+	}
+	if loadedAfterSyncSettings.DataPath != nextConfig.DataPath {
+		t.Fatalf("expected pending data path %q to survive SaveSyncSettings, got %q", nextConfig.DataPath, loadedAfterSyncSettings.DataPath)
+	}
+	if !loadedAfterSyncSettings.Sync.AutoSync || !loadedAfterSyncSettings.Sync.SyncOnStartup || !loadedAfterSyncSettings.Sync.SyncBeforeExit || loadedAfterSyncSettings.Sync.SyncInterval != 7 || loadedAfterSyncSettings.Sync.ConflictResolution != "manual" {
+		t.Fatalf("expected sync settings to persist into pending config, got %+v", loadedAfterSyncSettings.Sync)
+	}
 	if loaded.LLM.APIKey != "initial-key" {
 		t.Fatalf("expected empty save payload to preserve existing api key, got %q", loaded.LLM.APIKey)
 	}
@@ -291,6 +399,83 @@ func TestAppSaveConfigPersistsAndSignalsRestart(t *testing.T) {
 	}
 	if loaded.LLM.ReasoningEffort != "xhigh" {
 		t.Fatalf("expected reasoning effort to persist, got %q", loaded.LLM.ReasoningEffort)
+	}
+}
+
+func TestAppSaveConfigPreservesActiveSyncManagerForUnrelatedChanges(t *testing.T) {
+	useTestConfigPath(t)
+
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	config.BaiduCloud.Enabled = true
+	config.BaiduCloud.Token = "token-1"
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	originalManager := app.syncManager
+	if originalManager == nil {
+		t.Fatal("expected sync manager")
+	}
+	originalManager.updateProgress(func(progress *SyncProgress) {
+		progress.Status = "uploading"
+		progress.CurrentFile = "data/diveend.db"
+	})
+
+	nextConfig := app.config
+	nextConfig.Theme = "dark"
+	result, err := app.SaveConfig(nextConfig)
+	if err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	if result.RestartRequired {
+		t.Fatal("theme-only save should not require restart")
+	}
+	if app.syncManager != originalManager {
+		t.Fatal("expected active sync manager to be preserved for unrelated config changes")
+	}
+	if app.syncManager.GetSyncProgress().Status != "uploading" {
+		t.Fatalf("expected active sync progress to be preserved, got %+v", app.syncManager.GetSyncProgress())
+	}
+}
+
+func TestAppSaveConfigRejectsSyncConfigChangesDuringActiveSync(t *testing.T) {
+	useTestConfigPath(t)
+
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	config.BaiduCloud.Enabled = true
+	config.BaiduCloud.Token = "token-1"
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	originalManager := app.syncManager
+	if originalManager == nil {
+		t.Fatal("expected sync manager")
+	}
+	originalManager.updateProgress(func(progress *SyncProgress) {
+		progress.Status = "uploading"
+		progress.CurrentFile = "data/diveend.db"
+	})
+
+	nextConfig := app.config
+	nextConfig.BaiduCloud.Token = "token-2"
+	if _, err := app.SaveConfig(nextConfig); err == nil {
+		t.Fatal("expected sync config changes to be rejected while sync is active")
+	}
+	if app.config.BaiduCloud.Token != "token-1" {
+		t.Fatalf("expected runtime token to remain unchanged, got %q", app.config.BaiduCloud.Token)
+	}
+	if app.syncManager != originalManager {
+		t.Fatal("expected active sync manager to remain installed after rejected save")
+	}
+	if _, err := os.Stat(getConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("expected rejected save not to write config file, stat err=%v", err)
 	}
 }
 
@@ -354,6 +539,34 @@ func TestAppImportAndTranslateFlow(t *testing.T) {
 	}
 	if translations[0].Summary != "测试摘要" {
 		t.Fatalf("expected summary to round-trip, got %q", translations[0].Summary)
+	}
+}
+
+func TestAppImportsRejectUnknownTargetFolder(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() {
+		app.stopDownloadWorkers()
+		_ = app.db.Close()
+	})
+
+	input := []SearchPaper{{
+		ID:    "unknown-folder-paper",
+		Title: "Unknown Folder Paper",
+	}}
+
+	if _, err := app.ImportPapers("../escaped", input); err == nil || !strings.Contains(err.Error(), "folder not found") {
+		t.Fatalf("expected ImportPapers to reject unknown folder, got %v", err)
+	}
+	if _, err := app.ImportPapersWithAssets("../escaped", input); err == nil || !strings.Contains(err.Error(), "folder not found") {
+		t.Fatalf("expected ImportPapersWithAssets to reject unknown folder, got %v", err)
+	}
+	if _, err := app.resolveFolderID("../escaped"); err == nil || !strings.Contains(err.Error(), "folder not found") {
+		t.Fatalf("expected resolveFolderID to reject unknown folder, got %v", err)
 	}
 }
 
@@ -434,7 +647,89 @@ func TestAppImportPapersWithAssetsAllowsFolderCopiesAndSkipsSameFolderDuplicates
 	}
 }
 
+func TestProcessDownloadJobSanitizesCorruptFolderIDFallback(t *testing.T) {
+	allowPrivatePDFDownloadHostsForTest = true
+	t.Cleanup(func() {
+		allowPrivatePDFDownloadHostsForTest = false
+	})
+
+	pdfPayload := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write(pdfPayload)
+	}))
+	defer server.Close()
+
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() {
+		app.stopDownloadWorkers()
+		_ = app.db.Close()
+	})
+
+	corruptFolderID := "../../escaped"
+	folders, err := app.db.GetFolders()
+	if err != nil {
+		t.Fatalf("GetFolders() error = %v", err)
+	}
+	if len(folders) == 0 {
+		t.Fatal("expected at least one folder")
+	}
+	corruptPaperID := "../corrupt/paper"
+	paper := Paper{
+		ID:             corruptPaperID,
+		SourcePaperID:  corruptPaperID,
+		Title:          "Corrupt Folder Paper",
+		URL:            server.URL + "/paper.pdf",
+		FolderID:       folders[0].ID,
+		DownloadStatus: "queued",
+	}
+	if err := app.db.UpsertPaper(&paper); err != nil {
+		t.Fatalf("UpsertPaper() error = %v", err)
+	}
+
+	app.processDownloadJob(context.Background(), paperDownloadJob{
+		PaperID:     paper.ID,
+		FolderID:    corruptFolderID,
+		DataPath:    config.DataPath,
+		SourceURL:   paper.URL,
+		FolderPath:  "",
+		ExternalIDs: map[string]string{},
+	})
+
+	downloaded, err := app.db.GetPaperByID(paper.ID)
+	if err != nil {
+		t.Fatalf("GetPaperByID() error = %v", err)
+	}
+	if downloaded.DownloadStatus != "downloaded" {
+		t.Fatalf("expected download to succeed with sanitized fallback, got status=%q err=%q", downloaded.DownloadStatus, downloaded.DownloadError)
+	}
+	papersRoot := filepath.Join(config.DataPath, "papers")
+	if _, ok := managedPathInsideRoot(papersRoot, downloaded.PDFPath); !ok {
+		t.Fatalf("downloaded pdf escaped papers root: path=%q root=%q", downloaded.PDFPath, papersRoot)
+	}
+	if !strings.Contains(filepath.ToSlash(downloaded.PDFPath), safeSyncSegment(corruptFolderID)) {
+		t.Fatalf("expected sanitized folder segment in pdf path, got %q", downloaded.PDFPath)
+	}
+	if filepath.Base(downloaded.PDFPath) != safePaperPDFFileName(corruptPaperID) {
+		t.Fatalf("expected sanitized paper file name %q, got %q", safePaperPDFFileName(corruptPaperID), filepath.Base(downloaded.PDFPath))
+	}
+	escapedPath := filepath.Clean(filepath.Join(papersRoot, filepath.FromSlash(corruptFolderID), filepath.FromSlash(corruptPaperID)+".pdf"))
+	if _, err := os.Stat(escapedPath); err == nil {
+		t.Fatalf("unexpected escaped pdf was created at %q", escapedPath)
+	}
+}
+
 func TestAppImportPapersWithAssetsDownloadsPDFAndUpdatesStorageOverview(t *testing.T) {
+	allowPrivatePDFDownloadHostsForTest = true
+	t.Cleanup(func() {
+		allowPrivatePDFDownloadHostsForTest = false
+	})
+
 	pdfPayload := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/pdf")

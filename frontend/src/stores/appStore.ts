@@ -12,6 +12,7 @@ import type {
   TranslationRecord,
 } from '../types';
 import { defaultConfig } from '../types';
+import { sanitizeUserVisibleError } from '../lib/errors';
 
 interface AppStore extends AppState {
   hydrate: (state: InitialState) => void;
@@ -121,5 +122,5 @@ export const useAppStore = create<AppStore>((set) => ({
     set((state) => ({
       rightPanelCollapsed: !state.rightPanelCollapsed,
     })),
-  setError: (error) => set({ error }),
+  setError: (error) => set({ error: error ? sanitizeUserVisibleError(error) : null }),
 }));

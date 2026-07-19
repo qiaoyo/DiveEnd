@@ -2,11 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	appConfigFileLimitBytes  int64 = 1024 * 1024
+	seedConfigFileLimitBytes int64 = 256 * 1024
 )
 
 type llmSeedConfig struct {
@@ -119,6 +126,7 @@ func defaultAppConfig() AppConfig {
 			Enabled: false,
 			Quota:   0,
 		},
+		Sync: defaultSyncSettings(),
 	}
 }
 
@@ -133,6 +141,7 @@ func normalizeAppConfig(config AppConfig) AppConfig {
 	}
 	config.Search = normalizeSearchAPIConfig(config.Search)
 	config.BaiduCloud = normalizeBaiduCloudConfig(config.BaiduCloud)
+	config.Sync = normalizeSyncSettings(config.Sync)
 	if config.Theme != "dark" && config.Theme != "light" {
 		config.Theme = defaults.Theme
 	}
@@ -155,6 +164,29 @@ func normalizeAppConfig(config AppConfig) AppConfig {
 	config.SemanticScholarAPIKey = ""
 
 	return config
+}
+
+func defaultSyncSettings() SyncSettings {
+	return SyncSettings{
+		AutoSync:           false,
+		SyncOnStartup:      false,
+		SyncBeforeExit:     false,
+		SyncInterval:       30,
+		ConflictResolution: "timestamp",
+	}
+}
+
+func normalizeSyncSettings(settings SyncSettings) SyncSettings {
+	defaults := defaultSyncSettings()
+	if settings.SyncInterval <= 0 {
+		settings.SyncInterval = defaults.SyncInterval
+	}
+	switch strings.TrimSpace(settings.ConflictResolution) {
+	case "timestamp", "local", "remote", "manual":
+	default:
+		settings.ConflictResolution = defaults.ConflictResolution
+	}
+	return settings
 }
 
 func migrateLegacyConfig(config AppConfig) AppConfig {
@@ -323,8 +355,10 @@ func mergeAppConfigSecrets(existing AppConfig, incoming AppConfig) AppConfig {
 		merged.BaiduCloud.RefreshToken = ""
 		merged.BaiduCloud.ClientID = ""
 		merged.BaiduCloud.ClientSecret = ""
-	} else if strings.TrimSpace(incoming.BaiduCloud.Token) == "" {
-		merged.BaiduCloud.Token = existing.BaiduCloud.Token
+	} else {
+		if strings.TrimSpace(incoming.BaiduCloud.Token) == "" {
+			merged.BaiduCloud.Token = existing.BaiduCloud.Token
+		}
 		if strings.TrimSpace(incoming.BaiduCloud.RefreshToken) == "" {
 			merged.BaiduCloud.RefreshToken = existing.BaiduCloud.RefreshToken
 		}
@@ -357,7 +391,7 @@ func LoadAppConfig() (AppConfig, error) {
 		return loadBootstrapConfig(), nil
 	}
 
-	data, err := os.ReadFile(configPath)
+	data, err := readLimitedFile(configPath, appConfigFileLimitBytes)
 	if err != nil {
 		return AppConfig{}, err
 	}
@@ -372,16 +406,12 @@ func LoadAppConfig() (AppConfig, error) {
 
 func SaveAppConfig(config AppConfig) error {
 	configPath := getConfigPath()
-	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(normalizeAppConfig(config), "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0600)
+	return writeFileAtomic(configPath, data, 0600)
 }
 
 func getConfigPath() string {
@@ -438,21 +468,11 @@ func mergeSeedSecrets(config AppConfig) AppConfig {
 	}
 
 	if token, ok := readBaiduTokenSeed(); ok {
-		if strings.TrimSpace(config.BaiduCloud.Token) == "" {
-			config.BaiduCloud.Token = token.AccessToken
-		}
-		if strings.TrimSpace(config.BaiduCloud.RefreshToken) == "" {
-			config.BaiduCloud.RefreshToken = token.RefreshToken
-		}
-		if strings.TrimSpace(config.BaiduCloud.ClientID) == "" {
-			config.BaiduCloud.ClientID = token.ClientID
-		}
-		if strings.TrimSpace(config.BaiduCloud.ClientSecret) == "" {
-			config.BaiduCloud.ClientSecret = token.ClientSecret
-		}
-		if !config.BaiduCloud.Enabled {
-			config.BaiduCloud.Enabled = true
-		}
+		config.BaiduCloud.Token = token.AccessToken
+		config.BaiduCloud.RefreshToken = token.RefreshToken
+		config.BaiduCloud.ClientID = token.ClientID
+		config.BaiduCloud.ClientSecret = token.ClientSecret
+		config.BaiduCloud.Enabled = true
 	}
 
 	if config.Search.EnableSemanticScholar && strings.TrimSpace(config.Search.SemanticScholarAPIKey) == "" {
@@ -497,7 +517,7 @@ func mergeSearchConfigWithAppYAML(searchConfig SearchAPIConfig) SearchAPIConfig 
 }
 
 func readAppYAMLSearchConfig() (appYAMLSearchSettings, bool) {
-	data, err := os.ReadFile(filepath.Join("config", "app.yaml"))
+	data, err := readLimitedFile(filepath.Join("config", "app.yaml"), seedConfigFileLimitBytes)
 	if err != nil {
 		return appYAMLSearchSettings{}, false
 	}
@@ -528,7 +548,7 @@ func readWeakLLMSeed() (llmSeedConfig, bool) {
 }
 
 func readLLMSeed(path string) (llmSeedConfig, bool) {
-	data, err := os.ReadFile(path)
+	data, err := readLimitedFile(path, seedConfigFileLimitBytes)
 	if err != nil {
 		return llmSeedConfig{}, false
 	}
@@ -546,7 +566,7 @@ func readLLMSeed(path string) (llmSeedConfig, bool) {
 }
 
 func readBaiduTokenSeed() (BaiduToken, bool) {
-	data, err := os.ReadFile(defaultBaiduTokenPath())
+	data, err := readLimitedFile(defaultBaiduTokenPath(), seedConfigFileLimitBytes)
 	if err != nil {
 		return BaiduToken{}, false
 	}
@@ -575,7 +595,7 @@ func readSemanticScholarSeed(path string) (string, bool) {
 		return "", false
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := readLimitedFile(path, seedConfigFileLimitBytes)
 	if err != nil {
 		return "", false
 	}
@@ -587,6 +607,62 @@ func readSemanticScholarSeed(path string) (string, bool) {
 
 	key := strings.TrimSpace(seed.APIKey)
 	return key, key != ""
+}
+
+func readLimitedFile(path string, limit int64) ([]byte, error) {
+	return readLimitedFileWithOpen(path, limit, os.Open)
+}
+
+func readLimitedFileWithOpen(path string, limit int64, openFile func(string) (*os.File, error)) ([]byte, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("file byte limit must be positive")
+	}
+	if openFile == nil {
+		return nil, fmt.Errorf("file open function cannot be nil")
+	}
+
+	linkInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s is a symbolic link", path)
+	}
+	if !linkInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if linkInfo.Size() > limit {
+		return nil, fmt.Errorf("%s exceeds %d byte limit", path, limit)
+	}
+
+	file, err := openFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if !os.SameFile(linkInfo, info) {
+		return nil, fmt.Errorf("%s changed while opening", path)
+	}
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%s exceeds %d byte limit", path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s exceeds %d byte limit", path, limit)
+	}
+	return data, nil
 }
 
 func llmConfigFromSeed(seed llmSeedConfig) LLMConfig {

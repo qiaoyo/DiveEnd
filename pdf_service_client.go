@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,9 @@ type PDFServiceClient struct {
 	httpClient *http.Client
 }
 
+var pdfServiceUploadMaxBytes int64 = 50 * 1024 * 1024
+var pdfServiceExtractionMaxMarkdownBytes int64 = 2 * 1024 * 1024
+
 func NewPDFServiceClient(baseURL string) *PDFServiceClient {
 	return &PDFServiceClient{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
@@ -28,6 +32,58 @@ func NewPDFServiceClient(baseURL string) *PDFServiceClient {
 			Timeout: 2 * time.Minute,
 		},
 	}
+}
+
+func (c *PDFServiceClient) Status(ctx context.Context) *PDFServiceStatus {
+	status := &PDFServiceStatus{
+		Enabled:   c != nil && strings.TrimSpace(c.baseURL) != "",
+		CheckedAt: time.Now(),
+		Checks:    map[string]string{},
+	}
+	if c == nil || strings.TrimSpace(c.baseURL) == "" {
+		status.Message = "PDF 服务未配置"
+		return status
+	}
+	status.URL = c.baseURL
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health/ready", nil)
+	if err != nil {
+		status.Message = redactErrorText(err)
+		return status
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		status.Message = redactErrorText(err)
+		return status
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		Ready  bool                   `json:"ready"`
+		Checks map[string]interface{} `json:"checks"`
+	}
+	if err := decodePDFServiceJSON(resp.Body, &payload); err != nil {
+		status.Message = fmt.Sprintf("PDF 服务响应不可解析: %v", err)
+		return status
+	}
+	status.Healthy = resp.StatusCode >= 200 && resp.StatusCode < 300
+	status.Ready = payload.Ready
+	for key, value := range payload.Checks {
+		status.Checks[key] = fmt.Sprint(value)
+	}
+	if !status.Healthy {
+		status.Message = fmt.Sprintf("PDF 服务 HTTP %d", resp.StatusCode)
+	} else if !status.Ready {
+		status.Message = "PDF 服务未 ready"
+	} else {
+		status.Message = "PDF 服务 ready"
+	}
+	return status
 }
 
 type PDFParseResponse struct {
@@ -89,58 +145,198 @@ type PDFExtractionLLMConfig struct {
 }
 
 func (c *PDFServiceClient) ParsePDF(filePath string) (*PDFParseResponse, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open PDF file: %w", err)
-	}
-	defer file.Close()
+	return c.ParsePDFWithContext(context.Background(), filePath)
+}
 
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create upload body: %w", err)
-	}
-	if _, err := io.Copy(part, file); err != nil {
-		return nil, fmt.Errorf("failed to copy PDF file: %w", err)
-	}
-	if err := writer.WriteField("extract_sections", "true"); err != nil {
-		return nil, fmt.Errorf("failed to set extract_sections: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to finalize upload body: %w", err)
+func (c *PDFServiceClient) ParsePDFWithContext(ctx context.Context, filePath string) (*PDFParseResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/parse/upload", body)
+	body, contentType, uploadErrCh, err := streamingPDFUploadBody(filePath)
 	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/parse/upload", body)
+	if err != nil {
+		discardPDFUploadStream(body, uploadErrCh)
 		return nil, fmt.Errorf("failed to create parse request: %w", err)
 	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
+	req.ContentLength = -1
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		discardPDFUploadStream(body, uploadErrCh)
 		return nil, classifyPDFServiceCallError(c.baseURL, "parse", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, decodeServiceError("parse", resp)
+		serviceErr := decodeServiceError("parse", resp)
+		discardPDFUploadStream(body, uploadErrCh)
+		return nil, serviceErr
 	}
 
 	var result PDFParseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodePDFServiceJSON(resp.Body, &result); err != nil {
+		discardPDFUploadStream(body, uploadErrCh)
 		return nil, fmt.Errorf("failed to decode parse response: %w", err)
 	}
+	if err := finishPDFUploadStream(body, uploadErrCh); err != nil {
+		return nil, err
+	}
 	if !result.Success {
-		return nil, fmt.Errorf("pdf parse failed: %s", strings.TrimSpace(result.Error))
+		return nil, fmt.Errorf("pdf parse failed: %s", redactSensitiveText(result.Error))
 	}
 
 	return &result, nil
 }
 
+func streamingPDFUploadBody(filePath string) (io.ReadCloser, string, <-chan error, error) {
+	file, err := openPDFServiceUploadFile(filePath)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	reader, writer := io.Pipe()
+	multipartWriter := multipart.NewWriter(writer)
+	errCh := make(chan error, 1)
+
+	go func() {
+		var streamErr error
+		defer file.Close()
+		defer func() {
+			if closeErr := multipartWriter.Close(); streamErr == nil && closeErr != nil {
+				streamErr = closeErr
+			}
+			if streamErr != nil {
+				_ = writer.CloseWithError(streamErr)
+			} else {
+				_ = writer.Close()
+			}
+			errCh <- streamErr
+		}()
+
+		part, err := multipartWriter.CreateFormFile("file", filepath.Base(filePath))
+		if err != nil {
+			streamErr = fmt.Errorf("failed to create upload body: %w", err)
+			return
+		}
+		written, err := io.Copy(part, io.LimitReader(file, pdfServiceUploadMaxBytes+1))
+		if err != nil {
+			streamErr = fmt.Errorf("failed to stream PDF file: %w", err)
+			return
+		}
+		if written > pdfServiceUploadMaxBytes {
+			streamErr = fmt.Errorf("PDF file exceeds upload limit: %d bytes > %d bytes", written, pdfServiceUploadMaxBytes)
+			return
+		}
+		if err := multipartWriter.WriteField("extract_sections", "true"); err != nil {
+			streamErr = fmt.Errorf("failed to set extract_sections: %w", err)
+			return
+		}
+	}()
+
+	return reader, multipartWriter.FormDataContentType(), errCh, nil
+}
+
+func openPDFServiceUploadFile(filePath string) (*os.File, error) {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return nil, fmt.Errorf("PDF file path cannot be empty")
+	}
+	if !strings.EqualFold(filepath.Ext(filePath), ".pdf") {
+		return nil, fmt.Errorf("PDF service upload source is not a PDF")
+	}
+
+	linkInfo, err := os.Lstat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat PDF file: %w", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("PDF service upload source is a symbolic link")
+	}
+	if !linkInfo.Mode().IsRegular() || linkInfo.Size() == 0 {
+		return nil, fmt.Errorf("PDF service upload source is empty or invalid")
+	}
+	if linkInfo.Size() > pdfServiceUploadMaxBytes {
+		return nil, fmt.Errorf("PDF file exceeds upload limit: %d bytes > %d bytes", linkInfo.Size(), pdfServiceUploadMaxBytes)
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open PDF file: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to stat opened PDF file: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		_ = file.Close()
+		return nil, fmt.Errorf("PDF service upload source is empty or invalid")
+	}
+	if !os.SameFile(linkInfo, info) {
+		_ = file.Close()
+		return nil, fmt.Errorf("PDF service upload source changed while opening")
+	}
+	if info.Size() > pdfServiceUploadMaxBytes {
+		_ = file.Close()
+		return nil, fmt.Errorf("PDF file exceeds upload limit: %d bytes > %d bytes", info.Size(), pdfServiceUploadMaxBytes)
+	}
+
+	header := make([]byte, 5)
+	n, err := io.ReadFull(file, header)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to read PDF header: %w", err)
+	}
+	if n < len(header) || string(header) != "%PDF-" {
+		_ = file.Close()
+		return nil, fmt.Errorf("PDF service upload source is not a valid PDF")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to reset PDF stream: %w", err)
+	}
+	return file, nil
+}
+
+func finishPDFUploadStream(body io.Closer, errCh <-chan error) error {
+	_ = body.Close()
+	if err := <-errCh; err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		return err
+	}
+	return nil
+}
+
+func discardPDFUploadStream(body io.Closer, errCh <-chan error) {
+	_ = body.Close()
+	<-errCh
+}
+
 func (c *PDFServiceClient) ExtractContent(markdown string, llmConfig PDFExtractionLLMConfig) (*PDFExtractResponse, error) {
+	return c.ExtractContentWithContext(context.Background(), markdown, llmConfig)
+}
+
+func (c *PDFServiceClient) ExtractContentWithContext(ctx context.Context, markdown string, llmConfig PDFExtractionLLMConfig) (*PDFExtractResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	llmConfig = normalizePDFExtractionLLMConfig(llmConfig)
+	if err := validatePDFExtractionLLMConfig(llmConfig); err != nil {
+		return nil, err
+	}
+	markdown = strings.TrimSpace(markdown)
+	if markdown == "" {
+		return nil, fmt.Errorf("pdf extraction markdown is empty")
+	}
+	if int64(len(markdown)) > pdfServiceExtractionMaxMarkdownBytes {
+		return nil, fmt.Errorf("pdf extraction markdown exceeds limit: %d bytes > %d bytes", len(markdown), pdfServiceExtractionMaxMarkdownBytes)
+	}
 
 	requestBody := map[string]any{
 		"markdown":        markdown,
@@ -158,7 +354,7 @@ func (c *PDFServiceClient) ExtractContent(markdown string, llmConfig PDFExtracti
 		return nil, fmt.Errorf("failed to marshal extraction request: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/extract/", bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/extract/", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create extraction request: %w", err)
 	}
@@ -175,17 +371,27 @@ func (c *PDFServiceClient) ExtractContent(markdown string, llmConfig PDFExtracti
 	}
 
 	var result PDFExtractResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodePDFServiceJSON(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode extraction response: %w", err)
 	}
 	if !result.Success {
-		return nil, fmt.Errorf("pdf extraction failed: %s", strings.TrimSpace(result.Error))
+		return nil, fmt.Errorf("pdf extraction failed: %s", redactSensitiveText(result.Error))
 	}
 	if result.Data == nil {
 		return nil, fmt.Errorf("pdf extraction failed: empty data payload")
 	}
 
 	return &result, nil
+}
+
+func validatePDFExtractionLLMConfig(config PDFExtractionLLMConfig) error {
+	if strings.TrimSpace(config.APIKey) == "" {
+		return fmt.Errorf("pdf extraction LLM API key is not configured for provider %q; configure Weak LLM API Key in Settings > Credentials, or configure the legacy strong LLM key used as fallback", config.Provider)
+	}
+	if strings.TrimSpace(config.Model) == "" {
+		return fmt.Errorf("pdf extraction LLM model is not configured for provider %q", config.Provider)
+	}
+	return nil
 }
 
 func normalizePDFExtractionLLMConfig(config PDFExtractionLLMConfig) PDFExtractionLLMConfig {
@@ -225,9 +431,9 @@ func classifyPDFServiceCallError(baseURL, operation string, err error) error {
 		strings.Contains(message, "connection reset by peer") ||
 		(errors.As(err, &netErr) && netErr.Timeout()) {
 		return fmt.Errorf(
-			"failed to call PDF %s service: 无法连接 %s。请先启动 PDF 服务：cd services/pdf_service && pip install -r requirements.txt && uvicorn app.main:app --reload --host 0.0.0.0 --port 50051",
+			"failed to call PDF %s service: 无法连接 %s。请先启动 PDF 服务：cd services/pdf_service && pip install -r requirements.txt && uvicorn app.main:app --reload --host 127.0.0.1 --port 50051",
 			operation,
-			baseURL,
+			redactSensitiveText(baseURL),
 		)
 	}
 
@@ -235,7 +441,10 @@ func classifyPDFServiceCallError(baseURL, operation string, err error) error {
 }
 
 func decodeServiceError(operation string, resp *http.Response) error {
-	payload, _ := io.ReadAll(resp.Body)
+	payload, readErr := readServiceErrorHTTPBody(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("%s service returned %d: %v", operation, resp.StatusCode, readErr)
+	}
 
 	var structured struct {
 		Error      string `json:"error"`
@@ -248,7 +457,7 @@ func decodeServiceError(operation string, resp *http.Response) error {
 			message = strings.TrimSpace(structured.Detail)
 		}
 		if message != "" {
-			return fmt.Errorf("%s service returned %d: %s", operation, resp.StatusCode, message)
+			return fmt.Errorf("%s service returned %d: %s", operation, resp.StatusCode, redactSensitiveText(message))
 		}
 	}
 
@@ -256,5 +465,5 @@ func decodeServiceError(operation string, resp *http.Response) error {
 	if trimmed == "" {
 		trimmed = http.StatusText(resp.StatusCode)
 	}
-	return fmt.Errorf("%s service returned %d: %s", operation, resp.StatusCode, trimmed)
+	return fmt.Errorf("%s service returned %d: %s", operation, resp.StatusCode, redactSensitiveText(trimmed))
 }

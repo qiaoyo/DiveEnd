@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -185,14 +184,8 @@ func (a *App) preprocessDeepStartResults(
 		return papers, batch, nil
 	}
 
-	pdfDir := filepath.Join(a.config.DataPath, "deepstart_cache", sessionID, "pdf")
-	markdownDir := filepath.Join(a.config.DataPath, "deepstart_cache", sessionID, "markdown")
-	if err := os.MkdirAll(pdfDir, 0700); err != nil {
-		return papers, batch, err
-	}
-	if err := os.MkdirAll(markdownDir, 0700); err != nil {
-		return papers, batch, err
-	}
+	cacheSessionID := safeSyncSegment(sessionID)
+	cacheRoot := filepath.Join(a.config.DataPath, "deepstart_cache")
 
 	processed := make([]SearchPaper, 0, len(papers))
 	weak := a.currentWeakLLM()
@@ -203,8 +196,20 @@ func (a *App) preprocessDeepStartResults(
 
 		paper := papers[idx]
 		cacheID := deepStartCachePaperID(paper, idx)
-		pdfPath := filepath.Join(pdfDir, cacheID+".pdf")
-		markdownPath := filepath.Join(markdownDir, cacheID+".md")
+		pdfPath, err := ensureManagedFileParent(
+			cacheRoot,
+			filepath.Join(cacheRoot, cacheSessionID, "pdf", cacheID+".pdf"),
+		)
+		if err != nil {
+			return processed, batch, err
+		}
+		markdownPath, err := ensureManagedFileParent(
+			cacheRoot,
+			filepath.Join(cacheRoot, cacheSessionID, "markdown", cacheID+".md"),
+		)
+		if err != nil {
+			return processed, batch, err
+		}
 
 		paper.PreprocessStatus = "pending"
 		paper.ParseStatus = "pending"
@@ -254,7 +259,7 @@ func (a *App) preprocessDeepStartResults(
 			batch,
 			stats,
 		)
-		if err := downloadWithCandidates(ctx, candidates, pdfPath); err != nil {
+		if err := deepStartDownloadWithCandidates(ctx, candidates, pdfPath); err != nil {
 			if isDeepStartCancelledError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return processed, batch, err
 			}
@@ -307,7 +312,7 @@ func (a *App) preprocessDeepStartResults(
 			batch,
 			stats,
 		)
-		parseResult, err := a.pdfService.ParsePDF(pdfPath)
+		parseResult, err := a.pdfService.ParsePDFWithContext(ctx, pdfPath)
 		if err != nil {
 			if isDeepStartCancelledError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return processed, batch, err
@@ -340,7 +345,7 @@ func (a *App) preprocessDeepStartResults(
 			continue
 		}
 
-		if err := os.WriteFile(markdownPath, []byte(parseResult.Markdown), 0600); err != nil {
+		if err := writeFileAtomic(markdownPath, []byte(parseResult.Markdown), 0600); err != nil {
 			batch.Failed++
 			batch.Completed++
 			paper.PreprocessStatus = "failed"
@@ -382,7 +387,7 @@ func (a *App) preprocessDeepStartResults(
 			batch,
 			stats,
 		)
-		profile, err := weak.ExtractPaperProfile(markdown)
+		profile, err := extractPaperProfileWithContext(ctx, weak, markdown)
 		if err != nil {
 			if isDeepStartCancelledError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return processed, batch, err
@@ -506,6 +511,8 @@ func trimErrorForProgress(err error) string {
 	runes := []rune(message)
 	return string(runes[:120]) + "..."
 }
+
+var deepStartDownloadWithCandidates = downloadWithCandidates
 
 func downloadWithCandidates(ctx context.Context, candidates []string, targetPath string) error {
 	if len(candidates) == 0 {
@@ -758,6 +765,7 @@ func (a *App) SupplementDeepStartSearch(sessionID, query string, perSourceLimit 
 	})
 
 	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+		taskCtx,
 		detail.Summary,
 		messages,
 		detail.CurrentResults,

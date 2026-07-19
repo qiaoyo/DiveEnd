@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const screeningCompletionThreshold = 5
@@ -71,21 +71,30 @@ func (a *App) UploadScreeningFiles(sessionID string, filePaths []string) (*Scree
 
 	var papers []ScreeningPaper
 	now := time.Now()
-	for _, path := range normalizedPaths {
-		info, err := os.Stat(path)
+	for _, sourcePath := range normalizedPaths {
+		info, err := os.Stat(sourcePath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to access %s: %w", path, err)
+			return nil, fmt.Errorf("failed to access %s: %w", sourcePath, err)
 		}
 		if info.IsDir() {
 			continue
 		}
+		paperID := uuid.NewString()
+		managedPath, err := a.copyScreeningPDFToManagedPath(sessionID, paperID, sourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to import %s into screening storage: %w", sourcePath, err)
+		}
+		managedInfo, err := os.Stat(managedPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify imported PDF %s: %w", managedPath, err)
+		}
 
 		papers = append(papers, ScreeningPaper{
-			ID:        uuid.NewString(),
+			ID:        paperID,
 			SessionID: sessionID,
-			FileName:  filepath.Base(path),
-			FilePath:  path,
-			FileSize:  info.Size(),
+			FileName:  filepath.Base(sourcePath),
+			FilePath:  managedPath,
+			FileSize:  managedInfo.Size(),
 			Status:    "pending",
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -154,7 +163,7 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 		progress.ErrorMessage = ""
 		a.storeExtractProgress(progress)
 
-		parseResult, err := a.pdfService.ParsePDF(paper.FilePath)
+		parseResult, err := a.pdfService.ParsePDFWithContext(a.ctx, paper.FilePath)
 		if err != nil {
 			failedCount++
 			if firstErr == nil {
@@ -169,7 +178,7 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 			continue
 		}
 
-		extractResult, err := a.pdfService.ExtractContent(parseResult.Markdown, extractionLLMConfig)
+		extractResult, err := a.pdfService.ExtractContentWithContext(a.ctx, parseResult.Markdown, extractionLLMConfig)
 		if err != nil {
 			failedCount++
 			if firstErr == nil {
@@ -223,7 +232,7 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 		progress.Status = "error"
 		progress.ErrorMessage = fmt.Sprintf("完成 %d/%d，失败 %d：%v", progress.Completed, progress.Total, failedCount, firstErr)
 		a.storeExtractProgress(progress)
-		return cloneExtractProgress(progress), fmt.Errorf(progress.ErrorMessage)
+		return cloneExtractProgress(progress), fmt.Errorf("%s", progress.ErrorMessage)
 	}
 
 	progress.Status = "completed"
@@ -475,14 +484,27 @@ func (a *App) CancelScreening(sessionID string) error {
 		return err
 	}
 
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("sessionID is required")
+	}
+
 	a.stateMu.Lock()
 	delete(a.extractProgress, sessionID)
 	a.stateMu.Unlock()
+
+	if err := a.cleanupScreeningSessionStorage(sessionID); err != nil {
+		return err
+	}
 
 	return a.db.DeleteScreeningSession(sessionID)
 }
 
 func (a *App) buildNextScreeningNode(sessionTitle string, papers []ScreeningPaper, history []PathHistoryItem) (*ScreeningDecisionNode, error) {
+	return a.buildNextScreeningNodeWithContext(a.ctx, sessionTitle, papers, history)
+}
+
+func (a *App) buildNextScreeningNodeWithContext(ctx context.Context, sessionTitle string, papers []ScreeningPaper, history []PathHistoryItem) (*ScreeningDecisionNode, error) {
 	activePapers := screeningCandidatePapers(papers)
 	if len(activePapers) == 0 {
 		return nil, fmt.Errorf("no candidate papers remain")
@@ -496,7 +518,7 @@ func (a *App) buildNextScreeningNode(sessionTitle string, papers []ScreeningPape
 		return nil, fmt.Errorf("LLM client is not initialized")
 	}
 
-	node, err := strong.AnalyzeScreening(ScreeningAIRequest{
+	node, err := analyzeScreeningWithContext(ctx, strong, ScreeningAIRequest{
 		SessionTitle: sessionTitle,
 		Papers:       activePapers,
 		PathHistory:  history,
@@ -525,6 +547,9 @@ func (a *App) persistScreeningNode(sessionID string, node *ScreeningDecisionNode
 func (a *App) resolveFolderID(folderID string) (string, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID != "" {
+		if _, err := a.db.GetFolderByID(folderID); err != nil {
+			return "", fmt.Errorf("folder not found: %w", err)
+		}
 		return folderID, nil
 	}
 
@@ -545,9 +570,7 @@ func (a *App) storeExtractProgress(progress *ExtractProgress) {
 	a.extractProgress[progress.SessionID] = cloned
 	a.stateMu.Unlock()
 
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "extract-progress", cloned)
-	}
+	a.emitEvent("extract-progress", cloned)
 }
 
 func (a *App) loadExtractProgress(sessionID string) *ExtractProgress {
@@ -591,6 +614,146 @@ func normalizeScreeningPaths(filePaths []string) []string {
 	}
 	sort.Strings(normalized)
 	return normalized
+}
+
+func (a *App) copyScreeningPDFToManagedPath(sessionID, paperID, sourcePath string) (string, error) {
+	dataPath := strings.TrimSpace(a.config.DataPath)
+	if dataPath == "" {
+		return "", fmt.Errorf("data path is not configured")
+	}
+	fileName := filepath.Base(sourcePath)
+	if strings.TrimSpace(fileName) == "" || fileName == "." {
+		fileName = paperID + ".pdf"
+	}
+	screeningRoot := filepath.Join(dataPath, "screening")
+	targetPath := filepath.Join(screeningSessionStorageDir(dataPath, sessionID), safeSyncSegment(paperID), fileName)
+	if _, ok := managedPathInsideRoot(screeningRoot, targetPath); !ok {
+		return "", fmt.Errorf("screening pdf target is outside managed storage")
+	}
+	source, _, err := openValidatedLocalPDFFile(sourcePath)
+	if err != nil {
+		return "", err
+	}
+	defer source.Close()
+	targetPath, err = ensureManagedFileParent(screeningRoot, targetPath)
+	if err != nil {
+		return "", err
+	}
+	if err := copyOpenedPDFToTarget(source, targetPath, validateLocalPDFFile); err != nil {
+		return "", err
+	}
+	return targetPath, nil
+}
+
+func screeningSessionStorageDir(dataPath, sessionID string) string {
+	return filepath.Join(strings.TrimSpace(dataPath), "screening", safeSyncSegment(sessionID))
+}
+
+func (a *App) cleanupScreeningSessionStorage(sessionID string) error {
+	sessionDir := screeningSessionStorageDir(a.config.DataPath, sessionID)
+	screeningRoot := filepath.Join(a.config.DataPath, "screening")
+
+	detail, err := a.db.GetScreeningSessionDetail(sessionID)
+	if err != nil {
+		if _, ok := managedPathInsideRoot(screeningRoot, sessionDir); !ok {
+			return nil
+		}
+		return removeManagedPathIfPresent(screeningRoot, sessionDir)
+	}
+
+	libraryPapers, err := a.db.GetPapers("")
+	if err != nil {
+		return err
+	}
+
+	dirCandidates := map[string]struct{}{sessionDir: {}}
+	for _, screeningPaper := range detail.Papers {
+		filePath := strings.TrimSpace(screeningPaper.FilePath)
+		if filePath == "" {
+			continue
+		}
+		managedPath, ok := managedPathInsideRoot(sessionDir, filePath)
+		if !ok {
+			continue
+		}
+
+		referenced := false
+		for _, libraryPaper := range libraryPapers {
+			if sameExistingLocalPath(managedPath, libraryPaper.PDFPath) {
+				referenced = true
+				break
+			}
+		}
+		if !referenced {
+			if err := removeManagedFileInsideRoot(screeningRoot, managedPath); err != nil {
+				return err
+			}
+		}
+		dirCandidates[filepath.Dir(managedPath)] = struct{}{}
+	}
+
+	return removeEmptyDirectoriesInsideRoot(screeningRoot, dirCandidates)
+}
+
+func removeManagedFileInsideRoot(rootPath, candidatePath string) error {
+	managedPath, err := managedPathWithPlainExistingParent(rootPath, candidatePath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(managedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return nil
+	}
+	if err := removeFileAndSyncDir(managedPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeEmptyDirectoriesInsideRoot(rootPath string, candidates map[string]struct{}) error {
+	dirs := make([]string, 0, len(candidates))
+	for candidate := range candidates {
+		managedPath, err := managedPathWithPlainExistingParent(rootPath, candidate)
+		if err != nil {
+			return err
+		}
+		dirs = append(dirs, managedPath)
+	}
+	sort.SliceStable(dirs, func(i, j int) bool {
+		return len(dirs[i]) > len(dirs[j])
+	})
+	for _, dir := range dirs {
+		if err := removeDirectoryAndSyncParent(dir); err != nil && !os.IsNotExist(err) && !isDirectoryNotEmptyError(err) {
+			return err
+		}
+	}
+	rootInfo, err := os.Lstat(rootPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("managed root directory is a symbolic link")
+	}
+	if !rootInfo.IsDir() {
+		return fmt.Errorf("managed root path is not a directory")
+	}
+	return syncDirectory(rootPath)
+}
+
+func isDirectoryNotEmptyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "directory not empty")
 }
 
 func screeningCandidatePapers(papers []ScreeningPaper) []ScreeningPaper {

@@ -224,6 +224,29 @@ describe('SessionDetailPanel', () => {
     expect(screen.getByText('完整摘要')).toBeInTheDocument();
   });
 
+  it('redacts sensitive values in clipboard copy failures', async () => {
+    const writeText = vi.fn().mockRejectedValueOnce(
+      new Error('clipboard failed api_key=sk-clipboard-secret and access_token=clipboard-token-secret')
+    );
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<SessionDetailPanel />);
+
+    fireEvent.click(screen.getByText('Unified Embodied Agent Benchmark'));
+    fireEvent.click(screen.getByRole('button', { name: '复制摘要' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalled();
+      expect(document.body.textContent).toContain('api_key=[redacted]');
+      expect(document.body.textContent).toContain('access_token=[redacted]');
+    });
+    expect(document.body.textContent).not.toContain('sk-clipboard-secret');
+    expect(document.body.textContent).not.toContain('clipboard-token-secret');
+  });
+
   it('opens create-folder modal and submits', async () => {
     render(<SessionDetailPanel />);
 
@@ -240,6 +263,27 @@ describe('SessionDetailPanel', () => {
         expect.objectContaining({ path: 'Robotics/VLA/My Folder' })
       );
     });
+  });
+
+  it('redacts sensitive values in create-folder modal errors', async () => {
+    backendMocks.createFolderNode.mockRejectedValueOnce(
+      new Error('create failed api_key=sk-folder-secret and access_token=folder-token-secret')
+    );
+
+    render(<SessionDetailPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /新建文件夹/i }));
+    fireEvent.change(screen.getByPlaceholderText('输入路径，例如 Robotics/VLA/Benchmarks'), {
+      target: { value: 'Robotics/VLA/My Folder' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^创建$/ }));
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('api_key=[redacted]');
+      expect(document.body.textContent).toContain('access_token=[redacted]');
+    });
+    expect(document.body.textContent).not.toContain('sk-folder-secret');
+    expect(document.body.textContent).not.toContain('folder-token-secret');
   });
 
   it('does not submit create-folder on Enter key', async () => {
@@ -294,6 +338,72 @@ describe('SessionDetailPanel', () => {
       );
     });
     expect(backendMocks.rerunDeepStartSearch).not.toHaveBeenCalled();
+  });
+
+  it('redacts sensitive values in chat runtime failures', async () => {
+    backendMocks.replyDeepStartSession.mockRejectedValue(
+      new Error('LLM failed with api_key=sk-session-secret and access_token=session-token-secret')
+    );
+    render(<SessionDetailPanel />);
+
+    fireEvent.change(screen.getByPlaceholderText('补充你的筛选偏好'), {
+      target: { value: '请重新压缩候选' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      expect(backendMocks.replyDeepStartSession).toHaveBeenCalled();
+      expect(document.body.textContent).toContain('api_key=[redacted]');
+      expect(document.body.textContent).toContain('access_token=[redacted]');
+    });
+    expect(document.body.textContent).not.toContain('sk-session-secret');
+    expect(document.body.textContent).not.toContain('session-token-secret');
+  });
+
+  it('redacts sensitive values in undo failures', async () => {
+    backendMocks.undoDeepStartNarrow.mockRejectedValueOnce(
+      new Error('undo failed api_key=sk-undo-secret and access_token=undo-token-secret')
+    );
+
+    render(<SessionDetailPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /回退上一轮/i }));
+
+    await waitFor(() => {
+      const error = useAppStore.getState().error ?? '';
+      expect(error).toContain('api_key=[redacted]');
+      expect(error).toContain('access_token=[redacted]');
+      expect(error).not.toContain('sk-undo-secret');
+      expect(error).not.toContain('undo-token-secret');
+    });
+  });
+
+  it('redacts sensitive values in DeepStart progress event messages', async () => {
+    let progressHandler: ((event: any) => void) | null = null;
+    backendMocks.onDeepStartProgress.mockImplementation((handler) => {
+      progressHandler = handler;
+      return () => undefined;
+    });
+
+    render(<SessionDetailPanel />);
+
+    await act(async () => {
+      progressHandler?.({
+        sessionId: 'session-1',
+        phase: 'cancelling',
+        message: 'stopping with Authorization: Bearer progress-token-secret and client_secret=progress-client-secret',
+        elapsedSeconds: 1,
+        estimatedRemainingSeconds: 1,
+        total: 1,
+        completed: 0,
+        overallPercent: 12,
+      });
+    });
+
+    expect(document.body.textContent).toContain('Bearer [redacted]');
+    expect(document.body.textContent).toContain('client_secret=[redacted]');
+    expect(document.body.textContent).not.toContain('progress-token-secret');
+    expect(document.body.textContent).not.toContain('progress-client-secret');
   });
 
   it('keeps top rerun path separated from chat reply path', async () => {

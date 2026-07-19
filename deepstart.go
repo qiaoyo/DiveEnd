@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) ListDeepStartSessions() ([]DeepStartSessionSummary, error) {
@@ -187,6 +186,7 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 		return nil, err
 	}
 	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+		taskCtx,
 		summary,
 		[]DeepStartMessage{userMessage},
 		results,
@@ -325,6 +325,7 @@ func (a *App) ReplyDeepStartSession(sessionID, message string) (*DeepStartSessio
 		searchStats = detail.CurrentAnalysis.SearchStats
 	}
 	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+		a.ctx,
 		detail.Summary,
 		messages,
 		detail.CurrentResults,
@@ -564,6 +565,7 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 		return nil, err
 	}
 	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+		taskCtx,
 		detail.Summary,
 		messages,
 		results,
@@ -853,13 +855,11 @@ func (a *App) enrichDeepStartResults(
 }
 
 func (a *App) emitDeepStartProgress(progress DeepStartProgressEvent) {
-	if a.ctx == nil {
-		return
-	}
-	runtime.EventsEmit(a.ctx, "deepstart-progress", progress)
+	a.emitEvent("deepstart-progress", progress)
 }
 
 func (a *App) generateDeepStartAnalysis(
+	ctx context.Context,
 	summary DeepStartSessionSummary,
 	messages []DeepStartMessage,
 	results []SearchPaper,
@@ -886,7 +886,7 @@ func (a *App) generateDeepStartAnalysis(
 		strong = a.llm
 	}
 	if strong != nil && !shouldSkipLLM {
-		if response, err := strong.AnalyzeDeepStart(request); err == nil {
+		if response, err := analyzeDeepStartWithContext(ctx, strong, request); err == nil {
 			title = response.Title
 			analysis = response.Analysis
 			if searchWarning != "" {

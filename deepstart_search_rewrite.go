@@ -18,6 +18,26 @@ func (a *App) rewriteDeepStartQueries(ctx context.Context, query string) ([]stri
 
 	fallback := fallbackDeepStartRewriteQueries(query)
 	if weak := a.currentWeakLLM(); weak != nil {
+		if err := ctx.Err(); err != nil {
+			return fallback, fmt.Sprintf("弱模型 query 重写已取消，已回退：%v", err)
+		}
+		if rewriter, ok := weak.(contextQueryRewriter); ok {
+			rewritten, err := rewriter.RewriteSearchQueriesWithContext(ctx, query)
+			if err == nil {
+				queries := uniqueStrings(append(compactStrings(rewritten, 3), fallback...))
+				if len(queries) > 3 {
+					queries = queries[:3]
+				}
+				if len(queries) > 0 {
+					return queries, ""
+				}
+			}
+			queries := fallback
+			if len(queries) > 0 {
+				return queries, fmt.Sprintf("弱模型 query 重写失败，已回退：%v", err)
+			}
+			return []string{query}, fmt.Sprintf("弱模型 query 重写失败，已回退原始 query：%v", err)
+		}
 		if rewriter, ok := weak.(deepStartQueryRewriter); ok {
 			rewritten, err := rewriter.RewriteSearchQueries(query)
 			if err == nil {

@@ -4,9 +4,17 @@ frontend/node_modules/
 frontend/node_modules.worktrees/
 node_modules/
 .worktrees/
+.DS_Store
+auth.json
+config.toml
+test.txt
+downloaded.txt
+baidupan_test.py
+baidu_pcs.go.tmpl
 baiduyun_token.json
 config/weak_llm.json
 config/strong_llm.json
+config/stroing_llm.json
 config/semantic_scholar.json
 DiveEnd
 data/diveend.db

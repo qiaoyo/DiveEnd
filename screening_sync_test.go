@@ -166,6 +166,343 @@ func TestAppScreeningFlowImportsSelectedPapers(t *testing.T) {
 	}
 }
 
+func TestCancelScreeningRemovesManagedSessionFiles(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	sourcePath := filepath.Join(t.TempDir(), "cancel-me.pdf")
+	if err := os.WriteFile(sourcePath, []byte("%PDF-1.4 mock"), 0o600); err != nil {
+		t.Fatalf("WriteFile source pdf error = %v", err)
+	}
+
+	session, err := app.CreateScreeningSession("Cancel cleanup")
+	if err != nil {
+		t.Fatalf("CreateScreeningSession() error = %v", err)
+	}
+	detail, err := app.UploadScreeningFiles(session.ID, []string{sourcePath})
+	if err != nil {
+		t.Fatalf("UploadScreeningFiles() error = %v", err)
+	}
+	if len(detail.Papers) != 1 {
+		t.Fatalf("expected one uploaded paper, got %+v", detail.Papers)
+	}
+	if _, err := os.Stat(detail.Papers[0].FilePath); err != nil {
+		t.Fatalf("expected managed screening pdf to exist: %v", err)
+	}
+	sessionDir := screeningSessionStorageDir(config.DataPath, session.ID)
+	if _, err := os.Stat(sessionDir); err != nil {
+		t.Fatalf("expected managed screening session dir to exist: %v", err)
+	}
+
+	if err := app.CancelScreening(session.ID); err != nil {
+		t.Fatalf("CancelScreening() error = %v", err)
+	}
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("expected managed screening session dir to be removed, stat err=%v", err)
+	}
+	if _, err := app.db.GetScreeningSession(session.ID); err == nil {
+		t.Fatal("expected screening session database row to be removed")
+	}
+}
+
+func TestCancelScreeningPreservesLibraryReferencedFiles(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	sourcePath := filepath.Join(t.TempDir(), "keep-me.pdf")
+	if err := os.WriteFile(sourcePath, []byte("%PDF-1.4 mock"), 0o600); err != nil {
+		t.Fatalf("WriteFile source pdf error = %v", err)
+	}
+
+	session, err := app.CreateScreeningSession("Preserve referenced PDF")
+	if err != nil {
+		t.Fatalf("CreateScreeningSession() error = %v", err)
+	}
+	detail, err := app.UploadScreeningFiles(session.ID, []string{sourcePath})
+	if err != nil {
+		t.Fatalf("UploadScreeningFiles() error = %v", err)
+	}
+	if len(detail.Papers) != 1 {
+		t.Fatalf("expected one uploaded paper, got %+v", detail.Papers)
+	}
+
+	folders, err := app.db.GetFolders()
+	if err != nil {
+		t.Fatalf("GetFolders() error = %v", err)
+	}
+	if len(folders) == 0 {
+		t.Fatal("expected default folder")
+	}
+	libraryPaper := screeningPaperToLibraryPaper(detail.Papers[0], folders[0].ID)
+	if err := app.db.UpsertPaper(&libraryPaper); err != nil {
+		t.Fatalf("UpsertPaper(libraryPaper) error = %v", err)
+	}
+
+	if err := app.CancelScreening(session.ID); err != nil {
+		t.Fatalf("CancelScreening() error = %v", err)
+	}
+	if _, err := os.Stat(libraryPaper.PDFPath); err != nil {
+		t.Fatalf("expected library-referenced screening PDF to be preserved: %v", err)
+	}
+	if _, err := app.db.GetScreeningSession(session.ID); err == nil {
+		t.Fatal("expected screening session database row to be removed")
+	}
+}
+
+func TestUploadScreeningFilesRejectsOversizedPDF(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	oldMaxBytes := pdfDownloadMaxBytes
+	pdfDownloadMaxBytes = int64(len("%PDF-1.4\n"))
+	t.Cleanup(func() { pdfDownloadMaxBytes = oldMaxBytes })
+
+	sourcePath := filepath.Join(t.TempDir(), "oversized.pdf")
+	if err := os.WriteFile(sourcePath, []byte("%PDF-1.4\noversized screening upload\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile oversized pdf error = %v", err)
+	}
+
+	session, err := app.CreateScreeningSession("Oversized upload")
+	if err != nil {
+		t.Fatalf("CreateScreeningSession() error = %v", err)
+	}
+	if _, err := app.UploadScreeningFiles(session.ID, []string{sourcePath}); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected oversized pdf error, got %v", err)
+	}
+
+	detail, err := app.db.GetScreeningSessionDetail(session.ID)
+	if err != nil {
+		t.Fatalf("GetScreeningSessionDetail() error = %v", err)
+	}
+	if len(detail.Papers) != 0 {
+		t.Fatalf("expected no screening papers after rejected upload, got %+v", detail.Papers)
+	}
+	sessionDir := screeningSessionStorageDir(config.DataPath, session.ID)
+	if _, err := os.Stat(sessionDir); err == nil {
+		t.Fatalf("expected rejected upload not to create session storage dir %q", sessionDir)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected session storage stat error: %v", err)
+	}
+}
+
+func TestUploadScreeningFilesRejectsSymlinkPDF(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.pdf")
+	if err := os.WriteFile(targetPath, []byte("%PDF-1.4\nscreening symlink target\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile symlink target error = %v", err)
+	}
+	linkPath := filepath.Join(tempDir, "linked.pdf")
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	session, err := app.CreateScreeningSession("Symlink upload")
+	if err != nil {
+		t.Fatalf("CreateScreeningSession() error = %v", err)
+	}
+	if _, err := app.UploadScreeningFiles(session.ID, []string{linkPath}); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("expected symlink pdf error, got %v", err)
+	}
+
+	detail, err := app.db.GetScreeningSessionDetail(session.ID)
+	if err != nil {
+		t.Fatalf("GetScreeningSessionDetail() error = %v", err)
+	}
+	if len(detail.Papers) != 0 {
+		t.Fatalf("expected no screening papers after rejected symlink upload, got %+v", detail.Papers)
+	}
+	sessionDir := screeningSessionStorageDir(config.DataPath, session.ID)
+	if _, err := os.Stat(sessionDir); err == nil {
+		t.Fatalf("expected rejected symlink upload not to create session storage dir %q", sessionDir)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected session storage stat error: %v", err)
+	}
+}
+
+func TestUploadScreeningFilesRejectsSymlinkedStorageRoot(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	sourcePath := filepath.Join(t.TempDir(), "screening.pdf")
+	if err := os.WriteFile(sourcePath, []byte("%PDF-1.4\nscreening root symlink\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile source pdf error = %v", err)
+	}
+
+	outsideDir := t.TempDir()
+	screeningRoot := filepath.Join(config.DataPath, "screening")
+	if err := os.Symlink(outsideDir, screeningRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	session, err := app.CreateScreeningSession("Symlink storage root")
+	if err != nil {
+		t.Fatalf("CreateScreeningSession() error = %v", err)
+	}
+	if _, err := app.UploadScreeningFiles(session.ID, []string{sourcePath}); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("expected symlinked screening root error, got %v", err)
+	}
+
+	entries, readErr := os.ReadDir(outsideDir)
+	if readErr != nil {
+		t.Fatalf("ReadDir outside screening target error = %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no screening files outside DataPath, got %v", entries)
+	}
+	detail, err := app.db.GetScreeningSessionDetail(session.ID)
+	if err != nil {
+		t.Fatalf("GetScreeningSessionDetail() error = %v", err)
+	}
+	if len(detail.Papers) != 0 {
+		t.Fatalf("expected no screening papers after rejected storage root, got %+v", detail.Papers)
+	}
+}
+
+func TestCancelScreeningRejectsSymlinkedStorageRoot(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	session, err := app.CreateScreeningSession("Cancel symlink root")
+	if err != nil {
+		t.Fatalf("CreateScreeningSession() error = %v", err)
+	}
+	outsideDir := t.TempDir()
+	outsideSessionDir := filepath.Join(outsideDir, safeSyncSegment(session.ID))
+	if err := os.MkdirAll(outsideSessionDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll outside session dir error = %v", err)
+	}
+	sentinelPath := filepath.Join(outsideSessionDir, "sentinel.txt")
+	if err := os.WriteFile(sentinelPath, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("WriteFile outside sentinel error = %v", err)
+	}
+	screeningRoot := filepath.Join(config.DataPath, "screening")
+	if err := os.Symlink(outsideDir, screeningRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	paperPath := filepath.Join(screeningSessionStorageDir(config.DataPath, session.ID), "paper-1", "paper.pdf")
+	if err := app.db.UpsertScreeningPaper(&ScreeningPaper{
+		ID:        "screening-symlink-root-paper",
+		SessionID: session.ID,
+		FileName:  "paper.pdf",
+		FilePath:  paperPath,
+		FileSize:  32,
+		Status:    "pending",
+	}); err != nil {
+		t.Fatalf("UpsertScreeningPaper() error = %v", err)
+	}
+
+	err = app.CancelScreening(session.ID)
+	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("expected symlinked screening root cleanup error, got %v", err)
+	}
+	if _, statErr := os.Stat(sentinelPath); statErr != nil {
+		t.Fatalf("expected outside sentinel to remain after rejected cleanup, stat err=%v", statErr)
+	}
+	if _, err := app.db.GetScreeningSession(session.ID); err != nil {
+		t.Fatalf("expected session row to remain when cleanup fails, got %v", err)
+	}
+}
+
+func TestAppExtractPaperContentReportsMissingLLMKeyBeforeExtractCall(t *testing.T) {
+	app := NewApp()
+	config := defaultAppConfig()
+	config.DataPath = t.TempDir()
+	if err := app.applyConfig(config, true); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.db.Close() })
+
+	extractCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/parse/upload":
+			_ = json.NewEncoder(w).Encode(PDFParseResponse{
+				Success:  true,
+				Markdown: "# Example\n\n## Abstract\nA paper",
+				Metadata: map[string]any{"title": "Example"},
+				Sections: []string{"Example", "  Abstract"},
+			})
+		case "/extract/":
+			extractCalled = true
+			http.Error(w, "should not be called", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app.pdfService = NewPDFServiceClient(server.URL)
+
+	pdfPath := filepath.Join(t.TempDir(), "paper.pdf")
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.4 mock"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	session, err := app.CreateScreeningSession("Missing LLM")
+	if err != nil {
+		t.Fatalf("CreateScreeningSession() error = %v", err)
+	}
+	if _, err := app.UploadScreeningFiles(session.ID, []string{pdfPath}); err != nil {
+		t.Fatalf("UploadScreeningFiles() error = %v", err)
+	}
+
+	progress, err := app.ExtractPaperContent(session.ID)
+	if err == nil {
+		t.Fatal("expected ExtractPaperContent() to fail without a configured LLM API key")
+	}
+	if !strings.Contains(err.Error(), "API key") {
+		t.Fatalf("expected actionable API key error, got %v", err)
+	}
+	if progress == nil || progress.Status != "error" || !strings.Contains(progress.ErrorMessage, "API key") {
+		t.Fatalf("expected progress to include API key error, got %+v", progress)
+	}
+	if extractCalled {
+		t.Fatal("PDF extraction endpoint should not be called when the LLM API key is missing")
+	}
+
+	detail, err := app.db.GetScreeningSessionDetail(session.ID)
+	if err != nil {
+		t.Fatalf("GetScreeningSessionDetail() error = %v", err)
+	}
+	if len(detail.Papers) != 1 || detail.Papers[0].Status != "pending" || !strings.Contains(detail.Papers[0].Reason, "API key") {
+		t.Fatalf("expected paper to remain pending with API key reason, got %+v", detail.Papers)
+	}
+}
+
 func TestDeleteScreeningSessionCascadesPapers(t *testing.T) {
 	db, err := NewDB(t.TempDir())
 	if err != nil {

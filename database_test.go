@@ -100,6 +100,208 @@ func TestNewDBMigratesLegacySchemaAndCreatesDefaultFolder(t *testing.T) {
 	}
 }
 
+func TestNewDBMigratesLegacySyncRecordsMessageColumn(t *testing.T) {
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "diveend.db")
+
+	legacyDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = legacyDB.Exec(`
+		CREATE TABLE sync_records (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			file_name TEXT NOT NULL,
+			file_size INTEGER,
+			remote_path TEXT,
+			local_path TEXT,
+			status TEXT NOT NULL DEFAULT 'pending',
+			error_message TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			completed_at DATETIME
+		)
+	`)
+	if err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("creating legacy sync_records table: %v", err)
+	}
+	_, err = legacyDB.Exec(`
+		INSERT INTO sync_records (
+			id, type, file_name, file_size, remote_path, local_path, status,
+			error_message, created_at, completed_at
+		) VALUES (
+			'legacy-sync-record', 'upload', 'data/diveend.db', 123,
+			'/apps/pcstest_oauth/diveend-v1/data/diveend.db',
+			'/tmp/diveend.db', 'success', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("inserting legacy sync record: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("closing legacy DB: %v", err)
+	}
+
+	db, err := NewDB(dataDir)
+	if err != nil {
+		t.Fatalf("NewDB() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	columns := map[string]bool{}
+	rows, err := db.conn.Query(`PRAGMA table_info(sync_records)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(sync_records) error = %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("Scan() error = %v", err)
+		}
+		columns[name] = true
+	}
+	if !columns["message"] {
+		t.Fatalf("expected migrated sync_records table to include message column, got %v", columns)
+	}
+
+	records, err := db.GetSyncRecords(10)
+	if err != nil {
+		t.Fatalf("GetSyncRecords() error = %v", err)
+	}
+	if len(records) != 1 || records[0].ID != "legacy-sync-record" || records[0].Message != "" {
+		t.Fatalf("unexpected migrated legacy sync records: %+v", records)
+	}
+
+	if err := db.SaveSyncRecord(&SyncRecord{
+		Type:       "download",
+		FileName:   "diveend.db",
+		FileSize:   456,
+		RemotePath: "/apps/pcstest_oauth/diveend-v1/data/diveend.db",
+		LocalPath:  "/tmp/diveend-remote.db",
+		Status:     "success",
+		Message:    "Conflict resolved by keeping cloud version",
+	}); err != nil {
+		t.Fatalf("SaveSyncRecord() with message error = %v", err)
+	}
+	records, err = db.GetSyncRecords(10)
+	if err != nil {
+		t.Fatalf("GetSyncRecords() after message insert error = %v", err)
+	}
+	if len(records) != 2 || records[0].Message != "Conflict resolved by keeping cloud version" {
+		t.Fatalf("expected newest sync record message to round-trip, got %+v", records)
+	}
+}
+
+func TestNewDBMigratesLegacySyncConflictDiffColumns(t *testing.T) {
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "diveend.db")
+
+	legacyDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = legacyDB.Exec(`
+		CREATE TABLE sync_conflicts (
+			id TEXT PRIMARY KEY,
+			file_name TEXT NOT NULL,
+			local_path TEXT NOT NULL,
+			local_time DATETIME NOT NULL,
+			remote_path TEXT NOT NULL,
+			remote_time DATETIME NOT NULL,
+			resolution TEXT,
+			resolved_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("creating legacy sync_conflicts table: %v", err)
+	}
+	_, err = legacyDB.Exec(`
+		INSERT INTO sync_conflicts (
+			id, file_name, local_path, local_time, remote_path, remote_time, created_at
+		) VALUES (
+			'legacy-sync-conflict', 'diveend.db', '/tmp/diveend.db',
+			datetime('now', '-2 minutes'),
+			'/apps/pcstest_oauth/diveend-v1/data/diveend.db',
+			datetime('now', '-1 minutes'),
+			datetime('now', '-1 day')
+		)
+	`)
+	if err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("inserting legacy sync conflict: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("closing legacy DB: %v", err)
+	}
+
+	db, err := NewDB(dataDir)
+	if err != nil {
+		t.Fatalf("NewDB() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	columns := map[string]bool{}
+	rows, err := db.conn.Query(`PRAGMA table_info(sync_conflicts)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(sync_conflicts) error = %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("Scan() error = %v", err)
+		}
+		columns[name] = true
+	}
+	for _, column := range []string{"file_kind", "local_size", "remote_size", "newer_side"} {
+		if !columns[column] {
+			t.Fatalf("expected migrated sync_conflicts table to include %s, got %v", column, columns)
+		}
+	}
+
+	conflicts, err := db.GetSyncConflicts(10)
+	if err != nil {
+		t.Fatalf("GetSyncConflicts() error = %v", err)
+	}
+	if len(conflicts) != 1 || conflicts[0].ID != "legacy-sync-conflict" || conflicts[0].LocalSize != 0 || conflicts[0].RemoteSize != 0 {
+		t.Fatalf("unexpected migrated legacy sync conflicts: %+v", conflicts)
+	}
+
+	now := time.Now()
+	newConflict := &SyncConflict{
+		FileName:   "diveend.db",
+		FileKind:   "database",
+		LocalPath:  "/tmp/diveend.db",
+		LocalSize:  123,
+		LocalTime:  now,
+		RemotePath: syncRemotePathForKey(syncDatabaseKey),
+		RemoteSize: 456,
+		RemoteTime: now.Add(time.Minute),
+		NewerSide:  "remote",
+	}
+	if err := db.SaveSyncConflict(newConflict); err != nil {
+		t.Fatalf("SaveSyncConflict() with diff metadata error = %v", err)
+	}
+	loaded, err := db.GetSyncConflict(newConflict.ID)
+	if err != nil {
+		t.Fatalf("GetSyncConflict() error = %v", err)
+	}
+	if loaded.FileKind != "database" || loaded.NewerSide != "remote" || loaded.LocalSize != 123 || loaded.RemoteSize != 456 {
+		t.Fatalf("expected sync conflict diff metadata to round-trip, got %+v", loaded)
+	}
+}
+
 func TestPaperAndTranslationPersistence(t *testing.T) {
 	db, err := NewDB(t.TempDir())
 	if err != nil {

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { AppRouter } from './components/layout/Router';
 import { getInitialState } from './lib/backend';
+import { errorToUserMessage } from './lib/errors';
 import { useAppStore } from './stores/appStore';
 
 function App() {
@@ -19,7 +20,7 @@ function App() {
       } catch (error) {
         if (!cancelled) {
           setHydrating(false);
-          setError(error instanceof Error ? error.message : '初始化失败');
+          setError(errorToUserMessage(error, '初始化失败'));
         }
       }
     };

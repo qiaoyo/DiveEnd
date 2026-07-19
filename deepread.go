@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -10,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 )
+
+var deepReadBase64FallbackMaxBytes int64 = 16 * 1024 * 1024
 
 func (a *App) GetDeepReadState(paperID string) (*DeepReadState, error) {
 	if err := a.ensureReady(); err != nil {
@@ -40,7 +44,7 @@ func (a *App) GetDeepReadState(paperID string) (*DeepReadState, error) {
 		return nil, err
 	}
 
-	hasPDF := deepReadPDFAvailable(paper.PDFPath)
+	hasPDF := a.deepReadManagedPDFAvailable(paper.PDFPath)
 	state := &DeepReadState{
 		PaperID:      paperID,
 		HasPDF:       hasPDF,
@@ -111,12 +115,12 @@ func (a *App) PrepareDeepReadPaper(paperID string) (*DeepReadState, error) {
 	if err != nil {
 		return nil, err
 	}
-	pdfPath := strings.TrimSpace(paper.PDFPath)
-	if !deepReadPDFAvailable(pdfPath) {
-		errorMessage := "本地 PDF 不可用，请先等待下载完成或手动导入 PDF。"
+	pdfPath, pdfErr := a.resolveDeepReadPDFPath(paper.PDFPath)
+	if pdfErr != nil {
+		errorMessage := "本地 PDF 不可用或不在托管目录，请先等待下载完成或手动导入 PDF。"
 		_ = a.db.UpsertDeepReadParseCache(&DeepReadParseCache{
 			PaperID:        paperID,
-			PDFPath:        pdfPath,
+			PDFPath:        strings.TrimSpace(paper.PDFPath),
 			Status:         "missing_pdf",
 			ErrorMessage:   errorMessage,
 			Sections:       []DeepReadSection{},
@@ -140,7 +144,11 @@ func (a *App) PrepareDeepReadPaper(paperID string) (*DeepReadState, error) {
 		LastPreparedAt: time.Now(),
 	})
 
-	parseResult, err := a.pdfService.ParsePDF(pdfPath)
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	parseResult, err := a.pdfService.ParsePDFWithContext(ctx, pdfPath)
 	if err != nil {
 		_ = a.db.UpsertDeepReadParseCache(&DeepReadParseCache{
 			PaperID:        paperID,
@@ -230,20 +238,55 @@ func (a *App) GetDeepReadPDFBytes(paperID string) (string, error) {
 		return "", err
 	}
 
-	pdfPath := strings.TrimSpace(paper.PDFPath)
-	if pdfPath == "" {
-		return "", fmt.Errorf("paper has no local pdf path")
+	pdfPath, err := a.resolveDeepReadPDFPath(paper.PDFPath)
+	if err != nil {
+		return "", err
 	}
 
-	content, err := os.ReadFile(pdfPath)
+	content, err := readLimitedFile(pdfPath, deepReadBase64FallbackMaxBytes)
 	if err != nil {
+		if strings.Contains(err.Error(), "exceeds") {
+			return "", fmt.Errorf("local pdf is too large for base64 fallback: %w; use the DeepRead asset URL instead", err)
+		}
 		return "", fmt.Errorf("read local pdf failed: %w", err)
 	}
 	if len(content) == 0 {
 		return "", fmt.Errorf("local pdf file is empty")
 	}
+	if !bytes.HasPrefix(content, []byte("%PDF-")) {
+		return "", fmt.Errorf("local file is not a valid pdf")
+	}
 
 	return base64.StdEncoding.EncodeToString(content), nil
+}
+
+func (a *App) GetDeepReadPDFURL(paperID string) (string, error) {
+	if err := a.ensureReady(); err != nil {
+		return "", err
+	}
+
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return "", fmt.Errorf("paper id cannot be empty")
+	}
+
+	paper, err := a.db.GetPaperByID(paperID)
+	if err != nil {
+		return "", err
+	}
+
+	pdfPath, err := a.resolveDeepReadPDFPath(paper.PDFPath)
+	if err != nil {
+		return "", err
+	}
+
+	token := uuid.NewString()
+	a.storeDeepReadPDFResource(token, deepReadPDFResource{
+		PaperID:   paperID,
+		Path:      pdfPath,
+		ExpiresAt: time.Now().Add(deepReadPDFResourceTTL),
+	})
+	return "/deepread/pdf/" + token, nil
 }
 
 func deepReadPDFAvailable(path string) bool {

@@ -15,6 +15,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { getSecretPrefill, saveConfig } from '../../lib/backend';
+import { errorToUserMessage } from '../../lib/errors';
 import { useAppStore } from '../../stores/appStore';
 import type { AppConfig, ConfigSecretPrefill, LLMConfig } from '../../types';
 
@@ -73,17 +74,17 @@ function mergeConfigWithSecretPrefill(config: AppConfig, secretPrefill: ConfigSe
     ...config,
     llm: {
       ...config.llm,
-      apiKey: secretPrefill.strongLLMApiKey || config.llm.apiKey,
+      apiKey: config.llm.apiKey,
       hasApiKey: secretPrefill.hasStrongLLMApiKey || config.llm.hasApiKey,
     },
     weakLLM: {
       ...config.weakLLM,
-      apiKey: secretPrefill.weakLLMApiKey || config.weakLLM.apiKey,
+      apiKey: config.weakLLM.apiKey,
       hasApiKey: secretPrefill.hasWeakLLMApiKey || config.weakLLM.hasApiKey,
     },
     baiduCloud: {
       ...config.baiduCloud,
-      token: secretPrefill.baiduToken || config.baiduCloud.token,
+      token: config.baiduCloud.token,
       hasToken: secretPrefill.hasBaiduToken || config.baiduCloud.hasToken,
     },
   };
@@ -91,11 +92,11 @@ function mergeConfigWithSecretPrefill(config: AppConfig, secretPrefill: ConfigSe
 
 function secretPrefillFromConfig(config: AppConfig): ConfigSecretPrefill {
   return {
-    strongLLMApiKey: config.llm.apiKey,
+    strongLLMApiKey: '',
     hasStrongLLMApiKey: config.llm.hasApiKey || config.llm.apiKey.trim().length > 0,
-    weakLLMApiKey: config.weakLLM.apiKey,
+    weakLLMApiKey: '',
     hasWeakLLMApiKey: config.weakLLM.hasApiKey || config.weakLLM.apiKey.trim().length > 0,
-    baiduToken: config.baiduCloud.token,
+    baiduToken: '',
     hasBaiduToken: config.baiduCloud.hasToken || config.baiduCloud.token.trim().length > 0,
   };
 }
@@ -333,11 +334,14 @@ export function SettingsPanel() {
   const [saveMessage, setSaveMessage] = useState('');
   const [showStrongKey, setShowStrongKey] = useState(false);
   const [showWeakKey, setShowWeakKey] = useState(false);
-  const [showBaiduToken, setShowBaiduToken] = useState(false);
 
   useEffect(() => {
     setDraftConfig(mergeConfigWithSecretPrefill(config, secretPrefill));
-  }, [config, secretPrefill]);
+  }, [config]);
+
+  useEffect(() => {
+    setDraftConfig((current) => mergeConfigWithSecretPrefill(current, secretPrefill));
+  }, [secretPrefill]);
 
   useEffect(() => {
     let cancelled = false;
@@ -375,10 +379,6 @@ export function SettingsPanel() {
     } as AppConfig));
   };
 
-  const updateSecretPrefill = (patch: Partial<ConfigSecretPrefill>) => {
-    setSecretPrefill((current) => ({ ...current, ...patch }));
-  };
-
   const handleSave = async () => {
     setSavingConfig(true);
     setSaveMessage('');
@@ -388,7 +388,7 @@ export function SettingsPanel() {
       setConfig(result.config);
       setSaveMessage(result.restartRequired ? '配置已保存，数据路径改动将在重启后生效。' : '配置已保存。');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '保存配置失败';
+      const message = errorToUserMessage(error, '保存配置失败');
       setError(message);
       setSaveMessage(message);
     } finally {
@@ -536,37 +536,33 @@ export function SettingsPanel() {
           <div className="space-y-4">
             <SecretField
               title="强模型 API Key"
-              description="对应 `strong_llm.json` 和强模型配置，适合更重的分析任务。会自动预填充，但默认隐藏。"
+              description="对应 `strong_llm.json` 和强模型配置，适合更重的分析任务。出于安全考虑只显示是否已配置；输入新值会替换现有密钥。"
               configured={draftConfig.llm.hasApiKey}
               visible={showStrongKey}
               value={draftConfig.llm.apiKey}
-              placeholder={draftConfig.llm.hasApiKey ? '已填充，可直接修改后保存' : 'sk-...'}
+              placeholder={draftConfig.llm.hasApiKey ? '已配置；留空保存会保留原密钥，输入新值则替换' : 'sk-...'}
               onToggleVisible={() => setShowStrongKey((current) => !current)}
               onChange={(value) => {
                 updateLLMProfile('llm', { apiKey: value, clearApiKey: false, hasApiKey: value.trim().length > 0 });
-                updateSecretPrefill({ strongLLMApiKey: value, hasStrongLLMApiKey: value.trim().length > 0 });
               }}
               onClear={() => {
                 updateLLMProfile('llm', { apiKey: '', clearApiKey: true, hasApiKey: false });
-                updateSecretPrefill({ strongLLMApiKey: '', hasStrongLLMApiKey: false });
               }}
             />
 
             <SecretField
               title="弱模型 API Key"
-              description="对应 `weak_llm.json` 和轻量模型配置，后续可用于频繁、低成本调用。会自动预填充，但默认隐藏。"
+              description="对应 `weak_llm.json` 和轻量模型配置，后续可用于频繁、低成本调用。出于安全考虑只显示是否已配置；输入新值会替换现有密钥。"
               configured={draftConfig.weakLLM.hasApiKey}
               visible={showWeakKey}
               value={draftConfig.weakLLM.apiKey}
-              placeholder={draftConfig.weakLLM.hasApiKey ? '已填充，可直接修改后保存' : 'sk-...'}
+              placeholder={draftConfig.weakLLM.hasApiKey ? '已配置；留空保存会保留原密钥，输入新值则替换' : 'sk-...'}
               onToggleVisible={() => setShowWeakKey((current) => !current)}
               onChange={(value) => {
                 updateLLMProfile('weakLLM', { apiKey: value, clearApiKey: false, hasApiKey: value.trim().length > 0 });
-                updateSecretPrefill({ weakLLMApiKey: value, hasWeakLLMApiKey: value.trim().length > 0 });
               }}
               onClear={() => {
                 updateLLMProfile('weakLLM', { apiKey: '', clearApiKey: true, hasApiKey: false });
-                updateSecretPrefill({ weakLLMApiKey: '', hasWeakLLMApiKey: false });
               }}
             />
           </div>
@@ -593,41 +589,33 @@ export function SettingsPanel() {
             </div>
 
             {draftConfig.baiduCloud.enabled && (
-              <SecretField
-                title="百度网盘 Access Token"
-                description="默认会从本地 token 文件预填充，并以隐藏状态展示；当前先保留配置入口，不自动执行云同步。"
-                configured={draftConfig.baiduCloud.hasToken}
-                visible={showBaiduToken}
-                value={draftConfig.baiduCloud.token}
-                placeholder={draftConfig.baiduCloud.hasToken ? '已填充，可直接修改后保存' : 'OAuth 获取的 token'}
-                onToggleVisible={() => setShowBaiduToken((current) => !current)}
-                onChange={(value) => {
-                  updateDraft({
-                    baiduCloud: {
-                      ...draftConfig.baiduCloud,
-                      token: value,
-                      clearToken: false,
-                      hasToken: value.trim().length > 0,
-                    },
-                  });
-                  updateSecretPrefill({ baiduToken: value, hasBaiduToken: value.trim().length > 0 });
-                }}
-                onClear={() => {
-                  updateDraft({
-                    baiduCloud: {
-                      ...draftConfig.baiduCloud,
-                      token: '',
-                      clearToken: true,
-                      hasToken: false,
-                    },
-                  });
-                  updateSecretPrefill({ baiduToken: '', hasBaiduToken: false });
-                }}
-              />
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-100">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">百度网盘凭据由 token 文件统一管理</p>
+                    <p className="mt-1 text-xs leading-6 opacity-85">
+                      当前版本固定读取项目根目录的 <code>baiduyun_token.json</code>。该文件应同时包含 access_token、refresh_token、client_id 和 client_secret；设置页不再允许只保存单独的 access token，避免后续无法刷新。
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                    draftConfig.baiduCloud.hasToken
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/20 dark:text-emerald-100'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-400/20 dark:text-amber-100'
+                  }`}
+                  >
+                    {draftConfig.baiduCloud.hasToken ? 'Token file configured' : 'Token file missing'}
+                  </span>
+                </div>
+                <div className="mt-3 rounded-xl border border-emerald-200/70 bg-white/70 px-3 py-2 text-xs leading-6 dark:border-emerald-400/30 dark:bg-slate-950/30">
+                  <div>Token 文件：baiduyun_token.json</div>
+                  <div>刷新 access token：请前往 Sync 页面点击 “Refresh Token”。</div>
+                  <div>如果你更新了 token 文件，请重启 DiveEnd 或重新保存配置以刷新运行时同步管理器。</div>
+                </div>
+              </div>
             )}
 
             <div className="rounded-2xl border border-stone-200 bg-white/80 p-4 text-xs leading-6 text-stone-500 dark:border-stone-800 dark:bg-stone-900/70 dark:text-stone-400">
-              保存百度网盘凭据后，可以在 Sync 页面查看真实同步状态并手动触发同步；自动启动同步和退出提醒会单独完善。
+              启用百度网盘同步后，可以在 Sync 页面查看真实同步状态、先执行同步预检、手动触发同步、刷新 access token，并分别配置启动同步、周期同步、退出前同步和冲突策略。
             </div>
           </div>
         )}

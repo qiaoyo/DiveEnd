@@ -48,6 +48,8 @@ export ANTHROPIC_API_KEY=your_anthropic_key
 # Start services
 docker-compose up -d
 
+# The Compose file publishes the service on 127.0.0.1 only.
+#
 # Check health
 curl http://localhost:50051/health/
 ```
@@ -67,7 +69,7 @@ export OPENAI_API_KEY=your_openai_key
 export ANTHROPIC_API_KEY=your_anthropic_key
 
 # Run development server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 50051
+uvicorn app.main:app --reload --host 127.0.0.1 --port 50051
 ```
 
 ## API Endpoints
@@ -182,7 +184,7 @@ Content-Type: application/json
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key | Required |
 | `ANTHROPIC_API_KEY` | Anthropic API key | Required |
-| `PDF_HOST` | Server host | `0.0.0.0` |
+| `PDF_HOST` | Server host for direct local runs | `127.0.0.1` |
 | `PDF_PORT` | Server port | `50051` |
 | `PDF_WORKERS` | Number of workers | `1` |
 
@@ -194,7 +196,7 @@ Content-Type: application/json
 
 3. **Dual LLM Strategy**: Weak LLM (GPT-4o-mini) for speed and cost on simple tasks, Strong LLM (Claude Sonnet) for accuracy on complex extraction tasks.
 
-4. **Docker Compose Setup**: Includes optional Redis for caching, making it production-ready with horizontal scaling potential.
+4. **Docker Compose Setup**: Publishes the PDF service on host loopback only by default and includes optional Redis for caching, making it safer for local desktop use while keeping a path to horizontal scaling.
 
 ## Development
 

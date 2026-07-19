@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -534,7 +533,7 @@ func extractCrossrefYear(dateParts [][]int) int {
 func (e *DeepStartEnricher) getJSON(ctx context.Context, endpoint string, accept string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create metadata request: %s", redactURLQueryValuesInText(err.Error()))
 	}
 	if strings.TrimSpace(accept) != "" {
 		req.Header.Set("Accept", accept)
@@ -543,7 +542,7 @@ func (e *DeepStartEnricher) getJSON(ctx context.Context, endpoint string, accept
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("metadata request failed: %s", redactURLQueryValuesInText(err.Error()))
 	}
 	defer resp.Body.Close()
 
@@ -551,7 +550,7 @@ func (e *DeepStartEnricher) getJSON(ctx context.Context, endpoint string, accept
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	return readExternalHTTPBody(resp.Body)
 }
 
 func mergePublicationMetadata(base deepStartPublicationMetadata, candidate deepStartPublicationMetadata) deepStartPublicationMetadata {

@@ -2,7 +2,7 @@
 
 import os
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,13 +21,24 @@ class LLMConfig(BaseSettings):
     temperature: float = Field(default=0.0, description="Sampling temperature")
     timeout: int = Field(default=30, description="Request timeout in seconds")
 
-    def __post_init__(self):
-        if self.api_key is None:
+    def model_post_init(self, __context: Any) -> None:
+        self.provider = (self.provider or "openai").strip().lower()
+        self.model = (self.model or "").strip()
+        if not self.model:
+            self.model = "claude-sonnet-4-20250514" if self.provider == "anthropic" else "gpt-4o-mini"
+        if self.api_key is not None:
+            self.api_key = self.api_key.strip()
+        if self.base_url is not None:
+            self.base_url = self.base_url.strip() or None
+
+        if not self.api_key:
             # Try to load from environment based on provider
             if self.provider == "openai":
                 self.api_key = os.getenv("OPENAI_API_KEY")
             elif self.provider == "anthropic":
                 self.api_key = os.getenv("ANTHROPIC_API_KEY")
+            if self.api_key is not None:
+                self.api_key = self.api_key.strip() or None
 
 
 class PDFServiceConfig(BaseSettings):
@@ -40,9 +51,13 @@ class PDFServiceConfig(BaseSettings):
     )
 
     # Server settings
-    host: str = Field(default="0.0.0.0", description="Server host")
+    host: str = Field(default="127.0.0.1", description="Server host")
     port: int = Field(default=50051, description="Server port")
     workers: int = Field(default=1, description="Number of worker processes")
+    cors_allow_origin_regex: str = Field(
+        default=r"^(http://(localhost|127\.0\.0\.1)(:\d+)?|wails://wails\.localhost)$",
+        description="Allowed CORS origin regex",
+    )
 
     # PDF processing settings
     max_pdf_size: int = Field(default=50*1024*1024, description="Max PDF size in bytes (50MB)")

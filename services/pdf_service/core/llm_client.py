@@ -26,13 +26,24 @@ class LLMConfig:
 
     def __post_init__(self):
         """Load API key from environment if not provided."""
-        if self.api_key is None:
+        self.provider = (self.provider or "openai").strip().lower()
+        self.model = (self.model or "").strip()
+        if not self.model:
+            self.model = "claude-sonnet-4-20250514" if self.provider == "anthropic" else "gpt-4o-mini"
+        if self.api_key is not None:
+            self.api_key = self.api_key.strip()
+        if self.base_url is not None:
+            self.base_url = self.base_url.strip() or None
+
+        if not self.api_key:
             if self.provider == "openai":
                 self.api_key = os.getenv("OPENAI_API_KEY")
             elif self.provider == "anthropic":
                 self.api_key = os.getenv("ANTHROPIC_API_KEY")
+            if self.api_key is not None:
+                self.api_key = self.api_key.strip()
 
-        if self.api_key is None:
+        if not self.api_key:
             raise ValueError(f"API key not found for provider: {self.provider}")
 
 
@@ -102,5 +113,5 @@ class LLMClient:
                 raise ValueError(f"Unsupported provider: {self.config.provider}")
 
         except Exception as e:
-            logger.error(f"Error in LLM chat: {e}")
+            logger.error("Error in LLM chat: %s", type(e).__name__)
             raise

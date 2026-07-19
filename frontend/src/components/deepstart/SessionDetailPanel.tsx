@@ -29,6 +29,7 @@ import {
   undoDeepStartNarrow,
   updateDeepStartSelections,
 } from '../../lib/backend';
+import { errorToUserMessage, sanitizeUserVisibleError } from '../../lib/errors';
 import { useAppStore } from '../../stores/appStore';
 import type {
   DeepStartDirection,
@@ -56,6 +57,10 @@ function isDeepStartCancelledError(error: unknown): boolean {
   }
   const message = error.message.toLowerCase();
   return message.includes('cancelled') || message.includes('canceled');
+}
+
+function runtimeMessage(message: string | undefined, fallback: string): string {
+  return sanitizeUserVisibleError((message || fallback).trim());
 }
 
 function tierStyle(tier: string) {
@@ -312,6 +317,9 @@ function flattenFolderNodes(nodes: FolderNode[]): Folder[] {
 
 export function SessionDetailPanel() {
   const navigate = useNavigate();
+  const routeSessionId = typeof window === 'undefined'
+    ? ''
+    : decodeURIComponent(window.location.hash.match(/\/session\/([^/?#]+)/)?.[1] ?? '');
   const {
     activeDeepStartSession,
     activeFolderId,
@@ -335,10 +343,35 @@ export function SessionDetailPanel() {
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [activePaperId, setActivePaperId] = useState<string | null>(null);
   const [importFeedback, setImportFeedback] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState('');
   const [folderTree, setFolderTree] = useState<FolderNode[]>([]);
   const [storageTreeOverview, setStorageTreeOverview] = useState<FolderStorageTreeOverview | null>(null);
   const [loadingStorageOverview, setLoadingStorageOverview] = useState(false);
   const [optimisticUserMessage, setOptimisticUserMessage] = useState('');
+
+  useEffect(() => {
+    const requestedSessionId = routeSessionId.trim();
+    if (!requestedSessionId || activeDeepStartSession?.summary.id === requestedSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    getDeepStartSession(requestedSessionId)
+      .then((detail) => {
+        if (!cancelled) {
+          upsertDeepStartSession(detail);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setError(errorToUserMessage(error, '加载探索会话失败'));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeSessionId, activeDeepStartSession?.summary.id, upsertDeepStartSession, setError]);
   const [initialSuggestedQueries, setInitialSuggestedQueries] = useState<string[]>([]);
   const [chatRuntime, setChatRuntime] = useState<ChatRuntimeState>({
     status: 'idle',
@@ -384,7 +417,7 @@ export function SessionDetailPanel() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setError(error instanceof Error ? error.message : '同步目标文件夹失败');
+          setError(errorToUserMessage(error, '同步目标文件夹失败'));
         }
       });
 
@@ -417,7 +450,7 @@ export function SessionDetailPanel() {
       } catch (error) {
         if (!cancelled) {
           setStorageTreeOverview(null);
-          setError(error instanceof Error ? error.message : '读取本地存储速览失败');
+          setError(errorToUserMessage(error, '读取本地存储速览失败'));
         }
       } finally {
         if (!cancelled && markLoading) {
@@ -457,7 +490,7 @@ export function SessionDetailPanel() {
           }
         })
         .catch((error) => {
-          setError(error instanceof Error ? error.message : '刷新会话状态失败');
+          setError(errorToUserMessage(error, '刷新会话状态失败'));
         });
     };
 
@@ -472,7 +505,7 @@ export function SessionDetailPanel() {
           phase: progress.phase,
           percent: progress.overallPercent,
           eta: progress.estimatedRemainingSeconds,
-          message: progress.message || '正在停止本次任务',
+          message: runtimeMessage(progress.message, '正在停止本次任务'),
         });
         return;
       }
@@ -489,7 +522,7 @@ export function SessionDetailPanel() {
           phase: progress.phase,
           percent: progress.overallPercent,
           eta: 0,
-          message: progress.message || '本次任务已停止并回滚',
+          message: runtimeMessage(progress.message, '本次任务已停止并回滚'),
         });
         setOptimisticUserMessage('');
         setBusyAction(null);
@@ -503,7 +536,7 @@ export function SessionDetailPanel() {
           phase: progress.phase,
           percent: progress.overallPercent,
           eta: 0,
-          message: progress.message || '任务完成',
+          message: runtimeMessage(progress.message, '任务完成'),
         });
         if (activeDeepStartSession?.summary.processingStatus === 'background_processing' || (progress.backgroundCompleted ?? 0) > 0) {
           refreshSessionIfNeeded(true);
@@ -527,7 +560,7 @@ export function SessionDetailPanel() {
           phase: progress.phase,
           percent: progress.overallPercent,
           eta: progress.estimatedRemainingSeconds,
-          message: progress.message || '后台正在处理中',
+          message: runtimeMessage(progress.message, '后台正在处理中'),
         });
         if (progress.phase === 'initial_batch_ready' || progress.phase === 'background_processing') {
           refreshSessionIfNeeded();
@@ -600,6 +633,10 @@ export function SessionDetailPanel() {
       setActivePaperId(null);
     }
   }, [activePaperId, paperById]);
+
+  useEffect(() => {
+    setCopyFeedback('');
+  }, [activePaperId]);
 
   const groupedDirections = useMemo(() => {
     const assigned = new Set<string>();
@@ -694,13 +731,14 @@ export function SessionDetailPanel() {
         });
         return;
       }
+      const message = errorToUserMessage(error, '发送 DeepStart 对话失败');
       setChatRuntime((prev) => ({
         ...prev,
         status: 'failed',
         phase: 'failed',
-        message: error instanceof Error ? error.message : '发送 DeepStart 对话失败',
+        message,
       }));
-      setError(error instanceof Error ? error.message : '发送 DeepStart 对话失败');
+      setError(message);
     } finally {
       setBusyAction(null);
     }
@@ -720,7 +758,7 @@ export function SessionDetailPanel() {
       persistSession(detail);
       setImportFeedback(`已回退上一轮缩窄，当前候选池 ${detail.currentResults.length} 篇。`);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '回退上一轮失败');
+      setError(errorToUserMessage(error, '回退上一轮失败'));
     } finally {
       setBusyAction(null);
     }
@@ -773,13 +811,14 @@ export function SessionDetailPanel() {
         }));
         return;
       }
+      const message = errorToUserMessage(error, '重新检索失败');
       setChatRuntime((prev) => ({
         ...prev,
         status: 'failed',
         phase: 'failed',
-        message: error instanceof Error ? error.message : '重新检索失败',
+        message,
       }));
-      setError(error instanceof Error ? error.message : '重新检索失败');
+      setError(message);
     } finally {
       setBusyAction(null);
     }
@@ -832,13 +871,14 @@ export function SessionDetailPanel() {
         }));
         return;
       }
+      const message = errorToUserMessage(error, '补充检索失败');
       setChatRuntime((prev) => ({
         ...prev,
         status: 'failed',
         phase: 'failed',
-        message: error instanceof Error ? error.message : '补充检索失败',
+        message,
       }));
-      setError(error instanceof Error ? error.message : '补充检索失败');
+      setError(message);
     } finally {
       setBusyAction(null);
     }
@@ -859,13 +899,14 @@ export function SessionDetailPanel() {
     try {
       await cancelDeepStartTask(activeDeepStartSession.summary.id);
     } catch (error) {
+      const message = errorToUserMessage(error, '停止任务失败');
       setChatRuntime((prev) => ({
         ...prev,
         status: 'failed',
         phase: 'failed',
-        message: error instanceof Error ? error.message : '停止任务失败',
+        message,
       }));
-      setError(error instanceof Error ? error.message : '停止任务失败');
+      setError(message);
     }
   };
 
@@ -883,7 +924,7 @@ export function SessionDetailPanel() {
       );
       persistSession(detail);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '保存 DeepStart 勾选状态失败');
+      setError(errorToUserMessage(error, '保存 DeepStart 勾选状态失败'));
     } finally {
       setBusyAction(null);
     }
@@ -952,7 +993,7 @@ export function SessionDetailPanel() {
       setIsFolderModalOpen(false);
       setImportFeedback(`已创建文件夹「${folder.path || folder.name}」`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '创建文件夹失败';
+      const message = errorToUserMessage(error, '创建文件夹失败');
       setNewFolderError(message);
       setError(message);
     } finally {
@@ -983,7 +1024,7 @@ export function SessionDetailPanel() {
       }
       setImportFeedback('目录已删除。');
     } catch (error) {
-      setError(error instanceof Error ? error.message : '删除目录失败');
+      setError(errorToUserMessage(error, '删除目录失败'));
     } finally {
       setBusyAction(null);
     }
@@ -1038,9 +1079,29 @@ export function SessionDetailPanel() {
           `已导入并清空选中：新增 ${result.imported.length} 篇${skippedText}，后台继续下载 PDF。`
       );
     } catch (error) {
-      setError(error instanceof Error ? error.message : '导入论文失败');
+      setError(errorToUserMessage(error, '导入论文失败'));
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const handleCopyActiveAbstract = async () => {
+    const abstract = (activePaper?.abstract || '').trim();
+    if (!abstract) {
+      setCopyFeedback('没有可复制的摘要');
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setCopyFeedback('当前环境不支持剪贴板写入');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(abstract);
+      setCopyFeedback('摘要已复制到剪贴板');
+    } catch (error) {
+      const message = errorToUserMessage(error, '复制摘要失败');
+      setCopyFeedback(message);
+      setError(message);
     }
   };
 
@@ -1633,7 +1694,7 @@ export function SessionDetailPanel() {
                 <a
                   href={activePaper.url}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -1692,12 +1753,15 @@ export function SessionDetailPanel() {
                   <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">完整摘要</h4>
                   <button
                     type="button"
-                    onClick={() => void navigator.clipboard.writeText(activePaper.abstract || '')}
+                    onClick={() => void handleCopyActiveAbstract()}
                     className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                   >
                     复制摘要
                   </button>
                 </div>
+                {copyFeedback && (
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{copyFeedback}</p>
+                )}
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
                   {useLegacyAbstractHighlight
                     ? renderLegacyHighlightedText(activePaper.abstract || '', summaryHighlightTokens)

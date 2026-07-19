@@ -260,4 +260,27 @@ describe('Screening page', () => {
     expect(await screen.findByText('pdf service unavailable')).toBeInTheDocument();
     expect(screen.getByText('提取论文内容')).toBeInTheDocument();
   });
+
+  it('shows safe path-resolution errors for file input failures', async () => {
+    backendMocks.resolveFilePaths.mockImplementationOnce(() => {
+      throw new Error('resolve failed api_key=sk-screening-secret and access_token=screening-token-secret');
+    });
+
+    const { container } = render(<Screening />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, {
+      target: {
+        files: [new File(['pdf'], 'paper-1.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('api_key=[redacted]');
+      expect(document.body.textContent).toContain('access_token=[redacted]');
+    });
+    expect(document.body.textContent).not.toContain('sk-screening-secret');
+    expect(document.body.textContent).not.toContain('screening-token-secret');
+    expect(backendMocks.createScreeningSession).not.toHaveBeenCalled();
+  });
 });

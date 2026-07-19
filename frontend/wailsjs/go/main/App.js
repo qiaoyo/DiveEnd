@@ -6,6 +6,10 @@ export function AnalyzePapers(arg1) {
   return window['go']['main']['App']['AnalyzePapers'](arg1);
 }
 
+export function ApplyPendingDatabaseRestore() {
+  return window['go']['main']['App']['ApplyPendingDatabaseRestore']();
+}
+
 export function ApplyScreeningChoice(arg1, arg2) {
   return window['go']['main']['App']['ApplyScreeningChoice'](arg1, arg2);
 }
@@ -16,6 +20,10 @@ export function AttachLocalPDFToPaper(arg1, arg2) {
 
 export function CancelDeepStartTask(arg1) {
   return window['go']['main']['App']['CancelDeepStartTask'](arg1);
+}
+
+export function CancelPendingDatabaseRestore() {
+  return window['go']['main']['App']['CancelPendingDatabaseRestore']();
 }
 
 export function CancelScreening(arg1) {
@@ -58,6 +66,10 @@ export function GetDeepReadPDFBytes(arg1) {
   return window['go']['main']['App']['GetDeepReadPDFBytes'](arg1);
 }
 
+export function GetDeepReadPDFURL(arg1) {
+  return window['go']['main']['App']['GetDeepReadPDFURL'](arg1);
+}
+
 export function GetDeepReadState(arg1) {
   return window['go']['main']['App']['GetDeepReadState'](arg1);
 }
@@ -90,8 +102,16 @@ export function GetLocalStorageOverview() {
   return window['go']['main']['App']['GetLocalStorageOverview']();
 }
 
+export function GetPDFServiceStatus() {
+  return window['go']['main']['App']['GetPDFServiceStatus']();
+}
+
 export function GetPapers(arg1) {
   return window['go']['main']['App']['GetPapers'](arg1);
+}
+
+export function GetPendingDatabaseRestore() {
+  return window['go']['main']['App']['GetPendingDatabaseRestore']();
 }
 
 export function GetScreeningSession(arg1) {
@@ -106,12 +126,20 @@ export function GetSyncConflicts() {
   return window['go']['main']['App']['GetSyncConflicts']();
 }
 
+export function GetSyncPreview() {
+  return window['go']['main']['App']['GetSyncPreview']();
+}
+
 export function GetSyncProgress() {
   return window['go']['main']['App']['GetSyncProgress']();
 }
 
 export function GetSyncRecords(arg1) {
   return window['go']['main']['App']['GetSyncRecords'](arg1);
+}
+
+export function GetSyncSettings() {
+  return window['go']['main']['App']['GetSyncSettings']();
 }
 
 export function GetSyncStatus() {
@@ -142,8 +170,28 @@ export function ListScreeningSessions() {
   return window['go']['main']['App']['ListScreeningSessions']();
 }
 
+export function MoveFolderNode(arg1) {
+  return window['go']['main']['App']['MoveFolderNode'](arg1);
+}
+
+export function MovePaperToFolder(arg1, arg2) {
+  return window['go']['main']['App']['MovePaperToFolder'](arg1, arg2);
+}
+
+export function MovePapersToFolder(arg1, arg2) {
+  return window['go']['main']['App']['MovePapersToFolder'](arg1, arg2);
+}
+
 export function PrepareDeepReadPaper(arg1) {
   return window['go']['main']['App']['PrepareDeepReadPaper'](arg1);
+}
+
+export function RefreshBaiduToken() {
+  return window['go']['main']['App']['RefreshBaiduToken']();
+}
+
+export function RenameFolderNode(arg1) {
+  return window['go']['main']['App']['RenameFolderNode'](arg1);
 }
 
 export function ReplyDeepStartSession(arg1, arg2) {
@@ -176,6 +224,10 @@ export function SaveConfig(arg1) {
 
 export function SaveDeepReadNote(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveDeepReadNote'](arg1, arg2, arg3);
+}
+
+export function SaveSyncSettings(arg1) {
+  return window['go']['main']['App']['SaveSyncSettings'](arg1);
 }
 
 export function SearchPapers(arg1, arg2) {

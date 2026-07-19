@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BrainCircuit, Loader2, Search, Sparkles, Square } from 'lucide-react';
 import { cancelDeepStartTask, onDeepStartProgress, onSearchProgress, startDeepStartSession } from '../../lib/backend';
+import { errorToUserMessage } from '../../lib/errors';
 import type { DeepStartProgressEvent, SearchProgressEvent } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 
@@ -175,7 +176,7 @@ export function DeepStartPanel() {
         }));
         return;
       }
-      setError(error instanceof Error ? error.message : '创建探索会话失败');
+      setError(errorToUserMessage(error, '创建探索会话失败'));
     } finally {
       setIsStarting(false);
       setIsCancelling(false);
@@ -201,7 +202,7 @@ export function DeepStartPanel() {
     try {
       await cancelDeepStartTask(runningSessionId);
     } catch (error) {
-      setError(error instanceof Error ? error.message : '停止探索失败');
+      setError(errorToUserMessage(error, '停止探索失败'));
       setIsCancelling(false);
     }
   };
@@ -250,11 +251,15 @@ export function DeepStartPanel() {
                   type="button"
                   onClick={() => void handleCancelSession()}
                   disabled={isCancelling || !runningSessionId}
+                  title={runningSessionId ? '停止当前 DeepStart 后台任务' : '正在等待后端任务 ID，拿到任务 ID 后即可停止'}
                   className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200 dark:hover:bg-rose-500/20"
                 >
                   {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
                   {isCancelling ? '停止中...' : '停止本次探索'}
                 </button>
+              )}
+              {isStarting && !runningSessionId && (
+                <span className="text-xs text-slate-500 dark:text-slate-400">正在创建后端任务，拿到任务 ID 后可停止。</span>
               )}
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-violet-600 dark:bg-violet-500/20 dark:text-violet-300">
                 <Sparkles className="h-4 w-4" />

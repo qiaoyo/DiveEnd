@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
@@ -50,6 +49,21 @@ type LLMClient struct {
 	disableResponseStorage bool
 	reasoningEffort        string
 	httpClient             *http.Client
+}
+
+type contextLLMService interface {
+	TranslateSectionWithContext(ctx context.Context, section, originalText string) (translated string, summary string, err error)
+	AnalyzeDeepStartWithContext(ctx context.Context, request DeepStartAIRequest) (*DeepStartAIResponse, error)
+	AnalyzeScreeningWithContext(ctx context.Context, request ScreeningAIRequest) (*ScreeningDecisionNode, error)
+}
+
+type contextWeakLLMService interface {
+	TranslateSectionWithContext(ctx context.Context, section, originalText string) (translated string, summary string, err error)
+	ExtractPaperProfileWithContext(ctx context.Context, markdown string) (*PaperProfileExtraction, error)
+}
+
+type contextQueryRewriter interface {
+	RewriteSearchQueriesWithContext(ctx context.Context, query string) ([]string, error)
 }
 
 func NewLLMClient(config AppConfig) *LLMClient {
@@ -109,11 +123,15 @@ type ScreeningAIRequest struct {
 }
 
 func (c *LLMClient) ExtractPaperProfile(markdown string) (*PaperProfileExtraction, error) {
+	return c.ExtractPaperProfileWithContext(context.Background(), markdown)
+}
+
+func (c *LLMClient) ExtractPaperProfileWithContext(ctx context.Context, markdown string) (*PaperProfileExtraction, error) {
 	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
-		return nil, fmt.Errorf("missing API key for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing API key for %s", c.safeProviderLabel())
 	}
 	if strings.TrimSpace(c.model) == "" {
-		return nil, fmt.Errorf("missing model for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing model for %s", c.safeProviderLabel())
 	}
 
 	markdown = strings.TrimSpace(markdown)
@@ -154,7 +172,7 @@ Markdown:
 %s
 `, markdown)
 
-	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	response, err := c.chatWithContext(ctx, []llmMessage{{Role: "user", Content: prompt}})
 	if err != nil {
 		return nil, err
 	}
@@ -185,11 +203,15 @@ Markdown:
 }
 
 func (c *LLMClient) RewriteSearchQueries(query string) ([]string, error) {
+	return c.RewriteSearchQueriesWithContext(context.Background(), query)
+}
+
+func (c *LLMClient) RewriteSearchQueriesWithContext(ctx context.Context, query string) ([]string, error) {
 	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
-		return nil, fmt.Errorf("missing API key for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing API key for %s", c.safeProviderLabel())
 	}
 	if strings.TrimSpace(c.model) == "" {
-		return nil, fmt.Errorf("missing model for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing model for %s", c.safeProviderLabel())
 	}
 
 	query = strings.TrimSpace(query)
@@ -218,7 +240,7 @@ Input query:
 %s
 `, query)
 
-	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	response, err := c.chatWithContext(ctx, []llmMessage{{Role: "user", Content: prompt}})
 	if err != nil {
 		return nil, err
 	}
@@ -244,11 +266,15 @@ Input query:
 }
 
 func (c *LLMClient) TranslateSection(section, originalText string) (translated string, summary string, err error) {
+	return c.TranslateSectionWithContext(context.Background(), section, originalText)
+}
+
+func (c *LLMClient) TranslateSectionWithContext(ctx context.Context, section, originalText string) (translated string, summary string, err error) {
 	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
-		return "", "", fmt.Errorf("missing API key for %s", c.providerLabel())
+		return "", "", fmt.Errorf("missing API key for %s", c.safeProviderLabel())
 	}
 	if strings.TrimSpace(c.model) == "" {
-		return "", "", fmt.Errorf("missing model for %s", c.providerLabel())
+		return "", "", fmt.Errorf("missing model for %s", c.safeProviderLabel())
 	}
 
 	prompt := fmt.Sprintf(`
@@ -267,7 +293,7 @@ Original text:
 %s
 `, section, originalText)
 
-	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	response, err := c.chatWithContext(ctx, []llmMessage{{Role: "user", Content: prompt}})
 	if err != nil {
 		return "", "", err
 	}
@@ -288,11 +314,15 @@ Original text:
 }
 
 func (c *LLMClient) AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error) {
+	return c.AnalyzeDeepStartWithContext(context.Background(), request)
+}
+
+func (c *LLMClient) AnalyzeDeepStartWithContext(ctx context.Context, request DeepStartAIRequest) (*DeepStartAIResponse, error) {
 	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
-		return nil, fmt.Errorf("missing API key for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing API key for %s", c.safeProviderLabel())
 	}
 	if strings.TrimSpace(c.model) == "" {
-		return nil, fmt.Errorf("missing model for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing model for %s", c.safeProviderLabel())
 	}
 
 	payload := map[string]any{
@@ -357,7 +387,7 @@ Context:
 %s
 `, string(contextJSON))
 
-	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	response, err := c.chatWithContext(ctx, []llmMessage{{Role: "user", Content: prompt}})
 	if err != nil {
 		return nil, err
 	}
@@ -393,11 +423,15 @@ Context:
 }
 
 func (c *LLMClient) AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisionNode, error) {
+	return c.AnalyzeScreeningWithContext(context.Background(), request)
+}
+
+func (c *LLMClient) AnalyzeScreeningWithContext(ctx context.Context, request ScreeningAIRequest) (*ScreeningDecisionNode, error) {
 	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
-		return nil, fmt.Errorf("missing API key for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing API key for %s", c.safeProviderLabel())
 	}
 	if strings.TrimSpace(c.model) == "" {
-		return nil, fmt.Errorf("missing model for %s", c.providerLabel())
+		return nil, fmt.Errorf("missing model for %s", c.safeProviderLabel())
 	}
 
 	payload := map[string]any{
@@ -446,7 +480,7 @@ Context:
 %s
 `, string(contextJSON))
 
-	response, err := c.chat([]llmMessage{{Role: "user", Content: prompt}})
+	response, err := c.chatWithContext(ctx, []llmMessage{{Role: "user", Content: prompt}})
 	if err != nil {
 		return nil, err
 	}
@@ -487,15 +521,19 @@ func (c *LLMClient) requiresAPIKey() bool {
 }
 
 func (c *LLMClient) chat(messages []llmMessage) (string, error) {
+	return c.chatWithContext(context.Background(), messages)
+}
+
+func (c *LLMClient) chatWithContext(ctx context.Context, messages []llmMessage) (string, error) {
 	switch c.wireAPI {
 	case "responses":
-		return c.chatResponses(messages)
+		return c.chatResponsesWithContext(ctx, messages)
 	case "chat_completions":
-		return c.chatOpenAI(messages)
+		return c.chatOpenAIWithContext(ctx, messages)
 	case "anthropic_messages":
-		return c.chatAnthropic(messages)
+		return c.chatAnthropicWithContext(ctx, messages)
 	default:
-		return "", fmt.Errorf("unknown wire API for %s: %s", c.providerLabel(), c.wireAPI)
+		return "", fmt.Errorf("unknown wire API for %s: %s", c.safeProviderLabel(), redactSensitiveText(c.wireAPI))
 	}
 }
 
@@ -507,6 +545,10 @@ func (c *LLMClient) providerLabel() string {
 		return c.providerID
 	}
 	return c.providerType
+}
+
+func (c *LLMClient) safeProviderLabel() string {
+	return redactSensitiveText(c.providerLabel())
 }
 
 func (c *LLMClient) endpointURL(path string) string {
@@ -521,6 +563,10 @@ func (c *LLMClient) endpointURL(path string) string {
 }
 
 func (c *LLMClient) chatResponses(messages []llmMessage) (string, error) {
+	return c.chatResponsesWithContext(context.Background(), messages)
+}
+
+func (c *LLMClient) chatResponsesWithContext(ctx context.Context, messages []llmMessage) (string, error) {
 	reqBody := map[string]any{
 		"model": c.model,
 		"input": messagesToPrompt(messages),
@@ -535,9 +581,9 @@ func (c *LLMClient) chatResponses(messages []llmMessage) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.endpointURL("/responses"), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL("/responses"), bytes.NewReader(data))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s responses request creation failed: %s", c.safeProviderLabel(), redactURLQueryValuesInText(err.Error()))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.requiresOpenAIAuth {
@@ -546,22 +592,26 @@ func (c *LLMClient) chatResponses(messages []llmMessage) (string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s responses request failed: %s", c.safeProviderLabel(), redactURLQueryValuesInText(err.Error()))
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readExternalHTTPBody(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("%s responses request failed: %s", c.providerLabel(), strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("%s responses request failed: %s", c.safeProviderLabel(), redactSensitiveText(string(body)))
 	}
 
 	return parseResponsesText(body)
 }
 
 func (c *LLMClient) chatOpenAI(messages []llmMessage) (string, error) {
+	return c.chatOpenAIWithContext(context.Background(), messages)
+}
+
+func (c *LLMClient) chatOpenAIWithContext(ctx context.Context, messages []llmMessage) (string, error) {
 	reqBody := struct {
 		Model    string       `json:"model"`
 		Messages []llmMessage `json:"messages"`
@@ -575,9 +625,9 @@ func (c *LLMClient) chatOpenAI(messages []llmMessage) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.endpointURL("/chat/completions"), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL("/chat/completions"), bytes.NewReader(data))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s chat completions request creation failed: %s", c.safeProviderLabel(), redactURLQueryValuesInText(err.Error()))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.requiresOpenAIAuth {
@@ -586,16 +636,16 @@ func (c *LLMClient) chatOpenAI(messages []llmMessage) (string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s chat completions request failed: %s", c.safeProviderLabel(), redactURLQueryValuesInText(err.Error()))
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readExternalHTTPBody(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("%s chat completions request failed: %s", c.providerLabel(), strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("%s chat completions request failed: %s", c.safeProviderLabel(), redactSensitiveText(string(body)))
 	}
 
 	var result struct {
@@ -616,6 +666,10 @@ func (c *LLMClient) chatOpenAI(messages []llmMessage) (string, error) {
 }
 
 func (c *LLMClient) chatAnthropic(messages []llmMessage) (string, error) {
+	return c.chatAnthropicWithContext(context.Background(), messages)
+}
+
+func (c *LLMClient) chatAnthropicWithContext(ctx context.Context, messages []llmMessage) (string, error) {
 	reqBody := struct {
 		Model     string       `json:"model"`
 		Messages  []llmMessage `json:"messages"`
@@ -631,9 +685,9 @@ func (c *LLMClient) chatAnthropic(messages []llmMessage) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.endpointURL("/messages"), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL("/messages"), bytes.NewReader(data))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s messages request creation failed: %s", c.safeProviderLabel(), redactURLQueryValuesInText(err.Error()))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", c.apiKey)
@@ -641,16 +695,16 @@ func (c *LLMClient) chatAnthropic(messages []llmMessage) (string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s messages request failed: %s", c.safeProviderLabel(), redactURLQueryValuesInText(err.Error()))
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readExternalHTTPBody(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("%s messages request failed: %s", c.providerLabel(), strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("%s messages request failed: %s", c.safeProviderLabel(), redactSensitiveText(string(body)))
 	}
 
 	var result struct {
@@ -1178,6 +1232,7 @@ type SearchClient struct {
 	overallTimeout        time.Duration
 	httpClient            *http.Client
 	progressMu            sync.RWMutex
+	progressCallbackMu    sync.Mutex
 	progressReporter      func(SearchProgressEvent)
 	statsMu               sync.RWMutex
 	lastSearchStats       SearchRetrievalStats
@@ -1359,7 +1414,7 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 				state.Status = "retrying"
 			}
 			if err != nil {
-				state.Error = strings.TrimSpace(err.Error())
+				state.Error = redactSearchErrorText(err)
 			}
 		}
 		sourceStates[sourceName] = state
@@ -1421,7 +1476,7 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 				continue
 			}
 			if result.err != nil {
-				errs = append(errs, fmt.Sprintf("%s: %v", result.name, result.err))
+				errs = append(errs, fmt.Sprintf("%s: %s", result.name, redactSearchErrorText(result.err)))
 				continue
 			}
 		case <-overallCtx.Done():
@@ -1563,12 +1618,12 @@ func (s *SearchClient) retrySourceSearch(
 		}
 
 		lastErr = err
-		log.Printf("[Search][%s] attempt %d/%d failed: %v", sourceName, attempt, s.retryMax, err)
+		log.Printf("[Search][%s] attempt %d/%d failed: %s", sourceName, attempt, s.retryMax, redactSearchErrorText(err))
 		if onAttempt != nil {
 			onAttempt(sourceName, attempt, false, done, 0, err)
 		}
 		if done {
-			return nil, fmt.Errorf("%s failed after %d retries in %v: %v", sourceName, attempt, time.Since(startedAt), lastErr)
+			return nil, fmt.Errorf("%s failed after %d retries in %v: %s", sourceName, attempt, time.Since(startedAt), redactSearchErrorText(lastErr))
 		}
 		if attempt < s.retryMax {
 			if wait := s.retryInterval - time.Since(attemptStarted); wait > 0 {
@@ -1579,85 +1634,14 @@ func (s *SearchClient) retrySourceSearch(
 		}
 	}
 
-	return nil, fmt.Errorf("%s failed after %d retries in %v: %v", sourceName, s.retryMax, time.Since(startedAt), lastErr)
+	return nil, fmt.Errorf("%s failed after %d retries in %v: %s", sourceName, s.retryMax, time.Since(startedAt), redactSearchErrorText(lastErr))
 }
 
-// 新增：arxiv-sanity-lite 搜索
-func (s *SearchClient) searchArxivSanityLite(query string, limit int) ([]SearchPaper, error) {
-	// arxiv-sanity-lite API endpoint
-	apiURL := fmt.Sprintf(
-		"http://arxiv-sanity-lite.com/search?q=%s&size=%d",
-		url.QueryEscape(query),
-		limit,
-	)
-
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
-	if err != nil {
-		return nil, err
+func redactSearchErrorText(err error) string {
+	if err == nil {
+		return ""
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "DiveEnd/1.0")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("arxiv-sanity-lite request failed: %s", strings.TrimSpace(string(body)))
-	}
-
-	// 解析arxiv-sanity-lite响应格式
-	var result struct {
-		Papers []struct {
-			ID       string   `json:"id"`
-			Title    string   `json:"title"`
-			Authors  []string `json:"authors"`
-			Abstract string   `json:"abstract"`
-			Year     int      `json:"year"`
-			Category string   `json:"category"`
-			Tags     []string `json:"tags"`
-		} `json:"papers"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-
-	papers := make([]SearchPaper, 0, len(result.Papers))
-	for _, item := range result.Papers {
-		authors := strings.Join(item.Authors, ", ")
-		arxivURL := fmt.Sprintf("https://arxiv.org/abs/%s", strings.TrimSpace(item.ID))
-		pdfCandidates := []string{}
-		if arxivID := extractArxivID(item.ID); arxivID != "" {
-			pdfCandidates = append(pdfCandidates, fmt.Sprintf("https://arxiv.org/pdf/%s.pdf", arxivID))
-		}
-
-		papers = append(papers, SearchPaper{
-			ID:               item.ID,
-			Title:            strings.TrimSpace(item.Title),
-			Authors:          authors,
-			Abstract:         strings.TrimSpace(item.Abstract),
-			Year:             item.Year,
-			Journal:          "arXiv",
-			PublicationVenue: "arXiv",
-			PublicationYear:  item.Year,
-			CitationCount:    0,
-			URL:              arxivURL,
-			Category:         item.Category,
-			Tags:             item.Tags,
-			Source:           "arxiv_sanity",
-			PDFCandidates:    pdfCandidates,
-			SourceLabel:      "arXiv Sanity Lite",
-		})
-	}
-
-	return papers, nil
+	return redactURLQueryValuesInText(err.Error())
 }
 
 func (s *SearchClient) searchSemanticScholar(
@@ -1701,7 +1685,7 @@ func (s *SearchClient) searchSemanticScholar(
 				cancel()
 				return nil, err
 			}
-			body, readErr := io.ReadAll(resp.Body)
+			body, readErr := readExternalHTTPBody(resp.Body)
 			resp.Body.Close()
 			cancel()
 			if readErr != nil {
@@ -1712,7 +1696,7 @@ func (s *SearchClient) searchSemanticScholar(
 				if resp.StatusCode == http.StatusTooManyRequests {
 					return nil, fmt.Errorf("rate limited (429)")
 				}
-				return nil, fmt.Errorf("request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+				return nil, fmt.Errorf("request failed (%d): %s", resp.StatusCode, redactSensitiveText(string(body)))
 			}
 
 			var result struct {
@@ -1841,13 +1825,13 @@ func (s *SearchClient) searchArXiv(
 		if err != nil {
 			return nil, err
 		}
-		body, err := io.ReadAll(resp.Body)
+		body, err := readExternalHTTPBody(resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			return nil, err
 		}
 		if resp.StatusCode >= 400 {
-			return nil, fmt.Errorf("request failed: %s", strings.TrimSpace(string(body)))
+			return nil, fmt.Errorf("request failed: %s", redactSensitiveText(string(body)))
 		}
 
 		papers, err := parseArXivXML(body)
@@ -1872,6 +1856,8 @@ func (s *SearchClient) emitSearchProgress(progress SearchProgressEvent) {
 		return
 	}
 	progress.CompletedSources = countCompletedSources(progress.Sources)
+	s.progressCallbackMu.Lock()
+	defer s.progressCallbackMu.Unlock()
 	reporter(progress)
 }
 
@@ -2145,7 +2131,6 @@ func (s *SearchClient) EnhancedSearch(query string, limit int, offset int, yearS
 		Sources: []SearchSourceStatus{
 			{Name: "Semantic Scholar", Success: true, Count: len(filtered)},
 			{Name: "arXiv", Success: true, Count: len(filtered)},
-			{Name: "arxiv-sanity-lite", Success: true, Count: len(filtered)},
 		},
 	}
 

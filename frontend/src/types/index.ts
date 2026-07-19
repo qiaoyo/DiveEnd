@@ -43,6 +43,7 @@ export interface AppConfig {
   weakLLM: LLMConfig;
   search: SearchAPIConfig;
   baiduCloud: BaiduCloudConfig;
+  sync: SyncSettings;
   theme: 'light' | 'dark';
   leftPanelWidth: number;
   rightPanelWidth: number;
@@ -67,6 +68,16 @@ export interface CreateFolderNodeRequest {
   parentId?: string;
   path?: string;
   name?: string;
+}
+
+export interface RenameFolderNodeRequest {
+  folderId: string;
+  name: string;
+}
+
+export interface MoveFolderNodeRequest {
+  folderId: string;
+  parentId?: string;
 }
 
 export interface Paper {
@@ -477,6 +488,24 @@ export interface SyncStatus {
   totalFailed: number;
 }
 
+export interface SyncSettings {
+  autoSync: boolean;
+  syncOnStartup: boolean;
+  syncBeforeExit: boolean;
+  syncInterval: number;
+  conflictResolution: 'timestamp' | 'local' | 'remote' | 'manual';
+}
+
+export interface PDFServiceStatus {
+  enabled: boolean;
+  url: string;
+  healthy: boolean;
+  ready: boolean;
+  checks?: Record<string, string>;
+  checkedAt: string;
+  message?: string;
+}
+
 export interface SyncProgress {
   total: number;
   completed: number;
@@ -485,13 +514,53 @@ export interface SyncProgress {
   message?: string;
 }
 
+export interface BaiduTokenRefreshStatus {
+  enabled: boolean;
+  tokenFile: string;
+  hasAccessToken: boolean;
+  hasRefreshToken: boolean;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  refreshed: boolean;
+  checkedAt: string;
+  message?: string;
+}
+
+export interface SyncPreviewFile {
+  key: string;
+  fileName: string;
+  kind: 'database' | 'paper_pdf' | 'other' | string;
+  size: number;
+  remotePath: string;
+}
+
+export interface SyncPreview {
+  enabled: boolean;
+  dataPath: string;
+  remoteRoot: string;
+  tokenFile: string;
+  totalFiles: number;
+  totalBytes: number;
+  databaseBytes: number;
+  paperPdfCount: number;
+  paperPdfBytes: number;
+  otherFiles: number;
+  files: SyncPreviewFile[];
+  checkedAt: string;
+  warning?: string;
+}
+
 export interface SyncConflict {
   id: string;
   fileName: string;
+  fileKind?: string;
   localPath: string;
+  localSize: number;
   localTime: string;
   remotePath: string;
+  remoteSize: number;
   remoteTime: string;
+  newerSide?: 'local' | 'remote' | 'equal' | string;
   resolution?: string;
   resolvedAt?: string;
   createdAt: string;
@@ -505,9 +574,21 @@ export interface SyncRecord {
   remotePath: string;
   localPath: string;
   status: 'pending' | 'success' | 'failed';
+  message?: string;
   errorMessage?: string;
   createdAt: string;
   completedAt?: string;
+}
+
+export interface DatabaseRestoreStatus {
+  pending: boolean;
+  applied: boolean;
+  stagedPath?: string;
+  backupPath?: string;
+  remotePath?: string;
+  scheduledAt?: string;
+  appliedAt?: string;
+  message?: string;
 }
 
 export interface InitialState {
@@ -605,6 +686,13 @@ export const defaultConfig: AppConfig = {
     hasToken: false,
     quota: 0,
     clearToken: false,
+  },
+  sync: {
+    autoSync: false,
+    syncOnStartup: false,
+    syncBeforeExit: false,
+    syncInterval: 30,
+    conflictResolution: 'timestamp',
   },
   theme: 'light',
   leftPanelWidth: 280,

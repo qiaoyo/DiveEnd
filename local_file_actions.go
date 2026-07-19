@@ -79,15 +79,25 @@ func (a *App) AttachLocalPDFToPaper(paperID, sourcePath string) (*Paper, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to access selected PDF: %w", err)
 	}
-	if info.IsDir() || info.Size() == 0 {
+	if !info.Mode().IsRegular() || info.Size() == 0 {
 		return nil, fmt.Errorf("selected PDF is empty or invalid")
 	}
-
-	folderPath := paper.FolderID
-	if folder, folderErr := a.db.GetFolderByID(paper.FolderID); folderErr == nil {
-		folderPath = normalizeFolderPath(folder.Path)
+	if info.Size() > pdfDownloadMaxBytes {
+		return nil, fmt.Errorf("selected PDF is too large: %d bytes exceeds %d bytes limit", info.Size(), pdfDownloadMaxBytes)
 	}
-	targetPath := filepath.Join(a.config.DataPath, "papers", filepath.FromSlash(folderPath), paper.ID+".pdf")
+
+	folder, err := a.db.GetFolderByID(paper.FolderID)
+	if err != nil {
+		return nil, fmt.Errorf("paper folder not found: %w", err)
+	}
+	folderPath := normalizeFolderPath(folder.Path)
+	papersRoot := filepath.Join(a.config.DataPath, "papers")
+	targetPath := filepath.Join(papersRoot, filepath.FromSlash(folderPath), safePaperPDFFileName(paper.ID))
+	managedTargetPath, err := ensureManagedFileParent(papersRoot, targetPath)
+	if err != nil {
+		return nil, fmt.Errorf("managed pdf target is not safe: %w", err)
+	}
+	targetPath = managedTargetPath
 	if err := copyLocalPDF(sourcePath, targetPath); err != nil {
 		return nil, err
 	}
@@ -125,10 +135,11 @@ func (a *App) RetryFolderPendingDownloads(folderID string) (int, error) {
 		return 0, err
 	}
 
-	folderPath := folderID
-	if folder, folderErr := a.db.GetFolderByID(folderID); folderErr == nil {
-		folderPath = normalizeFolderPath(folder.Path)
+	folder, err := a.db.GetFolderByID(folderID)
+	if err != nil {
+		return 0, err
 	}
+	folderPath := normalizeFolderPath(folder.Path)
 
 	queued := 0
 	for _, paper := range papers {
@@ -148,6 +159,7 @@ func (a *App) RetryFolderPendingDownloads(folderID string) (int, error) {
 			PaperID:       paper.ID,
 			FolderID:      paper.FolderID,
 			FolderPath:    folderPath,
+			DataPath:      a.config.DataPath,
 			SourceURL:     strings.TrimSpace(paper.URL),
 			SourcePaperID: strings.TrimSpace(paper.SourcePaperID),
 		})
@@ -158,29 +170,63 @@ func (a *App) RetryFolderPendingDownloads(folderID string) (int, error) {
 }
 
 func copyLocalPDF(sourcePath, targetPath string) error {
-	source, err := os.Open(sourcePath)
+	return copyLocalPDFWithOpen(sourcePath, targetPath, os.Open)
+}
+
+func copyLocalPDFWithOpen(sourcePath, targetPath string, openFile func(string) (*os.File, error)) error {
+	return copyLocalPDFWithOpenAndValidator(sourcePath, targetPath, openFile, validateLocalPDFFile)
+}
+
+func copyLocalPDFWithOpenAndValidator(sourcePath, targetPath string, openFile func(string) (*os.File, error), validateCopiedFile func(string) error) error {
+	sourcePath = strings.TrimSpace(sourcePath)
+	targetPath = strings.TrimSpace(targetPath)
+	if !strings.EqualFold(filepath.Ext(sourcePath), ".pdf") {
+		return fmt.Errorf("source file is not a PDF")
+	}
+	if !strings.EqualFold(filepath.Ext(targetPath), ".pdf") {
+		return fmt.Errorf("target file is not a PDF")
+	}
+	if validateCopiedFile == nil {
+		return fmt.Errorf("copied pdf validation function cannot be nil")
+	}
+
+	source, _, err := openValidatedLocalPDFFileWithOpen(sourcePath, openFile)
 	if err != nil {
 		return err
 	}
 	defer source.Close()
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
-		return err
+	return copyOpenedPDFToTarget(source, targetPath, validateCopiedFile)
+}
+
+func copyOpenedPDFToTarget(source *os.File, targetPath string, validateCopiedFile func(string) error) error {
+	targetPath = strings.TrimSpace(targetPath)
+	if source == nil {
+		return fmt.Errorf("source pdf file cannot be nil")
+	}
+	if !strings.EqualFold(filepath.Ext(targetPath), ".pdf") {
+		return fmt.Errorf("target file is not a PDF")
+	}
+	if validateCopiedFile == nil {
+		return fmt.Errorf("copied pdf validation function cannot be nil")
 	}
 
-	tmpPath := targetPath + ".tmp"
-	target, err := os.Create(tmpPath)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(target, source); err != nil {
-		_ = target.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := target.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return os.Rename(tmpPath, targetPath)
+	return writeFileAtomicWithWriter(targetPath, 0600, func(tmp *os.File) error {
+		written, err := io.Copy(tmp, io.LimitReader(source, pdfDownloadMaxBytes+1))
+		if err != nil {
+			return err
+		}
+		if written > pdfDownloadMaxBytes {
+			return fmt.Errorf("local pdf is too large: exceeds %d bytes limit", pdfDownloadMaxBytes)
+		}
+		return nil
+	}, func(tmp *os.File, tmpPath string) error {
+		if err := validateOpenLocalPDFFile(tmp); err != nil {
+			return fmt.Errorf("copied local pdf validation failed: %w", err)
+		}
+		if err := validateCopiedFile(tmpPath); err != nil {
+			return fmt.Errorf("copied local pdf validation failed: %w", err)
+		}
+		return nil
+	})
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,13 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	config.BaiduCloud.Enabled = true
 	config.BaiduCloud.Token = "baidu-token"
 
+	if err := os.MkdirAll(filepath.Dir(configPathOverride), 0700); err != nil {
+		t.Fatalf("MkdirAll config dir error = %v", err)
+	}
+	if err := os.WriteFile(configPathOverride, []byte(`{"theme":"light"}`), 0644); err != nil {
+		t.Fatalf("WriteFile existing config error = %v", err)
+	}
+
 	if err := SaveAppConfig(config); err != nil {
 		t.Fatalf("SaveAppConfig() error = %v", err)
 	}
@@ -121,6 +129,13 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("expected config permissions 0600, got %o", info.Mode().Perm())
 	}
+	tempMatches, err := filepath.Glob(filepath.Join(filepath.Dir(configPathOverride), ".config.json.tmp-*"))
+	if err != nil {
+		t.Fatalf("Glob temp config files error = %v", err)
+	}
+	if len(tempMatches) != 0 {
+		t.Fatalf("expected no leftover temp config files, got %v", tempMatches)
+	}
 }
 
 func TestLoadAppConfigMigratesLegacyProviderFields(t *testing.T) {
@@ -161,6 +176,12 @@ func TestSanitizeAppConfigRemovesSecretValues(t *testing.T) {
 	config.WeakLLM.APIKey = "weak-secret"
 	config.Search.SemanticScholarAPIKey = "semantic-secret"
 	config.BaiduCloud.Token = "token-secret"
+	config.BaiduCloud.RefreshToken = "refresh-secret"
+	config.BaiduCloud.ClientID = "client-id-secret"
+	config.BaiduCloud.ClientSecret = "client-secret"
+	config.OpenAIAPIKey = "legacy-openai-secret"
+	config.AnthropicAPIKey = "legacy-anthropic-secret"
+	config.SemanticScholarAPIKey = "legacy-semantic-secret"
 
 	sanitized := sanitizeAppConfig(config)
 	if sanitized.LLM.APIKey != "" {
@@ -184,8 +205,14 @@ func TestSanitizeAppConfigRemovesSecretValues(t *testing.T) {
 	if sanitized.BaiduCloud.Token != "" {
 		t.Fatal("expected cloud token to be redacted")
 	}
+	if sanitized.BaiduCloud.RefreshToken != "" || sanitized.BaiduCloud.ClientID != "" || sanitized.BaiduCloud.ClientSecret != "" {
+		t.Fatal("expected cloud refresh/client credentials to be redacted")
+	}
 	if !sanitized.BaiduCloud.HasToken {
 		t.Fatal("expected cloud token presence flag to remain true")
+	}
+	if sanitized.OpenAIAPIKey != "" || sanitized.AnthropicAPIKey != "" || sanitized.SemanticScholarAPIKey != "" {
+		t.Fatal("expected legacy secret fields to be redacted")
 	}
 }
 
@@ -198,6 +225,60 @@ func TestLoadAppConfigInvalidJSON(t *testing.T) {
 
 	if _, err := LoadAppConfig(); err == nil {
 		t.Fatal("expected invalid JSON to return an error")
+	}
+}
+
+func TestLoadAppConfigRejectsOversizedConfigFile(t *testing.T) {
+	useTestConfigPath(t)
+
+	oversized := strings.Repeat(" ", int(appConfigFileLimitBytes)+1)
+	if err := os.WriteFile(configPathOverride, []byte(oversized), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, err := LoadAppConfig(); err == nil || !strings.Contains(err.Error(), "byte limit") {
+		t.Fatalf("expected config byte limit error, got %v", err)
+	}
+}
+
+func TestLoadAppConfigRejectsSymlinkedConfigFile(t *testing.T) {
+	tempDir := useTestConfigPath(t)
+
+	target := filepath.Join(tempDir, "real-config.json")
+	if err := os.WriteFile(target, []byte(`{"theme":"dark"}`), 0600); err != nil {
+		t.Fatalf("WriteFile target error = %v", err)
+	}
+	if err := os.Symlink(target, configPathOverride); err != nil {
+		t.Skipf("Symlink not supported in this environment: %v", err)
+	}
+
+	if _, err := LoadAppConfig(); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("expected config symlink rejection, got %v", err)
+	}
+}
+
+func TestReadLimitedFileRejectsFileSwapDuringOpen(t *testing.T) {
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "seed.json")
+	if err := os.WriteFile(path, []byte(`{"api_key":"original"}`), 0600); err != nil {
+		t.Fatalf("WriteFile original seed error = %v", err)
+	}
+
+	swapped := false
+	_, err := readLimitedFileWithOpen(path, seedConfigFileLimitBytes, func(openPath string) (*os.File, error) {
+		if !swapped {
+			swapped = true
+			if err := os.Remove(openPath); err != nil {
+				t.Fatalf("Remove original seed error = %v", err)
+			}
+			if err := os.WriteFile(openPath, []byte(`{"api_key":"replacement"}`), 0600); err != nil {
+				t.Fatalf("WriteFile replacement seed error = %v", err)
+			}
+		}
+		return os.Open(openPath)
+	})
+	if err == nil || !strings.Contains(err.Error(), "changed while opening") {
+		t.Fatalf("expected file swap rejection, got %v", err)
 	}
 }
 
@@ -230,6 +311,101 @@ func TestLoadAppConfigBootstrapsStrongWeakAndBaiduSeeds(t *testing.T) {
 	}
 	if config.BaiduCloud.Token != "baidu-seed-token" {
 		t.Fatalf("expected baidu token to bootstrap, got %q", config.BaiduCloud.Token)
+	}
+}
+
+func TestLoadAppConfigBaiduSeedOverridesPersistedIncompleteToken(t *testing.T) {
+	useTestConfigPath(t)
+
+	persisted := defaultAppConfig()
+	persisted.BaiduCloud.Enabled = true
+	persisted.BaiduCloud.Token = "old-access-token"
+	persisted.BaiduCloud.RefreshToken = ""
+	persisted.BaiduCloud.ClientID = ""
+	persisted.BaiduCloud.ClientSecret = ""
+	if err := SaveAppConfig(persisted); err != nil {
+		t.Fatalf("SaveAppConfig() error = %v", err)
+	}
+	seedJSON := `{"access_token":"new-access-token","refresh_token":"new-refresh-token","client_id":"new-client-id","client_secret":"new-client-secret"}`
+	if err := os.WriteFile("baiduyun_token.json", []byte(seedJSON), 0600); err != nil {
+		t.Fatalf("WriteFile baidu seed error = %v", err)
+	}
+
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if config.BaiduCloud.Token != "new-access-token" || config.BaiduCloud.RefreshToken != "new-refresh-token" || config.BaiduCloud.ClientID != "new-client-id" || config.BaiduCloud.ClientSecret != "new-client-secret" {
+		t.Fatalf("expected baidu seed to override persisted token fields, got %+v", config.BaiduCloud)
+	}
+}
+
+func TestLoadAppConfigIgnoresOversizedSeedFiles(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := os.MkdirAll("config", 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	oversizedSuffix := strings.Repeat(" ", int(seedConfigFileLimitBytes)+1)
+	if err := os.WriteFile(filepath.Join("config", "strong_llm.json"), []byte(`{"api_key":"oversized-strong"}`+oversizedSuffix), 0600); err != nil {
+		t.Fatalf("WriteFile strong seed error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "weak_llm.json"), []byte(`{"api_key":"oversized-weak"}`+oversizedSuffix), 0600); err != nil {
+		t.Fatalf("WriteFile weak seed error = %v", err)
+	}
+	if err := os.WriteFile("baiduyun_token.json", []byte(`{"access_token":"oversized-token"}`+oversizedSuffix), 0600); err != nil {
+		t.Fatalf("WriteFile baidu seed error = %v", err)
+	}
+	appYAML := `search:
+  enable_semantic_scholar: true
+  semantic_scholar_key_path: "config/semantic_scholar.private.json"
+`
+	if err := os.WriteFile(filepath.Join("config", "app.yaml"), []byte(appYAML), 0644); err != nil {
+		t.Fatalf("WriteFile app.yaml error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "semantic_scholar.private.json"), []byte(`{"api_key":"oversized-semantic"}`+oversizedSuffix), 0600); err != nil {
+		t.Fatalf("WriteFile semantic key seed error = %v", err)
+	}
+
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+
+	if config.LLM.APIKey != "" {
+		t.Fatalf("expected oversized strong seed to be ignored, got %q", config.LLM.APIKey)
+	}
+	if config.WeakLLM.APIKey != "" {
+		t.Fatalf("expected oversized weak seed to be ignored, got %q", config.WeakLLM.APIKey)
+	}
+	if config.BaiduCloud.Token != "" {
+		t.Fatalf("expected oversized baidu seed to be ignored, got %q", config.BaiduCloud.Token)
+	}
+	if config.Search.SemanticScholarAPIKey != "" {
+		t.Fatalf("expected oversized semantic seed to be ignored, got %q", config.Search.SemanticScholarAPIKey)
+	}
+}
+
+func TestLoadAppConfigIgnoresSymlinkedSeedFiles(t *testing.T) {
+	tempDir := useTestConfigPath(t)
+
+	if err := os.MkdirAll("config", 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	target := filepath.Join(tempDir, "external-strong-seed.json")
+	if err := os.WriteFile(target, []byte(`{"api_key":"symlinked-strong-key"}`), 0600); err != nil {
+		t.Fatalf("WriteFile seed target error = %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join("config", "strong_llm.json")); err != nil {
+		t.Skipf("Symlink not supported in this environment: %v", err)
+	}
+
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if config.LLM.APIKey != "" {
+		t.Fatalf("expected symlinked strong seed to be ignored, got %q", config.LLM.APIKey)
 	}
 }
 

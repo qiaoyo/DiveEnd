@@ -1,5 +1,25 @@
 export namespace main {
 	
+	export class SyncSettings {
+	    autoSync: boolean;
+	    syncOnStartup: boolean;
+	    syncBeforeExit: boolean;
+	    syncInterval: number;
+	    conflictResolution: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.autoSync = source["autoSync"];
+	        this.syncOnStartup = source["syncOnStartup"];
+	        this.syncBeforeExit = source["syncBeforeExit"];
+	        this.syncInterval = source["syncInterval"];
+	        this.conflictResolution = source["conflictResolution"];
+	    }
+	}
 	export class BaiduCloudConfig {
 	    enabled: boolean;
 	    token?: string;
@@ -97,6 +117,7 @@ export namespace main {
 	    weakLLM: LLMConfig;
 	    search: SearchAPIConfig;
 	    baiduCloud: BaiduCloudConfig;
+	    sync: SyncSettings;
 	    theme: string;
 	    leftPanelWidth: number;
 	    rightPanelWidth: number;
@@ -118,6 +139,7 @@ export namespace main {
 	        this.weakLLM = this.convertValues(source["weakLLM"], LLMConfig);
 	        this.search = this.convertValues(source["search"], SearchAPIConfig);
 	        this.baiduCloud = this.convertValues(source["baiduCloud"], BaiduCloudConfig);
+	        this.sync = this.convertValues(source["sync"], SyncSettings);
 	        this.theme = source["theme"];
 	        this.leftPanelWidth = source["leftPanelWidth"];
 	        this.rightPanelWidth = source["rightPanelWidth"];
@@ -149,6 +171,34 @@ export namespace main {
 		}
 	}
 	
+	export class BaiduTokenRefreshStatus {
+	    enabled: boolean;
+	    tokenFile: string;
+	    hasAccessToken: boolean;
+	    hasRefreshToken: boolean;
+	    hasClientId: boolean;
+	    hasClientSecret: boolean;
+	    refreshed: boolean;
+	    checkedAt: string;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BaiduTokenRefreshStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.tokenFile = source["tokenFile"];
+	        this.hasAccessToken = source["hasAccessToken"];
+	        this.hasRefreshToken = source["hasRefreshToken"];
+	        this.hasClientId = source["hasClientId"];
+	        this.hasClientSecret = source["hasClientSecret"];
+	        this.refreshed = source["refreshed"];
+	        this.checkedAt = source["checkedAt"];
+	        this.message = source["message"];
+	    }
+	}
 	export class ConfigSecretPrefill {
 	    strongLLMApiKey?: string;
 	    hasStrongLLMApiKey: boolean;
@@ -187,15 +237,39 @@ export namespace main {
 	        this.name = source["name"];
 	    }
 	}
+	export class DatabaseRestoreStatus {
+	    pending: boolean;
+	    applied: boolean;
+	    stagedPath?: string;
+	    backupPath?: string;
+	    remotePath?: string;
+	    scheduledAt?: string;
+	    appliedAt?: string;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DatabaseRestoreStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pending = source["pending"];
+	        this.applied = source["applied"];
+	        this.stagedPath = source["stagedPath"];
+	        this.backupPath = source["backupPath"];
+	        this.remotePath = source["remotePath"];
+	        this.scheduledAt = source["scheduledAt"];
+	        this.appliedAt = source["appliedAt"];
+	        this.message = source["message"];
+	    }
+	}
 	export class DeepReadNote {
 	    id: string;
 	    paperId: string;
 	    section: string;
 	    content: string;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
+	    createdAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeepReadNote(source);
@@ -207,27 +281,9 @@ export namespace main {
 	        this.paperId = source["paperId"];
 	        this.section = source["section"];
 	        this.content = source["content"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class DeepReadSection {
 	    id: string;
@@ -254,10 +310,8 @@ export namespace main {
 	    originalText: string;
 	    translatedText: string;
 	    summary: string;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
+	    createdAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TranslationRecord(source);
@@ -271,27 +325,9 @@ export namespace main {
 	        this.originalText = source["originalText"];
 	        this.translatedText = source["translatedText"];
 	        this.summary = source["summary"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class DeepReadState {
 	    paperId: string;
@@ -303,8 +339,7 @@ export namespace main {
 	    markdown?: string;
 	    translations: TranslationRecord[];
 	    notes: DeepReadNote[];
-	    // Go type: time
-	    lastPreparedAt: any;
+	    lastPreparedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeepReadState(source);
@@ -321,7 +356,7 @@ export namespace main {
 	        this.markdown = source["markdown"];
 	        this.translations = this.convertValues(source["translations"], TranslationRecord);
 	        this.notes = this.convertValues(source["notes"], DeepReadNote);
-	        this.lastPreparedAt = this.convertValues(source["lastPreparedAt"], null);
+	        this.lastPreparedAt = source["lastPreparedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -454,8 +489,7 @@ export namespace main {
 	    sessionId: string;
 	    role: string;
 	    content: string;
-	    // Go type: time
-	    createdAt: any;
+	    createdAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeepStartMessage(source);
@@ -467,26 +501,8 @@ export namespace main {
 	        this.sessionId = source["sessionId"];
 	        this.role = source["role"];
 	        this.content = source["content"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.createdAt = source["createdAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	
 	export class SearchPaper {
@@ -579,10 +595,8 @@ export namespace main {
 	    initialReadyCount?: number;
 	    totalPlannedCount?: number;
 	    backgroundRemaining?: number;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
+	    createdAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeepStartSessionSummary(source);
@@ -599,27 +613,9 @@ export namespace main {
 	        this.initialReadyCount = source["initialReadyCount"];
 	        this.totalPlannedCount = source["totalPlannedCount"];
 	        this.backgroundRemaining = source["backgroundRemaining"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class DeepStartSessionDetail {
 	    summary: DeepStartSessionSummary;
@@ -754,8 +750,7 @@ export namespace main {
 	    parentId?: string;
 	    path: string;
 	    isSystem: boolean;
-	    // Go type: time
-	    createdAt: any;
+	    createdAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Folder(source);
@@ -768,26 +763,8 @@ export namespace main {
 	        this.parentId = source["parentId"];
 	        this.path = source["path"];
 	        this.isSystem = source["isSystem"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.createdAt = source["createdAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class FolderNode {
 	    folder: Folder;
@@ -870,8 +847,7 @@ export namespace main {
 	export class FolderStorageTreeOverview {
 	    rootPath: string;
 	    directories: FolderStorageTreeNode[];
-	    // Go type: time
-	    generatedAt: any;
+	    generatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new FolderStorageTreeOverview(source);
@@ -881,7 +857,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.rootPath = source["rootPath"];
 	        this.directories = this.convertValues(source["directories"], FolderStorageTreeNode);
-	        this.generatedAt = this.convertValues(source["generatedAt"], null);
+	        this.generatedAt = source["generatedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -933,10 +909,8 @@ export namespace main {
 	    folderId: string;
 	    category: string;
 	    tags: string[];
-	    // Go type: time
-	    addedAt: any;
-	    // Go type: time
-	    updatedAt: any;
+	    addedAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Paper(source);
@@ -958,27 +932,9 @@ export namespace main {
 	        this.folderId = source["folderId"];
 	        this.category = source["category"];
 	        this.tags = source["tags"];
-	        this.addedAt = this.convertValues(source["addedAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.addedAt = source["addedAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class ImportPapersWithAssetsResult {
 	    imported: Paper[];
@@ -1095,8 +1051,7 @@ export namespace main {
 	    downloaded: number;
 	    failed: number;
 	    folders: LocalStorageFolderOverview[];
-	    // Go type: time
-	    generatedAt: any;
+	    generatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new LocalStorageOverview(source);
@@ -1112,7 +1067,7 @@ export namespace main {
 	        this.downloaded = source["downloaded"];
 	        this.failed = source["failed"];
 	        this.folders = this.convertValues(source["folders"], LocalStorageFolderOverview);
-	        this.generatedAt = this.convertValues(source["generatedAt"], null);
+	        this.generatedAt = source["generatedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1133,6 +1088,44 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class MoveFolderNodeRequest {
+	    folderId: string;
+	    parentId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MoveFolderNodeRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folderId = source["folderId"];
+	        this.parentId = source["parentId"];
+	    }
+	}
+	export class PDFServiceStatus {
+	    enabled: boolean;
+	    url: string;
+	    healthy: boolean;
+	    ready: boolean;
+	    checks?: Record<string, string>;
+	    checkedAt: string;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PDFServiceStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.url = source["url"];
+	        this.healthy = source["healthy"];
+	        this.ready = source["ready"];
+	        this.checks = source["checks"];
+	        this.checkedAt = source["checkedAt"];
+	        this.message = source["message"];
+	    }
+	}
 	
 	export class PathHistoryItem {
 	    dimension: string;
@@ -1146,6 +1139,20 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.dimension = source["dimension"];
 	        this.choice = source["choice"];
+	    }
+	}
+	export class RenameFolderNodeRequest {
+	    folderId: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RenameFolderNodeRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folderId = source["folderId"];
+	        this.name = source["name"];
 	    }
 	}
 	export class SaveConfigResult {
@@ -1258,10 +1265,8 @@ export namespace main {
 	    selection?: string;
 	    reason?: string;
 	    targetFolderId?: string;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
+	    createdAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ScreeningPaper(source);
@@ -1283,27 +1288,9 @@ export namespace main {
 	        this.selection = source["selection"];
 	        this.reason = source["reason"];
 	        this.targetFolderId = source["targetFolderId"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class ScreeningSession {
 	    id: string;
@@ -1313,10 +1300,8 @@ export namespace main {
 	    currentNodeJson?: string;
 	    selectedOptionsJson?: string;
 	    pathHistoryJson?: string;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
+	    createdAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ScreeningSession(source);
@@ -1331,27 +1316,9 @@ export namespace main {
 	        this.currentNodeJson = source["currentNodeJson"];
 	        this.selectedOptionsJson = source["selectedOptionsJson"];
 	        this.pathHistoryJson = source["pathHistoryJson"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class ScreeningSessionDetail {
 	    session: ScreeningSession;
@@ -1396,17 +1363,17 @@ export namespace main {
 	export class SyncConflict {
 	    id: string;
 	    fileName: string;
+	    fileKind?: string;
 	    localPath: string;
-	    // Go type: time
-	    localTime: any;
+	    localSize: number;
+	    localTime: string;
 	    remotePath: string;
-	    // Go type: time
-	    remoteTime: any;
+	    remoteSize: number;
+	    remoteTime: string;
+	    newerSide?: string;
 	    resolution: string;
-	    // Go type: time
-	    resolvedAt?: any;
-	    // Go type: time
-	    createdAt: any;
+	    resolvedAt?: string;
+	    createdAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SyncConflict(source);
@@ -1416,13 +1383,73 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.fileName = source["fileName"];
+	        this.fileKind = source["fileKind"];
 	        this.localPath = source["localPath"];
-	        this.localTime = this.convertValues(source["localTime"], null);
+	        this.localSize = source["localSize"];
+	        this.localTime = source["localTime"];
 	        this.remotePath = source["remotePath"];
-	        this.remoteTime = this.convertValues(source["remoteTime"], null);
+	        this.remoteSize = source["remoteSize"];
+	        this.remoteTime = source["remoteTime"];
+	        this.newerSide = source["newerSide"];
 	        this.resolution = source["resolution"];
-	        this.resolvedAt = this.convertValues(source["resolvedAt"], null);
-	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.resolvedAt = source["resolvedAt"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
+	export class SyncPreviewFile {
+	    key: string;
+	    fileName: string;
+	    kind: string;
+	    size: number;
+	    remotePath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncPreviewFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.fileName = source["fileName"];
+	        this.kind = source["kind"];
+	        this.size = source["size"];
+	        this.remotePath = source["remotePath"];
+	    }
+	}
+	export class SyncPreview {
+	    enabled: boolean;
+	    dataPath: string;
+	    remoteRoot: string;
+	    tokenFile: string;
+	    totalFiles: number;
+	    totalBytes: number;
+	    databaseBytes: number;
+	    paperPdfCount: number;
+	    paperPdfBytes: number;
+	    otherFiles: number;
+	    files: SyncPreviewFile[];
+	    checkedAt: string;
+	    warning?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncPreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.dataPath = source["dataPath"];
+	        this.remoteRoot = source["remoteRoot"];
+	        this.tokenFile = source["tokenFile"];
+	        this.totalFiles = source["totalFiles"];
+	        this.totalBytes = source["totalBytes"];
+	        this.databaseBytes = source["databaseBytes"];
+	        this.paperPdfCount = source["paperPdfCount"];
+	        this.paperPdfBytes = source["paperPdfBytes"];
+	        this.otherFiles = source["otherFiles"];
+	        this.files = this.convertValues(source["files"], SyncPreviewFile);
+	        this.checkedAt = source["checkedAt"];
+	        this.warning = source["warning"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1443,6 +1470,7 @@ export namespace main {
 		    return a;
 		}
 	}
+	
 	export class SyncProgress {
 	    total: number;
 	    completed: number;
@@ -1471,11 +1499,10 @@ export namespace main {
 	    remotePath: string;
 	    localPath: string;
 	    status: string;
+	    message?: string;
 	    errorMessage?: string;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    completedAt?: any;
+	    createdAt: string;
+	    completedAt?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SyncRecord(source);
@@ -1490,34 +1517,17 @@ export namespace main {
 	        this.remotePath = source["remotePath"];
 	        this.localPath = source["localPath"];
 	        this.status = source["status"];
+	        this.message = source["message"];
 	        this.errorMessage = source["errorMessage"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.completedAt = this.convertValues(source["completedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.completedAt = source["completedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
+	
 	export class SyncStatus {
 	    enabled: boolean;
 	    provider: string;
-	    // Go type: time
-	    lastSync?: any;
+	    lastSync?: string;
 	    syncInProgress: boolean;
 	    pendingFiles: number;
 	    conflicts: number;
@@ -1532,31 +1542,13 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
 	        this.provider = source["provider"];
-	        this.lastSync = this.convertValues(source["lastSync"], null);
+	        this.lastSync = source["lastSync"];
 	        this.syncInProgress = source["syncInProgress"];
 	        this.pendingFiles = source["pendingFiles"];
 	        this.conflicts = source["conflicts"];
 	        this.totalSynced = source["totalSynced"];
 	        this.totalFailed = source["totalFailed"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }
