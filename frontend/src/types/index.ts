@@ -126,6 +126,8 @@ export interface SearchPaper {
   institutions: string[];
   keywords: string[];
   sourceLabel: string;
+  matchReason?: string;
+  matchedTerms?: string[];
   enrichmentNote?: string;
   preprocessStatus?: string;
   localPdfPath?: string;
@@ -495,7 +497,7 @@ export interface ExtractProgress {
   total: number;
   completed: number;
   currentFile: string;
-  status: 'processing' | 'completed' | 'error';
+  status: 'processing' | 'completed' | 'cancelled' | 'error';
   errorMessage?: string;
 }
 

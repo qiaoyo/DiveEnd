@@ -38,6 +38,10 @@ export function CancelScreening(arg1) {
   return window['go']['main']['App']['CancelScreening'](arg1);
 }
 
+export function CancelScreeningTask(arg1) {
+  return window['go']['main']['App']['CancelScreeningTask'](arg1);
+}
+
 export function CompleteScreening(arg1, arg2) {
   return window['go']['main']['App']['CompleteScreening'](arg1, arg2);
 }

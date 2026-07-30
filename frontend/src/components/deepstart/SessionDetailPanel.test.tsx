@@ -139,6 +139,8 @@ describe('SessionDetailPanel', () => {
             institutions: ['CMU', 'OpenAI'],
             keywords: ['embodied', 'benchmark', 'robot policy'],
             sourceLabel: 'arXiv',
+            matchReason: '标题命中关键词：embodied、benchmark。',
+            matchedTerms: ['embodied', 'benchmark'],
           },
         ],
         currentAnalysis: {
@@ -200,6 +202,7 @@ describe('SessionDetailPanel', () => {
     expect(screen.getByText('Unified Embodied Agent Benchmark')).toBeInTheDocument();
     expect(screen.getByText('NeurIPS · 2025 · 引用 156')).toBeInTheDocument();
     expect(screen.getByText(/CMU · OpenAI/)).toBeInTheDocument();
+    expect(screen.getByText('标题命中关键词：embodied、benchmark。')).toBeInTheDocument();
     expect(screen.getByText('robot policy')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择' })).toBeInTheDocument();
   });
@@ -220,6 +223,8 @@ describe('SessionDetailPanel', () => {
 
     expect(screen.getByText('Paper Detail')).toBeInTheDocument();
     expect(screen.getByText('作者列表')).toBeInTheDocument();
+    expect(screen.getByText('检索匹配')).toBeInTheDocument();
+    expect(screen.getByText('命中词：embodied · benchmark')).toBeInTheDocument();
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('完整摘要')).toBeInTheDocument();
   });

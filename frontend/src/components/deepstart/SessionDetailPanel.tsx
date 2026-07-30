@@ -58,11 +58,11 @@ function runtimeMessage(message: string | undefined, fallback: string): string {
 function tierStyle(tier: string) {
   switch (tier) {
     case 'core':
-      return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200';
+      return 'bg-[var(--de-accent-soft)] text-[var(--de-accent)]';
     case 'important':
-      return 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200';
+      return 'border border-[var(--de-rule-strong)] text-[var(--de-ink)]';
     default:
-      return 'bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-200';
+      return 'bg-[var(--de-surface-muted)] text-[var(--de-ink-muted)]';
   }
 }
 
@@ -1104,10 +1104,10 @@ export function SessionDetailPanel() {
     return (
       <div key={node.folderId} className="space-y-1">
         <div
-          className={`rounded-lg border px-3 py-2 text-xs ${
+          className={`rounded-[var(--de-radius)] border px-3 py-2 text-xs ${
             isTarget
-              ? 'border-indigo-300 bg-indigo-50/80 text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-500/15 dark:text-indigo-200'
-              : 'border-slate-200 bg-white/80 text-slate-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200'
+              ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
+              : 'border-[var(--de-rule)] bg-[var(--de-surface)] text-[var(--de-ink)]'
           }`}
           style={{ marginLeft: depth * 10 }}
         >
@@ -1115,7 +1115,7 @@ export function SessionDetailPanel() {
             <button
               type="button"
               onClick={() => void handleTargetFolderChange(node.folderId)}
-              className="truncate text-left font-medium hover:text-indigo-700 dark:hover:text-indigo-200"
+              className="truncate text-left font-medium hover:text-[var(--de-accent)]"
             >
               {node.folderName}
             </button>
@@ -1167,12 +1167,12 @@ export function SessionDetailPanel() {
             setActivePaperId(paper.id);
           }
         }}
-        className={`cursor-pointer rounded-2xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+        className={`cursor-pointer rounded-[var(--de-radius)] border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--de-accent)] ${
           isSelected
-            ? 'border-indigo-400 bg-indigo-50/90 dark:border-indigo-500/60 dark:bg-indigo-500/15'
+            ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)]'
             : isRecommended
-              ? 'border-violet-300 bg-violet-50/80 hover:border-violet-400 dark:border-violet-500/60 dark:bg-violet-500/15'
-              : 'border-slate-200 bg-white/85 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/80'
+              ? 'border-[var(--de-rule-strong)] bg-[var(--de-surface)] hover:border-[var(--de-accent)]'
+              : 'border-[var(--de-rule)] bg-[var(--de-surface)] hover:border-[var(--de-rule-strong)]'
         }`}
       >
         <div className="flex items-start justify-between gap-3">
@@ -1191,6 +1191,12 @@ export function SessionDetailPanel() {
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
               来源：{sourceLabel(paper)} · {institutionLabel(paper)}
             </p>
+            {paper.matchReason ? (
+              <p className="mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-[var(--de-accent)]">
+                <Search className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{paper.matchReason}</span>
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -1199,10 +1205,10 @@ export function SessionDetailPanel() {
               event.stopPropagation();
               void toggleSelect(paper.id);
             }}
-            className={`mt-1 inline-flex shrink-0 items-center justify-center rounded-full border px-2.5 py-1 text-xs font-medium ${
+            className={`mt-1 inline-flex shrink-0 items-center justify-center rounded-[var(--de-radius)] border px-2.5 py-1 text-xs font-medium ${
               isSelected
-                ? 'border-indigo-500 bg-indigo-500 text-white'
-                : 'border-slate-300 text-slate-500 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-500 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300'
+                ? 'border-[var(--de-accent)] bg-[var(--de-accent)] text-white'
+                : 'border-[var(--de-rule-strong)] text-[var(--de-ink-muted)] hover:border-[var(--de-accent)] hover:text-[var(--de-accent)]'
             }`}
           >
             {isSelected ? '已选择' : '选择'}
@@ -1237,7 +1243,7 @@ export function SessionDetailPanel() {
           <p className="text-slate-600 dark:text-slate-300">未找到会话</p>
           <button
             onClick={() => navigate('/history')}
-            className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500"
+            className="de-button-primary mt-4 px-4 py-2"
           >
             返回历史
           </button>
@@ -1334,7 +1340,7 @@ export function SessionDetailPanel() {
             {showRerunStop && (
               <button
                 onClick={() => void handleCancelRunningTask()}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200 dark:hover:bg-rose-500/20"
+                className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-[var(--de-danger)]"
               >
                 <Loader2 className={`h-4 w-4 ${chatRuntime.status === 'cancelling' ? 'animate-spin' : ''}`} />
                 停止
@@ -1361,7 +1367,7 @@ export function SessionDetailPanel() {
               <button
                 type="button"
                 onClick={() => setChatCollapsed((value) => !value)}
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white/80 px-2.5 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200"
+                className="de-button-secondary inline-flex items-center gap-1 px-2.5 py-1 text-xs"
               >
                 {chatCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
                 {chatCollapsed ? '展开' : '收起'}
@@ -1449,12 +1455,12 @@ export function SessionDetailPanel() {
                     }}
                     placeholder="补充你的筛选偏好"
                     rows={3}
-                    className="min-h-[74px] min-w-0 flex-1 resize-y rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
+                    className="de-field min-h-[74px] min-w-0 flex-1 resize-y px-3 py-2 text-xs"
                   />
                   <button
                     onClick={() => void handleReply(replyInput)}
                     disabled={isReplyBlocked || !replyInput.trim()}
-                    className="inline-flex h-fit items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-xs text-white transition hover:bg-violet-500 disabled:opacity-60"
+                    className="de-button-primary inline-flex h-fit items-center gap-1.5 px-3 py-2 text-xs disabled:opacity-60"
                   >
                     {busyAction === 'replying' ? (
                       <>
@@ -1482,13 +1488,13 @@ export function SessionDetailPanel() {
                         onBlur={() => {
                           setSupplementPerSourceLimit((value) => Math.max(5, Math.min(100, Number(value) || 20)));
                         }}
-                        className="w-20 rounded-lg border border-slate-200 bg-white/80 px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-900/80"
+                        className="de-field w-20 px-2 py-1 text-[11px]"
                       />
                     </div>
                     <button
                       onClick={() => void handleSupplementSearch(replyInput)}
                       disabled={isReplyBlocked || !replyInput.trim()}
-                      className="inline-flex h-fit items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs text-white transition hover:bg-emerald-500 disabled:opacity-60"
+                      className="de-button-secondary inline-flex h-fit items-center gap-1.5 px-3 py-2 text-xs disabled:opacity-60"
                     >
                       {busyAction === 'supplementing' ? (
                         <>
@@ -1510,89 +1516,93 @@ export function SessionDetailPanel() {
         <div className="mx-auto max-w-7xl pt-5">
           <div className="mt-5 grid gap-6 xl:grid-cols-[320px_1px_1fr]">
             <aside className="space-y-4">
-              <section className="de-glass rounded-2xl p-4">
-                <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Overview</h3>
-                <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-200">
+              <section className="de-panel p-4">
+                <h3 className="text-sm font-semibold text-[var(--de-ink)]">研究概览</h3>
+                <p className="mt-2 text-sm leading-7 text-[var(--de-ink-muted)]">
                   {currentAnalysis?.overview || 'AI 正在构建这轮检索的分组策略。'}
                 </p>
                 {searchStats && (
-                  <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-slate-200">
+                  <dl className="mt-3 border-t border-[var(--de-rule)] text-xs text-[var(--de-ink-muted)]">
                     {searchStats.originalQuery && (
-                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-                        原始问题：{searchStats.originalQuery}
+                      <div className="border-b border-[var(--de-rule)] py-2">
+                        <dt className="font-medium text-[var(--de-ink)]">原始问题</dt>
+                        <dd className="mt-1 leading-5">{searchStats.originalQuery}</dd>
                       </div>
                     )}
                     {(searchStats.rewrittenQueries?.length ?? 0) > 0 && (
-                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-                        英文检索词：{(searchStats.rewrittenQueries ?? []).join(' | ')}
+                      <div className="border-b border-[var(--de-rule)] py-2">
+                        <dt className="font-medium text-[var(--de-ink)]">英文检索词</dt>
+                        <dd className="mt-1 leading-5">{(searchStats.rewrittenQueries ?? []).join(' | ')}</dd>
                       </div>
                     )}
                     {searchStats.queryHits && Object.keys(searchStats.queryHits).length > 0 && (
-                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-                        重写命中：
+                      <div className="border-b border-[var(--de-rule)] py-2">
+                        <dt className="font-medium text-[var(--de-ink)]">重写命中</dt>
+                        <dd className="mt-1 leading-5">
                         {Object.entries(searchStats.queryHits)
                           .map(([query, count]) => `${query}=${count}`)
                           .join('；')}
+                        </dd>
                       </div>
                     )}
-                    <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-                      首轮检索基线：原始 {searchStats.rawCount} · 去重后 {searchStats.dedupCount} · 入池 {searchStats.finalCount}
+                    <div className="border-b border-[var(--de-rule)] py-2">
+                      <dt className="font-medium text-[var(--de-ink)]">首轮检索基线</dt>
+                      <dd className="mt-1">原始 {searchStats.rawCount} · 去重后 {searchStats.dedupCount} · 入池 {searchStats.finalCount}</dd>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-                      当前候选池：{currentPoolCount} 篇
+                    <div className="border-b border-[var(--de-rule)] py-2">
+                      <dt className="font-medium text-[var(--de-ink)]">当前候选池</dt>
+                      <dd className="mt-1">{currentPoolCount} 篇</dd>
                     </div>
                     {(activeDeepStartSession.summary.totalPlannedCount ?? 0) > 0 && (
-                      <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-                        处理状态：{activeDeepStartSession.summary.processingStatus === 'background_processing' ? '后台处理中' : '已完成'} · 首批就绪 {activeDeepStartSession.summary.initialReadyCount || currentPoolCount} / 总计划 {activeDeepStartSession.summary.totalPlannedCount} · 后台剩余 {activeDeepStartSession.summary.backgroundRemaining || 0}
+                      <div className="py-2">
+                        <dt className="font-medium text-[var(--de-ink)]">处理状态</dt>
+                        <dd className="mt-1 leading-5">
+                          {activeDeepStartSession.summary.processingStatus === 'background_processing' ? '后台处理中' : '已完成'} · 首批就绪 {activeDeepStartSession.summary.initialReadyCount || currentPoolCount} / 总计划 {activeDeepStartSession.summary.totalPlannedCount} · 后台剩余 {activeDeepStartSession.summary.backgroundRemaining || 0}
+                        </dd>
                       </div>
                     )}
-                  </div>
+                  </dl>
                 )}
               </section>
 
-              <section className="de-glass rounded-2xl p-4">
-                <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Category Tree</h3>
+              <section className="de-panel p-4">
+                <h3 className="text-sm font-semibold text-[var(--de-ink)]">研究方向</h3>
                 <div className="mt-3 space-y-2">
-                  {groupedDirections.map((direction, index) => {
+                  {groupedDirections.map((direction) => {
                     const selectedCount = direction.paperIds.filter((paperId) => selectedPaperIds.has(paperId)).length;
                     return (
-                      <div key={direction.id} className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/80">
+                      <div key={direction.id} className="border-b border-[var(--de-rule)] py-3 last:border-b-0">
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-medium">{direction.name}</div>
-                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
-                            {direction.paperIds.length}
-                          </span>
+                          <span className="text-[11px] tabular-nums text-[var(--de-ink-muted)]">{direction.paperIds.length} 篇</span>
                         </div>
                         <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-300">{direction.summary}</p>
                         <div className="mt-2 flex gap-2">
                           <button
                             onClick={() => void toggleDirection(direction, true)}
                             disabled={isSelectionActionBlocked}
-                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                            className="de-button-secondary px-2.5 py-1 text-[11px] disabled:opacity-60"
                           >
                             全选 {selectedCount}/{direction.paperIds.length}
                           </button>
                           <button
                             onClick={() => void toggleDirection(direction, false)}
                             disabled={isSelectionActionBlocked}
-                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                            className="de-button-secondary px-2.5 py-1 text-[11px] disabled:opacity-60"
                           >
                             清空
                           </button>
                         </div>
-                        {index < groupedDirections.length - 1 && (
-                          <div className="mx-auto mt-2 h-3 w-px border-l border-dashed border-indigo-300 dark:border-indigo-500/40" />
-                        )}
                       </div>
                     );
                   })}
                 </div>
               </section>
 
-              <section className="de-glass rounded-2xl p-4">
+              <section className="de-panel p-4">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">本地存储速览</h3>
-                  {loadingStorageOverview && <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" />}
+                  {loadingStorageOverview && <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--de-accent)]" />}
                 </div>
                 {storageTreeOverview ? (
                   <div className="mt-3 max-h-64 space-y-2 overflow-y-auto text-xs text-slate-600 dark:text-slate-200">
@@ -1609,15 +1619,13 @@ export function SessionDetailPanel() {
             <section className="space-y-4">
               {currentResults.length > 0 ? (
                 groupedDirections.map((direction) => (
-                  <div key={direction.id} className="de-glass rounded-2xl p-4">
+                  <section key={direction.id} className="border-t border-[var(--de-rule-strong)] pt-4 first:border-t-0 first:pt-0">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-base font-semibold">{direction.name}</h3>
                         <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{direction.why}</p>
                       </div>
-                      <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200">
-                        {direction.paperIds.length} papers
-                      </span>
+                      <span className="text-xs tabular-nums text-[var(--de-ink-muted)]">{direction.paperIds.length} 篇</span>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       {direction.paperIds
@@ -1625,10 +1633,10 @@ export function SessionDetailPanel() {
                         .filter((paper): paper is SearchPaper => Boolean(paper))
                         .map((paper) => renderPaperCard(paper))}
                     </div>
-                  </div>
+                  </section>
                 ))
               ) : (
-                <div className="de-glass rounded-2xl p-10 text-center">
+                <div className="border-y border-[var(--de-rule)] py-10 text-center">
                   <p className="text-slate-600 dark:text-slate-200">这一轮还没有拿到候选论文</p>
                   <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">
                     可以点击顶部建议 query 重跑，或告诉 AI 你更偏好的论文类型。
@@ -1645,10 +1653,10 @@ export function SessionDetailPanel() {
           <button
             type="button"
             onClick={() => setActivePaperId(null)}
-            className="fixed inset-0 z-30 bg-slate-950/35 backdrop-blur-[1px]"
+            className="fixed inset-0 z-30 bg-slate-950/35"
             aria-label="关闭详情抽屉"
           />
-          <aside className="fixed right-0 top-0 z-40 flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-950">
+          <aside className="fixed right-0 top-0 z-40 flex h-full w-full max-w-2xl flex-col border-l border-[var(--de-rule)] bg-[var(--de-surface)] p-5 shadow-lg">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Paper Detail</p>
@@ -1663,7 +1671,7 @@ export function SessionDetailPanel() {
               <button
                 type="button"
                 onClick={() => setActivePaperId(null)}
-                className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                className="de-button-secondary p-2 text-[var(--de-ink-muted)]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1674,10 +1682,10 @@ export function SessionDetailPanel() {
                 type="button"
                 onClick={() => void toggleSelect(activePaper.id)}
                 disabled={isSelectionActionBlocked}
-                className={`rounded-xl px-3 py-1.5 text-xs font-medium ${
+                className={`rounded-[var(--de-radius)] px-3 py-1.5 text-xs font-medium ${
                   selectedPaperIds.has(activePaper.id)
-                    ? 'bg-indigo-600 text-white'
-                    : 'border border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                    ? 'bg-[var(--de-accent)] text-white'
+                    : 'de-button-secondary'
                 }`}
               >
                 {selectedPaperIds.has(activePaper.id) ? '已选中' : '加入选中'}
@@ -1687,7 +1695,7 @@ export function SessionDetailPanel() {
                   href={activePaper.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  className="de-button-secondary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   打开链接
@@ -1696,16 +1704,27 @@ export function SessionDetailPanel() {
             </div>
 
             <div className="mt-4 grid gap-3 overflow-y-auto pr-1">
-              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">机构 / 学校</h4>
+              {activePaper.matchReason ? (
+                <section className="border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-3 py-2.5">
+                  <h4 className="text-xs font-semibold text-[var(--de-accent)]">检索匹配</h4>
+                  <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-200">{activePaper.matchReason}</p>
+                  {activePaper.matchedTerms?.length ? (
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      命中词：{activePaper.matchedTerms.join(' · ')}
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
+              <section className="border-b border-[var(--de-rule)] px-1 py-3">
+                <h4 className="text-xs font-semibold text-[var(--de-ink-muted)]">机构 / 学校</h4>
                 <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{institutionLabel(activePaper)}</p>
                 {activePaper.enrichmentNote && (
                   <p className="mt-2 text-xs leading-5 text-amber-700 dark:text-amber-300">{activePaper.enrichmentNote}</p>
                 )}
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">关键词</h4>
+              <section className="border-b border-[var(--de-rule)] px-1 py-3">
+                <h4 className="text-xs font-semibold text-[var(--de-ink-muted)]">关键词</h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {paperKeywords(activePaper).length > 0 ? (
                     paperKeywords(activePaper).map((keyword) => (
@@ -1722,8 +1741,8 @@ export function SessionDetailPanel() {
                 </div>
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">作者列表</h4>
+              <section className="border-b border-[var(--de-rule)] px-1 py-3">
+                <h4 className="text-xs font-semibold text-[var(--de-ink-muted)]">作者列表</h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {splitAuthors(activePaper.authors).length > 0 ? (
                     splitAuthors(activePaper.authors).map((author) => (
@@ -1740,13 +1759,13 @@ export function SessionDetailPanel() {
                 </div>
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+              <section className="px-1 py-3">
                 <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">完整摘要</h4>
+                  <h4 className="text-xs font-semibold text-[var(--de-ink-muted)]">完整摘要</h4>
                   <button
                     type="button"
                     onClick={() => void handleCopyActiveAbstract()}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                    className="de-button-secondary px-2 py-1 text-xs"
                   >
                     复制摘要
                   </button>
@@ -1767,7 +1786,7 @@ export function SessionDetailPanel() {
 
       {isFolderModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+          <div className="de-panel w-full max-w-md p-5 shadow-lg">
             <h3 className="text-base font-semibold">新建文件夹</h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">仅支持路径输入，按分段自动创建多级目录（全局根级）。</p>
             <input
@@ -1790,14 +1809,14 @@ export function SessionDetailPanel() {
                 }
               }}
               placeholder="输入路径，例如 Robotics/VLA/Benchmarks"
-              className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+              className="de-field mt-3 w-full px-3 py-2 text-sm"
             />
             {newFolderError && <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">{newFolderError}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsFolderModalOpen(false)}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-200"
+                className="de-button-secondary px-3 py-2 text-sm"
               >
                 取消
               </button>
@@ -1805,7 +1824,7 @@ export function SessionDetailPanel() {
                 type="button"
                 onClick={() => void submitCreateFolder()}
                 disabled={isCreatingFolder}
-                className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-60"
+                className="de-button-primary inline-flex items-center gap-1 px-3 py-2 text-sm disabled:opacity-60"
               >
                 {isCreatingFolder ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
                 创建
@@ -1816,17 +1835,17 @@ export function SessionDetailPanel() {
       )}
 
       <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-7xl -translate-x-1/2 px-6">
-        <div className="pointer-events-auto mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/90">
+        <div className="pointer-events-auto mx-auto max-w-xl rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-4 py-3 shadow-md">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-200">
-              <CheckCheck className="h-4 w-4 text-indigo-500" />
-              当前已选 <span className="font-semibold text-indigo-600 dark:text-indigo-300">{selectedCount}</span> 篇论文
+              <CheckCheck className="h-4 w-4 text-[var(--de-accent)]" />
+              当前已选 <span className="font-semibold text-[var(--de-accent)]">{selectedCount}</span> 篇论文
             </div>
             <button
               onClick={() => void handleImportSelected()}
               disabled={Boolean(importDisabledReason)}
               title={importDisabledReason || '导入到目标文件夹并后台下载 PDF'}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="de-button-primary inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busyAction === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               {busyAction === 'importing' ? '导入中' : '导入选中'}
@@ -1840,21 +1859,21 @@ export function SessionDetailPanel() {
               <button
                 type="button"
                 onClick={() => navigate('/deepread')}
-                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                className="de-button-secondary px-2.5 py-1 text-xs"
               >
                 去 DeepRead
               </button>
               <button
                 type="button"
                 onClick={() => navigate('/history')}
-                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                className="de-button-secondary px-2.5 py-1 text-xs"
               >
                 去历史
               </button>
               <button
                 type="button"
                 onClick={() => navigate('/')}
-                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                className="de-button-secondary px-2.5 py-1 text-xs"
               >
                 回首页
               </button>

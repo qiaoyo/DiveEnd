@@ -50,6 +50,9 @@ func TestRealDeepStartRetrievalE2E(t *testing.T) {
 		if index >= 5 {
 			break
 		}
+		if strings.TrimSpace(paper.MatchReason) == "" {
+			t.Fatalf("rank %d is missing a retrieval explanation: %+v", index+1, paper)
+		}
 		haystack := strings.ToLower(paper.Title + " " + paper.Abstract)
 		if strings.Contains(haystack, "code") ||
 			strings.Contains(haystack, "software") ||
@@ -57,7 +60,7 @@ func TestRealDeepStartRetrievalE2E(t *testing.T) {
 			strings.Contains(haystack, "benchmark") {
 			relevantTopResults++
 		}
-		t.Logf("rank %d: %s", index+1, paper.Title)
+		t.Logf("rank %d: %s (%s)", index+1, paper.Title, paper.MatchReason)
 	}
 	if relevantTopResults < 4 {
 		t.Fatalf("expected at least four of the top five papers to match the research topic, got %d", relevantTopResults)

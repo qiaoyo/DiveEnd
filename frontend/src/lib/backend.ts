@@ -128,6 +128,7 @@ declare global {
           CompleteScreening(sessionId: string, targetFolderId: string): Promise<Paper[]>;
           ListScreeningSessions(): Promise<ScreeningSession[]>;
           GetScreeningSession(sessionId: string): Promise<ScreeningSessionDetail>;
+          CancelScreeningTask(sessionId: string): Promise<void>;
           CancelScreening(sessionId: string): Promise<void>;
 
           // Sync API
@@ -311,6 +312,8 @@ function normalizeSearchPaper(paper: Partial<SearchPaper> | null | undefined): S
     institutions: normalizeArray(paper?.institutions),
     keywords: normalizeArray(paper?.keywords),
     sourceLabel: paper?.sourceLabel ?? '',
+    matchReason: paper?.matchReason ?? '',
+    matchedTerms: normalizeArray(paper?.matchedTerms),
     enrichmentNote: paper?.enrichmentNote ?? '',
     preprocessStatus: paper?.preprocessStatus ?? '',
     localPdfPath: paper?.localPdfPath ?? '',
@@ -2241,6 +2244,14 @@ export async function cancelScreening(sessionId: string): Promise<void> {
     return app.CancelScreening(sessionId);
   }
   assertMockFallbackAllowed(app, 'CancelScreening');
+}
+
+export async function cancelScreeningTask(sessionId: string): Promise<void> {
+  const app = runtimeApp();
+  if (app?.CancelScreeningTask) {
+    return app.CancelScreeningTask(sessionId);
+  }
+  assertMockFallbackAllowed(app, 'CancelScreeningTask');
 }
 
 // ============ Sync API ============

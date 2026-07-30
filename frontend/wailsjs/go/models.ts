@@ -581,6 +581,8 @@ export namespace main {
 	    institutions: string[];
 	    keywords: string[];
 	    sourceLabel: string;
+	    matchReason?: string;
+	    matchedTerms?: string[];
 	    enrichmentNote?: string;
 	    preprocessStatus?: string;
 	    localPdfPath?: string;
@@ -623,6 +625,8 @@ export namespace main {
 	        this.institutions = source["institutions"];
 	        this.keywords = source["keywords"];
 	        this.sourceLabel = source["sourceLabel"];
+	        this.matchReason = source["matchReason"];
+	        this.matchedTerms = source["matchedTerms"];
 	        this.enrichmentNote = source["enrichmentNote"];
 	        this.preprocessStatus = source["preprocessStatus"];
 	        this.localPdfPath = source["localPdfPath"];

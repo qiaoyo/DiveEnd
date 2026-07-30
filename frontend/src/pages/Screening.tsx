@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, FileUp, Filter, Loader2, Sparkles } from 'lucide-react';
 import type { ExtractProgress, Paper, ScreeningDecisionNode, ScreeningSessionDetail } from '../types';
 import * as backend from '../lib/backend';
-import { errorToUserMessage } from '../lib/errors';
+import { errorToUserMessage, isCancellationError } from '../lib/errors';
 import { useAppStore } from '../stores/appStore';
 
 type ScreeningStage = 'upload' | 'extract' | 'screen' | 'results';
@@ -23,6 +23,7 @@ export const Screening: React.FC = () => {
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [extractionProgress, setExtractionProgress] = useState<ExtractProgress | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [importedPapers, setImportedPapers] = useState<Paper[]>([]);
@@ -64,6 +65,7 @@ export const Screening: React.FC = () => {
     setError(null);
     setImportedPapers([]);
     setIsBusy(false);
+    setIsCancelling(false);
   };
 
   const resolveInputPaths = async (files: File[]): Promise<string[]> => {
@@ -103,7 +105,17 @@ export const Screening: React.FC = () => {
 
       await proceedToAnalysis(nextSessionId);
     } catch (cause) {
-      setError(errorToUserMessage(cause, 'PDF 抽取失败'));
+      if (isCancellationError(cause)) {
+        setExtractionProgress((previous) => previous ? {
+          ...previous,
+          status: 'cancelled',
+          currentFile: '',
+          errorMessage: '',
+        } : previous);
+        setError(null);
+      } else {
+        setError(errorToUserMessage(cause, 'PDF 抽取失败'));
+      }
       setCurrentStage('extract');
       const latest = await backend.getScreeningSession(nextSessionId).catch(() => null);
       if (latest) {
@@ -111,6 +123,20 @@ export const Screening: React.FC = () => {
       }
     } finally {
       setIsBusy(false);
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCancelTask = async () => {
+    if (!sessionId || !isBusy) {
+      return;
+    }
+    setIsCancelling(true);
+    try {
+      await backend.cancelScreeningTask(sessionId);
+    } catch (cause) {
+      setError(errorToUserMessage(cause, '停止批量分析失败'));
+      setIsCancelling(false);
     }
   };
 
@@ -368,6 +394,16 @@ export const Screening: React.FC = () => {
       )}
 
       <div className="mt-4 flex flex-wrap gap-2">
+        {isBusy ? (
+          <button
+            type="button"
+            onClick={() => void handleCancelTask()}
+            disabled={isCancelling}
+            className="de-button-secondary px-4 py-2 text-sm text-[var(--de-danger)]"
+          >
+            {isCancelling ? '正在停止' : '停止任务'}
+          </button>
+        ) : null}
         <button
           onClick={() => sessionId && void runExtraction(sessionId)}
           disabled={!sessionId || isBusy}

@@ -2345,7 +2345,6 @@ func searchPaperQualityScore(paper SearchPaper) int {
 }
 
 func rankSearchPapersByQueries(papers []SearchPaper, queries []string) []SearchPaper {
-	ranked := append([]SearchPaper(nil), papers...)
 	tokens := make([]string, 0, 24)
 	phrases := make([]string, 0, len(queries))
 	primaryTokens := map[string]struct{}{}
@@ -2365,10 +2364,14 @@ func rankSearchPapersByQueries(papers []SearchPaper, queries []string) []SearchP
 	}
 	tokens = uniqueStrings(tokens)
 
-	score := func(paper SearchPaper) int {
+	score := func(paper SearchPaper) (int, string, []string) {
 		title := strings.ToLower(strings.TrimSpace(paper.Title))
 		abstract := strings.ToLower(strings.TrimSpace(paper.Abstract))
 		value := 0
+		titlePhrases := make([]string, 0, 2)
+		abstractPhrases := make([]string, 0, 2)
+		titleTerms := make([]string, 0, 6)
+		abstractTerms := make([]string, 0, 6)
 		for index, phrase := range phrases {
 			titleWeight := 30
 			abstractWeight := 12
@@ -2378,8 +2381,10 @@ func rankSearchPapersByQueries(papers []SearchPaper, queries []string) []SearchP
 			}
 			if strings.Contains(title, phrase) {
 				value += titleWeight
+				titlePhrases = append(titlePhrases, phrase)
 			} else if strings.Contains(abstract, phrase) {
 				value += abstractWeight
+				abstractPhrases = append(abstractPhrases, phrase)
 			}
 		}
 		for _, token := range tokens {
@@ -2391,26 +2396,63 @@ func rankSearchPapersByQueries(papers []SearchPaper, queries []string) []SearchP
 			}
 			if strings.Contains(title, token) {
 				value += titleWeight
+				titleTerms = append(titleTerms, token)
 			}
 			if strings.Contains(abstract, token) {
 				value += abstractWeight
+				abstractTerms = append(abstractTerms, token)
 			}
 		}
-		return value
+		matchedTerms := uniqueStrings(append(titleTerms, abstractTerms...))
+		if len(matchedTerms) > 6 {
+			matchedTerms = matchedTerms[:6]
+		}
+		return value, buildSearchPaperMatchReason(titlePhrases, abstractPhrases, titleTerms, abstractTerms), matchedTerms
 	}
 
-	sort.SliceStable(ranked, func(i, j int) bool {
-		leftScore := score(ranked[i])
-		rightScore := score(ranked[j])
-		if leftScore != rightScore {
-			return leftScore > rightScore
+	type scoredPaper struct {
+		paper SearchPaper
+		score int
+	}
+	scored := make([]scoredPaper, 0, len(papers))
+	for _, paper := range papers {
+		value, reason, matchedTerms := score(paper)
+		paper.MatchReason = reason
+		paper.MatchedTerms = matchedTerms
+		scored = append(scored, scoredPaper{paper: paper, score: value})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
 		}
-		if ranked[i].Year != ranked[j].Year {
-			return ranked[i].Year > ranked[j].Year
+		if scored[i].paper.Year != scored[j].paper.Year {
+			return scored[i].paper.Year > scored[j].paper.Year
 		}
-		return strings.ToLower(ranked[i].Title) < strings.ToLower(ranked[j].Title)
+		return strings.ToLower(scored[i].paper.Title) < strings.ToLower(scored[j].paper.Title)
 	})
+	ranked := make([]SearchPaper, 0, len(scored))
+	for _, item := range scored {
+		ranked = append(ranked, item.paper)
+	}
 	return ranked
+}
+
+func buildSearchPaperMatchReason(titlePhrases, abstractPhrases, titleTerms, abstractTerms []string) string {
+	if len(titlePhrases) > 0 {
+		return fmt.Sprintf("标题直接匹配检索短语「%s」。", titlePhrases[0])
+	}
+	titleTerms = uniqueStrings(titleTerms)
+	abstractTerms = uniqueStrings(abstractTerms)
+	if len(titleTerms) > 0 {
+		return "标题命中关键词：" + strings.Join(compactStrings(titleTerms, 4), "、") + "。"
+	}
+	if len(abstractPhrases) > 0 {
+		return fmt.Sprintf("摘要直接匹配检索短语「%s」。", abstractPhrases[0])
+	}
+	if len(abstractTerms) > 0 {
+		return "摘要命中关键词：" + strings.Join(compactStrings(abstractTerms, 4), "、") + "。"
+	}
+	return "由论文来源召回，当前按年份与元数据完整度辅助排序。"
 }
 
 func extractJSONObject(raw string) string {

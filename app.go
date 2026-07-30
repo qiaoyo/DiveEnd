@@ -44,6 +44,8 @@ type App struct {
 	deepStartTasks        map[string]deepStartTaskHandle
 	deepReadAITaskMu      sync.Mutex
 	deepReadAITask        deepReadAITaskHandle
+	screeningTaskMu       sync.Mutex
+	screeningTasks        map[string]screeningTaskHandle
 	pdfResourceMu         sync.Mutex
 	pdfResources          map[string]deepReadPDFResource
 	closeMu               sync.Mutex
@@ -63,6 +65,7 @@ func NewApp() *App {
 	return &App{
 		extractProgress:  map[string]*ExtractProgress{},
 		deepStartTasks:   map[string]deepStartTaskHandle{},
+		screeningTasks:   map[string]screeningTaskHandle{},
 		pdfResources:     map[string]deepReadPDFResource{},
 		emitRuntimeEvent: runtime.EventsEmit,
 	}
@@ -102,6 +105,7 @@ func (a *App) shutdown(ctx context.Context) {
 	a.stopPeriodicSyncLoop()
 	a.cancelAllDeepStartTasks()
 	a.cancelDeepReadAI()
+	a.cancelAllScreeningTasks()
 	a.stopDownloadWorkers()
 	a.stopManagedPDFService()
 	a.closeMu.Lock()

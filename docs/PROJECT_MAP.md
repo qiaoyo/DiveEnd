@@ -75,6 +75,7 @@ Purpose:
 - Start an AI-assisted research exploration from a natural language prompt.
 - Search Semantic Scholar and arXiv.
 - Rewrite and enrich queries.
+- Persist a concise explanation of which retrieval phrase or title/abstract terms caused each paper to rank.
 - Preprocess PDF/markdown caches when possible.
 - Generate analysis directions and recommended papers.
 - Persist session history and selections.
@@ -167,6 +168,7 @@ Purpose:
 - Select PDFs through native picker or path resolution.
 - Copy PDFs into `DataPath/screening/<session>/<paper>/`.
 - Extract content through the PDF service.
+- Stop extraction or initial AI analysis without deleting the session; completed papers remain available for retry or partial continuation.
 - Build and traverse an LLM decision tree.
 - Import selected papers into the library.
 
@@ -174,6 +176,7 @@ Backend files:
 
 - `screening.go`
 - `screening_workflow.go`
+- `screening_task.go`
 - `pdf_service_client.go`
 - `local_file_actions.go`
 - `models.go`
@@ -187,6 +190,7 @@ Frontend files:
 Tests:
 
 - `screening_sync_test.go`
+- `screening_task_test.go`
 - `pdf_service_client_test.go`
 - `frontend/src/pages/Screening.test.tsx`
 

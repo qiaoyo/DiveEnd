@@ -20,6 +20,8 @@ export function CancelPendingDatabaseRestore():Promise<void>;
 
 export function CancelScreening(arg1:string):Promise<void>;
 
+export function CancelScreeningTask(arg1:string):Promise<void>;
+
 export function CompleteScreening(arg1:string,arg2:string):Promise<Array<main.Paper>>;
 
 export function CreateFolder(arg1:string):Promise<main.Folder>;

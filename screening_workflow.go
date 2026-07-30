@@ -122,7 +122,16 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 	if a.pdfService == nil {
 		return nil, fmt.Errorf("pdf service client is not initialized")
 	}
-	if err := a.ensureManagedPDFServiceReady(a.ctx); err != nil {
+	taskCtx, taskToken, err := a.beginScreeningTask(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer a.finishScreeningTask(sessionID, taskToken)
+
+	if err := a.ensureManagedPDFServiceReady(taskCtx); err != nil {
+		if isScreeningTaskCancelled(err) {
+			return nil, ErrScreeningTaskCancelled
+		}
 		return nil, fmt.Errorf("pdf service is not ready: %w", err)
 	}
 
@@ -140,6 +149,9 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 		Status:    "processing",
 	}
 	for _, paper := range detail.Papers {
+		if taskCtx.Err() != nil {
+			return a.abortScreeningExtraction(&paper, progress)
+		}
 		if paper.Status == "extracted" || paper.Status == "selected" {
 			progress.Completed++
 		}
@@ -167,8 +179,11 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 		progress.ErrorMessage = ""
 		a.storeExtractProgress(progress)
 
-		parseResult, err := a.pdfService.ParsePDFWithContext(a.ctx, paper.FilePath)
+		parseResult, err := a.pdfService.ParsePDFWithContext(taskCtx, paper.FilePath)
 		if err != nil {
+			if isScreeningTaskCancelled(err) {
+				return a.abortScreeningExtraction(&paper, progress)
+			}
 			failedCount++
 			if firstErr == nil {
 				firstErr = err
@@ -186,9 +201,12 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 		if err != nil {
 			return nil, err
 		}
-		extractResult, err := a.pdfService.ExtractContentWithContext(a.ctx, parseResult.Markdown, extractionLLMConfig)
+		extractResult, err := a.pdfService.ExtractContentWithContext(taskCtx, parseResult.Markdown, extractionLLMConfig)
 		if err != nil {
 			reservation.Finish(0)
+			if isScreeningTaskCancelled(err) {
+				return a.abortScreeningExtraction(&paper, progress)
+			}
 			failedCount++
 			if firstErr == nil {
 				firstErr = err
@@ -254,6 +272,23 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 	progress.CurrentFile = ""
 	a.storeExtractProgress(progress)
 	return cloneExtractProgress(progress), nil
+}
+
+func (a *App) abortScreeningExtraction(paper *ScreeningPaper, progress *ExtractProgress) (*ExtractProgress, error) {
+	if paper != nil && paper.Status == "extracting" {
+		paper.Status = "pending"
+		paper.Reason = ""
+		paper.UpdatedAt = time.Now()
+		_ = a.db.UpsertScreeningPaper(paper)
+	}
+	if progress == nil {
+		progress = &ExtractProgress{}
+	}
+	progress.Status = "cancelled"
+	progress.ErrorMessage = ""
+	progress.CurrentFile = ""
+	a.storeExtractProgress(progress)
+	return cloneExtractProgress(progress), ErrScreeningTaskCancelled
 }
 
 func (a *App) reservePDFExtractionBudget(markdown string, config PDFExtractionLLMConfig) (*tokenReservation, error) {
@@ -338,8 +373,17 @@ func (a *App) AnalyzePapers(sessionID string) (*ScreeningDecisionNode, error) {
 		return nil, fmt.Errorf("no extracted papers available for screening")
 	}
 
-	node, err := a.buildNextScreeningNode(detail.Session.Title, candidates, detail.PathHistory)
+	taskCtx, taskToken, err := a.beginScreeningTask(sessionID)
 	if err != nil {
+		return nil, err
+	}
+	defer a.finishScreeningTask(sessionID, taskToken)
+
+	node, err := a.buildNextScreeningNodeWithContext(taskCtx, detail.Session.Title, candidates, detail.PathHistory)
+	if err != nil {
+		if isScreeningTaskCancelled(err) {
+			return nil, ErrScreeningTaskCancelled
+		}
 		return nil, err
 	}
 
@@ -529,6 +573,9 @@ func (a *App) CancelScreening(sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return fmt.Errorf("sessionID is required")
+	}
+	if !a.cancelScreeningTaskAndWait(sessionID, 10*time.Second) {
+		return fmt.Errorf("screening task is still stopping; retry cancellation before deleting the session")
 	}
 
 	a.stateMu.Lock()

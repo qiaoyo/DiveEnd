@@ -19,6 +19,35 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+func TestRankSearchPapersExplainsQueryMatches(t *testing.T) {
+	papers := []SearchPaper{
+		{ID: "abstract", Title: "A Recent Systems Paper", Abstract: "We evaluate code agent reliability.", Year: 2026},
+		{ID: "title", Title: "Code Agent Benchmark", Abstract: "A benchmark suite.", Year: 2024},
+		{ID: "fallback", Title: "Unrelated Study", Abstract: "No matching terms.", Year: 2027},
+	}
+
+	ranked := rankSearchPapersByQueries(papers, []string{"code agent benchmark", "agent reliability"})
+	if ranked[0].ID != "title" {
+		t.Fatalf("expected direct title phrase match first, got %+v", ranked)
+	}
+	if !strings.Contains(ranked[0].MatchReason, "标题直接匹配") {
+		t.Fatalf("expected title match explanation, got %q", ranked[0].MatchReason)
+	}
+	if len(ranked[0].MatchedTerms) == 0 {
+		t.Fatalf("expected matched terms, got %+v", ranked[0])
+	}
+
+	var fallback SearchPaper
+	for _, paper := range ranked {
+		if paper.ID == "fallback" {
+			fallback = paper
+		}
+	}
+	if !strings.Contains(fallback.MatchReason, "来源召回") {
+		t.Fatalf("expected transparent fallback explanation, got %q", fallback.MatchReason)
+	}
+}
+
 func TestParseArXivXML(t *testing.T) {
 	xmlData := []byte(`
 <feed xmlns="http://www.w3.org/2005/Atom">

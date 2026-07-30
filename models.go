@@ -224,6 +224,8 @@ type SearchPaper struct {
 	Institutions             []string          `json:"institutions"`
 	Keywords                 []string          `json:"keywords"`
 	SourceLabel              string            `json:"sourceLabel"`
+	MatchReason              string            `json:"matchReason,omitempty"`
+	MatchedTerms             []string          `json:"matchedTerms,omitempty"`
 	EnrichmentNote           string            `json:"enrichmentNote,omitempty"`
 	PreprocessStatus         string            `json:"preprocessStatus,omitempty"` // pending | no_pdf_url | downloading | downloaded | parsing | parsed | extracting | extracted | failed
 	LocalPDFPath             string            `json:"localPdfPath,omitempty"`

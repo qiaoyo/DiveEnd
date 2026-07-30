@@ -14,6 +14,7 @@ const backendMocks = vi.hoisted(() => ({
   analyzePapers: vi.fn(),
   applyScreeningChoice: vi.fn(),
   completeScreening: vi.fn(),
+  cancelScreeningTask: vi.fn(),
   getPapers: vi.fn(),
 }));
 
@@ -30,6 +31,7 @@ describe('Screening page', () => {
     backendMocks.resolveFilePaths.mockReturnValue(['/tmp/paper-1.pdf', '/tmp/paper-2.pdf']);
     backendMocks.selectScreeningPDFs.mockResolvedValue(['/tmp/paper-1.pdf', '/tmp/paper-2.pdf']);
     backendMocks.onExtractProgress.mockReturnValue(() => undefined);
+    backendMocks.cancelScreeningTask.mockResolvedValue(undefined);
     backendMocks.createScreeningSession.mockResolvedValue({
       id: 'session-1',
       title: 'Screening',
@@ -259,6 +261,32 @@ describe('Screening page', () => {
 
     expect(await screen.findByText('pdf service unavailable')).toBeInTheDocument();
     expect(screen.getByText('提取论文内容')).toBeInTheDocument();
+  });
+
+  it('stops an in-flight extraction without deleting the screening session', async () => {
+    backendMocks.extractPaperContent.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => {
+        backendMocks.cancelScreeningTask.mockImplementationOnce(async () => {
+          reject(new Error('screening task cancelled'));
+        });
+      }),
+    );
+
+    const { container } = render(<Screening />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: {
+        files: [new File(['pdf'], 'paper-1.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    const stopButton = await screen.findByRole('button', { name: '停止任务' });
+    fireEvent.click(stopButton);
+
+    await waitFor(() => expect(backendMocks.cancelScreeningTask).toHaveBeenCalledWith('session-1'));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument());
+    expect(screen.queryByText('screening task cancelled')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新提取' })).toBeEnabled();
   });
 
   it('shows safe path-resolution errors for file input failures', async () => {
