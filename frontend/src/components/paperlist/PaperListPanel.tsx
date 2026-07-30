@@ -346,10 +346,10 @@ export function PaperListPanel() {
 
   if (rightPanelCollapsed) {
     return (
-      <div className="flex h-full flex-col items-center justify-between border-l border-stone-200 bg-[#efe9de] py-4 dark:border-stone-800 dark:bg-[#1c1c1a]">
+      <div className="flex h-full flex-col items-center justify-between border-l border-[var(--de-rule)] bg-[var(--de-surface)] py-4">
         <div className="flex flex-col items-center gap-4">
-          <div className="rounded-2xl bg-white/80 p-3 shadow-sm dark:bg-stone-900/80">
-            <FolderOpen className="h-5 w-5 text-emerald-600" />
+          <div className="p-3">
+            <FolderOpen className="h-5 w-5 text-[var(--de-accent)]" />
           </div>
           <span className="text-xs uppercase tracking-[0.3em] text-stone-500 [writing-mode:vertical-rl] dark:text-stone-400">
             Library
@@ -357,7 +357,7 @@ export function PaperListPanel() {
         </div>
         <button
           onClick={toggleRightPanel}
-          className="rounded-xl border border-stone-200 p-2 text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+          className="de-button-secondary p-2 text-[var(--de-ink-muted)]"
           title="展开论文库"
         >
           <ChevronLeft className="h-4 w-4" />
@@ -367,18 +367,18 @@ export function PaperListPanel() {
   }
 
   return (
-    <div className="relative flex h-full flex-col border-l border-stone-200 bg-[#efe9de] dark:border-stone-800 dark:bg-[#1c1c1a]">
+    <div className="relative flex h-full flex-col border-l border-[var(--de-rule)] bg-[var(--de-surface)]">
       {folderDeleteCandidate && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-3xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-700 dark:bg-stone-950">
-            <div className="flex items-center gap-2 text-red-600 dark:text-red-300">
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] p-5 shadow-lg">
+            <div className="flex items-center gap-2 text-[var(--de-danger)]">
               <Trash2 className="h-5 w-5" />
               <h3 className="font-semibold">确认删除文件夹</h3>
             </div>
-            <p className="mt-3 text-sm leading-6 text-stone-600 dark:text-stone-300">
+            <p className="mt-3 text-sm leading-6 text-[var(--de-ink-muted)]">
               将删除「{folderDeleteCandidate.path || folderDeleteCandidate.name}」及其子文件夹。这个操作会影响该目录下的论文和本地文件管理记录。
             </p>
-            <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 p-3 text-xs leading-6 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+            <div className="mt-3 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-3 text-xs leading-6 text-[var(--de-danger)]">
               <div>子文件夹数量：{folderDeleteChildCount}</div>
               <div>当前已加载列表中受影响论文：{loadedDeletePaperCount}</div>
               <div>删除后如果当前正在查看该目录，会自动切换回系统文件夹。</div>
@@ -387,14 +387,14 @@ export function PaperListPanel() {
               <button
                 type="button"
                 onClick={() => setFolderDeleteCandidateId('')}
-                className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600 transition hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800"
+                className="de-button-secondary px-3 py-2 text-sm"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={() => void handleConfirmDeleteFolder()}
-                className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+                className="rounded-[var(--de-radius)] bg-[var(--de-danger)] px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
               >
                 确认删除
               </button>
@@ -402,24 +402,24 @@ export function PaperListPanel() {
           </div>
         </div>
       )}
-      <div className="border-b border-stone-200 p-4 dark:border-stone-800">
+      <div className="border-b border-[var(--de-rule)] p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FolderOpen className="h-5 w-5 text-emerald-600" />
+            <FolderOpen className="h-5 w-5 text-[var(--de-accent)]" />
             <span className="font-semibold">论文库</span>
             <span className="text-sm text-stone-500 dark:text-stone-400">({papers.length})</span>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => setCreatingFolder((value) => !value)}
-              className="rounded-xl border border-stone-200 p-2 text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+              className="de-button-secondary p-2 text-[var(--de-ink-muted)]"
               title="新建文件夹"
             >
               <FolderPlus className="h-4 w-4" />
             </button>
             <button
               onClick={toggleRightPanel}
-              className="rounded-xl border border-stone-200 p-2 text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+              className="de-button-secondary p-2 text-[var(--de-ink-muted)]"
               title="收起论文库"
             >
               <ChevronRight className="h-4 w-4" />
@@ -428,10 +428,10 @@ export function PaperListPanel() {
         </div>
       </div>
 
-      <div className="border-b border-stone-200 p-3 dark:border-stone-800">
+      <div className="border-b border-[var(--de-rule)] p-3">
         {creatingFolder && (
           <form
-            className="mb-3 rounded-2xl border border-emerald-200 bg-white/80 p-2 dark:border-emerald-500/40 dark:bg-stone-900/80"
+            className="mb-3 border border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-2"
             onSubmit={(event) => {
               event.preventDefault();
               void handleCreateFolder();
@@ -442,12 +442,12 @@ export function PaperListPanel() {
               onChange={(event) => setNewFolderName(event.target.value)}
               autoFocus
               placeholder="新文件夹名称"
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-950"
+              className="de-field w-full px-3 py-2 text-sm"
             />
             <div className="mt-2 flex gap-2">
               <button
                 type="submit"
-                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                className="de-button-primary px-3 py-1.5 text-xs font-medium"
               >
                 创建
               </button>
@@ -457,7 +457,7 @@ export function PaperListPanel() {
                   setCreatingFolder(false);
                   setNewFolderName('');
                 }}
-                className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-600 hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+                className="de-button-secondary px-3 py-1.5 text-xs"
               >
                 取消
               </button>
@@ -466,7 +466,7 @@ export function PaperListPanel() {
         )}
         {renamingFolderId && (
           <form
-            className="mb-3 rounded-2xl border border-amber-200 bg-white/80 p-2 dark:border-amber-500/40 dark:bg-stone-900/80"
+            className="mb-3 border border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-2"
             onSubmit={(event) => {
               event.preventDefault();
               void handleRenameFolder();
@@ -477,12 +477,12 @@ export function PaperListPanel() {
               onChange={(event) => setRenameFolderName(event.target.value)}
               autoFocus
               placeholder="新的文件夹名称"
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500 dark:border-stone-700 dark:bg-stone-950"
+              className="de-field w-full px-3 py-2 text-sm"
             />
             <div className="mt-2 flex gap-2">
               <button
                 type="submit"
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-500"
+                className="de-button-primary px-3 py-1.5 text-xs font-medium"
               >
                 保存
               </button>
@@ -492,7 +492,7 @@ export function PaperListPanel() {
                   setRenamingFolderId('');
                   setRenameFolderName('');
                 }}
-                className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-600 hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+                className="de-button-secondary px-3 py-1.5 text-xs"
               >
                 取消
               </button>
@@ -501,20 +501,20 @@ export function PaperListPanel() {
         )}
         {movingFolderId && (
           <form
-            className="mb-3 rounded-2xl border border-sky-200 bg-white/80 p-2 dark:border-sky-500/40 dark:bg-stone-900/80"
+            className="mb-3 border border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-2"
             onSubmit={(event) => {
               event.preventDefault();
               void handleMoveFolder();
             }}
           >
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">
+            <label className="mb-1 block text-[11px] font-medium text-[var(--de-ink-muted)]">
               移动文件夹到
             </label>
             <select
               value={moveFolderParentId}
               onChange={(event) => setMoveFolderParentId(event.target.value)}
               aria-label="移动文件夹目标父级"
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 dark:border-stone-700 dark:bg-stone-950"
+              className="de-field w-full px-3 py-2 text-sm"
             >
               {validParentFolderIdsForMove(movingFolderId).map((parentId) => {
                 const parent = folders.find((folder) => folder.id === parentId);
@@ -528,7 +528,7 @@ export function PaperListPanel() {
             <div className="mt-2 flex gap-2">
               <button
                 type="submit"
-                className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+                className="de-button-primary px-3 py-1.5 text-xs font-medium"
               >
                 移动
               </button>
@@ -538,7 +538,7 @@ export function PaperListPanel() {
                   setMovingFolderId('');
                   setMoveFolderParentId('');
                 }}
-                className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-600 hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+                className="de-button-secondary px-3 py-1.5 text-xs"
               >
                 取消
               </button>
@@ -549,10 +549,10 @@ export function PaperListPanel() {
           {folders.map((folder) => (
             <div
               key={folder.id}
-              className={`inline-flex items-center overflow-hidden rounded-full text-sm transition ${
+              className={`inline-flex items-center overflow-hidden rounded-[var(--de-radius)] border text-sm transition-colors ${
                 activeFolderId === folder.id
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-white text-stone-600 hover:text-emerald-700 dark:bg-stone-900 dark:text-stone-300'
+                  ? 'border-[var(--de-accent)] bg-[var(--de-accent)] text-white'
+                  : 'border-[var(--de-rule)] bg-[var(--de-surface)] text-[var(--de-ink-muted)] hover:border-[var(--de-accent)] hover:text-[var(--de-accent)]'
               }`}
             >
               <button
@@ -570,8 +570,8 @@ export function PaperListPanel() {
                     onClick={() => startRenameFolder(folder)}
                     className={`px-2 py-1.5 transition ${
                       activeFolderId === folder.id
-                        ? 'text-white/80 hover:bg-emerald-700 hover:text-white'
-                        : 'text-stone-400 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30'
+                        ? 'text-white/80 hover:bg-[var(--de-accent-hover)] hover:text-white'
+                        : 'text-[var(--de-ink-muted)] hover:bg-[var(--de-surface-muted)] hover:text-[var(--de-warning)]'
                     }`}
                     title={`重命名文件夹 ${folder.name}`}
                   >
@@ -582,8 +582,8 @@ export function PaperListPanel() {
                     onClick={() => startMoveFolder(folder)}
                     className={`px-2 py-1.5 transition ${
                       activeFolderId === folder.id
-                        ? 'text-white/80 hover:bg-emerald-700 hover:text-white'
-                        : 'text-stone-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-950/30'
+                        ? 'text-white/80 hover:bg-[var(--de-accent-hover)] hover:text-white'
+                        : 'text-[var(--de-ink-muted)] hover:bg-[var(--de-surface-muted)] hover:text-[var(--de-accent)]'
                     }`}
                     title={`移动文件夹 ${folder.name}`}
                   >
@@ -594,8 +594,8 @@ export function PaperListPanel() {
                     onClick={() => requestDeleteFolder(folder)}
                     className={`px-2 py-1.5 transition ${
                       activeFolderId === folder.id
-                        ? 'text-white/80 hover:bg-emerald-700 hover:text-white'
-                        : 'text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30'
+                        ? 'text-white/80 hover:bg-[var(--de-accent-hover)] hover:text-white'
+                        : 'text-[var(--de-ink-muted)] hover:bg-[var(--de-surface-muted)] hover:text-[var(--de-danger)]'
                     }`}
                     title={`删除文件夹 ${folder.name}`}
                   >
@@ -608,12 +608,12 @@ export function PaperListPanel() {
         </div>
 
         {filteredPapers.length > 0 && (
-          <div className="mb-3 rounded-2xl border border-stone-200 bg-white/70 p-2 dark:border-stone-700 dark:bg-stone-900/70">
+          <div className="mb-3 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-2">
             <div className="mb-2 flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={toggleAllFilteredPapers}
-                className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600 hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+                className="de-button-secondary px-3 py-1.5 text-xs font-medium"
               >
                 {allFilteredSelected ? '取消全选' : '全选当前结果'}
               </button>
@@ -625,7 +625,7 @@ export function PaperListPanel() {
                   value={resolvedBatchTargetFolderId}
                   onChange={(event) => setBatchTargetFolderId(event.target.value)}
                   aria-label="批量移动目标文件夹"
-                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-950"
+                  className="de-field w-full px-3 py-2 text-sm"
                 >
                   <option value="">选择批量移动目标</option>
                   {batchTargetOptions.map((folder) => (
@@ -638,7 +638,7 @@ export function PaperListPanel() {
                   <button
                     type="button"
                     onClick={() => void handleBatchMovePapers()}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-stone-300"
+                    className="de-button-primary px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed"
                     disabled={!resolvedBatchTargetFolderId}
                   >
                     批量移动
@@ -646,7 +646,7 @@ export function PaperListPanel() {
                   <button
                     type="button"
                     onClick={clearBatchSelection}
-                    className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-600 hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+                    className="de-button-secondary px-3 py-1.5 text-xs"
                   >
                     清空选择
                   </button>
@@ -663,7 +663,7 @@ export function PaperListPanel() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="搜索论文..."
-            className="w-full rounded-xl border border-stone-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+            className="de-field w-full py-2 pl-9 pr-3 text-sm"
           />
         </div>
       </div>
@@ -676,15 +676,15 @@ export function PaperListPanel() {
             <p className="mt-1 text-xs">在 DeepStart 中搜索并导入</p>
           </div>
         ) : (
-          <div className="space-y-2 p-3">
+          <div className="divide-y divide-[var(--de-rule)] px-3">
             {filteredPapers.map((paper) => (
               <div
                 key={paper.id}
                 onClick={() => handlePaperClick(paper)}
-                className={`group cursor-pointer rounded-3xl border p-4 transition ${
+                className={`group cursor-pointer border-x p-4 transition-colors ${
                   selectedPaper?.id === paper.id
-                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20'
-                    : 'border-stone-200 bg-white hover:border-emerald-300 dark:border-stone-800 dark:bg-stone-900/70'
+                    ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)]'
+                    : 'border-[var(--de-rule)] bg-[var(--de-surface)] hover:bg-[var(--de-surface-muted)]'
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -698,7 +698,7 @@ export function PaperListPanel() {
                       checked={selectedPaperIdSet.has(paper.id)}
                       onChange={() => togglePaperSelection(paper.id)}
                       aria-label={`选择论文 ${paper.title}`}
-                      className="h-4 w-4 rounded border-stone-300 text-emerald-600 focus:ring-emerald-500"
+                      className="h-4 w-4 rounded-[3px] border-[var(--de-rule-strong)] text-[var(--de-accent)] focus:ring-[var(--de-accent)]"
                     />
                   </label>
                   <FileText className="mt-1 h-4 w-4 shrink-0 text-stone-400" />
@@ -718,7 +718,7 @@ export function PaperListPanel() {
                           e.stopPropagation();
                           startMovePaper(paper);
                         }}
-                        className="rounded-lg p-1 text-stone-400 opacity-0 transition hover:bg-stone-100 hover:text-emerald-600 group-hover:opacity-100 dark:hover:bg-stone-800"
+                        className="rounded-[var(--de-radius)] p-1 text-[var(--de-ink-muted)] opacity-0 transition hover:bg-[var(--de-surface-muted)] hover:text-[var(--de-accent)] group-hover:opacity-100"
                         title="移动论文"
                       >
                         <FolderOpen className="h-3.5 w-3.5" />
@@ -729,7 +729,7 @@ export function PaperListPanel() {
                         e.stopPropagation();
                         void handleDelete(paper.id);
                       }}
-                      className="rounded-lg p-1 text-stone-400 opacity-0 transition hover:bg-stone-100 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-stone-800"
+                      className="rounded-[var(--de-radius)] p-1 text-[var(--de-ink-muted)] opacity-0 transition hover:bg-[var(--de-surface-muted)] hover:text-[var(--de-danger)] group-hover:opacity-100"
                       title="删除论文"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -738,21 +738,21 @@ export function PaperListPanel() {
                 </div>
                 {movingPaperId === paper.id && (
                   <form
-                    className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-2 dark:border-emerald-500/40 dark:bg-emerald-950/20"
+                    className="mt-3 border-t border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-2"
                     onClick={(event) => event.stopPropagation()}
                     onSubmit={(event) => {
                       event.preventDefault();
                       void handleMovePaper(paper.id);
                     }}
                   >
-                    <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+                    <label className="mb-1 block text-[11px] font-medium text-[var(--de-ink-muted)]">
                       移动到
                     </label>
                     <select
                       value={moveTargetFolderId}
                       onChange={(event) => setMoveTargetFolderId(event.target.value)}
                       aria-label="移动目标文件夹"
-                      className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-emerald-700 dark:bg-stone-950"
+                      className="de-field w-full px-3 py-2 text-sm"
                     >
                       <option value="">选择目标文件夹</option>
                       {folders
@@ -766,7 +766,7 @@ export function PaperListPanel() {
                     <div className="mt-2 flex gap-2">
                       <button
                         type="submit"
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                        className="de-button-primary px-3 py-1.5 text-xs font-medium"
                       >
                         移动
                       </button>
@@ -776,7 +776,7 @@ export function PaperListPanel() {
                           setMovingPaperId('');
                           setMoveTargetFolderId('');
                         }}
-                        className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-600 hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+                        className="de-button-secondary px-3 py-1.5 text-xs"
                       >
                         取消
                       </button>
