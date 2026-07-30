@@ -491,7 +491,7 @@ class SmokePage {
   async assertStartButtonDisabled() {
     const disabled = await this.eval(() => {
       const buttons = Array.from(document.querySelectorAll('button'));
-      const start = buttons.find((button) => button.textContent.includes('开始探索'));
+      const start = buttons.find((button) => button.textContent.includes('开始检索'));
       return Boolean(start?.disabled);
     });
     if (!disabled) {
@@ -534,9 +534,9 @@ async function main() {
     await page.navigate('/deepstart');
     await page.assertStartButtonDisabled();
     await shot('deepstart-empty-disabled', 'DeepStart 空输入时开始按钮禁用态');
-    await page.fillPlaceholder('寻找最近两年 VLA', 'scientific reading assistant');
+    await page.fillPlaceholder('哪些方法真正提升了代码智能体', 'scientific reading assistant');
     await shot('deepstart-ready', 'DeepStart 输入后可执行状态');
-    await page.clickText('开始探索');
+    await page.clickText('开始检索');
     await shot('deepstart-loading', 'DeepStart 检索/分析 loading 状态');
     await page.navigate('/session/session-smoke');
     await page.waitForText('Unified Embodied Agent Benchmark');
@@ -548,14 +548,15 @@ async function main() {
     await shot('deepstart-paper-detail', 'DeepStart 论文详情抽屉');
 
     await page.navigate('/deepread');
-    await page.waitForText('DeepRead Workspace');
+    await page.waitForText('论文阅读工作台');
     await shot('deepread-library', 'DeepRead 文库与缺失 PDF 状态');
+    await page.clickText('论文库');
     await page.clickText('Cache/Subtopic');
     await page.waitForText('Child Folder Paper');
-    await page.clickText('Child Folder Paper');
     await page.waitForText('no downloadable pdf url');
     await shot('deepread-download-error', 'DeepRead 下载失败、重试入口');
-    await page.clickText('重试');
+    await page.clickText('论文库');
+    await page.clickText('手动链接');
     await page.waitForText('填写可访问的 http/https PDF 链接');
     await page.fillPlaceholder('https://...', 'https://example.org/manual-paper.pdf');
     await shot('deepread-manual-url', 'DeepRead 手动 PDF URL 重试表单');
@@ -563,7 +564,7 @@ async function main() {
     await shot('deepread-retry-submitted', 'DeepRead 手动重试提交后的状态');
 
     await page.navigate('/screening');
-    await page.waitForText('Upload & Progress');
+    await page.waitForText('导入待分析论文');
     await shot('screening-upload', 'Screening 上传入口和步骤条');
     await page.clickText('选择 PDF 文件');
     await shot('screening-extracting', 'Screening 文件上传后提取阶段/loading 状态');
@@ -579,12 +580,12 @@ async function main() {
     await shot('screening-imported', 'Screening 导入完成反馈');
 
     await page.navigate('/sync');
-    await page.waitForText('Connected');
+    await page.waitForText('已连接');
     await shot('sync-dashboard', 'Sync 仪表盘、状态卡片、手动同步入口');
-    await page.clickText('Refresh Token');
+    await page.clickText('更新凭证');
     await page.waitForText('百度 access token 已通过 refresh token 更新');
     await shot('sync-refresh-token', 'Sync 手动刷新百度 access token');
-    await page.clickText('Manual Sync');
+    await page.clickText('检查并同步');
     await page.waitForText('确认本次百度云同步');
     await shot('sync-preflight', 'Sync 手动同步前预检确认');
     await page.clickText('确认开始同步');
@@ -593,10 +594,10 @@ async function main() {
     await page.emitRuntimeEvent('sync-progress', { total: 3, completed: 3, currentFile: '', status: 'complete', message: '同步完成' });
     await sleep(500);
     await shot('sync-progress-complete', 'Sync runtime event 完成态刷新');
-    await page.clickText('Conflict Resolution');
+    await page.clickText('冲突处理');
     await page.waitForText('SQLite 数据库');
     await shot('sync-conflict-diff', 'Sync 冲突 diff 元数据和覆盖前保留提示');
-    await page.clickText('Sync before exit', { selector: 'label,span,button' });
+    await page.clickText('退出前同步', { selector: 'label,span,button' });
     await shot('sync-settings-toggle', 'Sync 设置切换、退出前同步独立开关');
 
     const markdown = [
