@@ -72,7 +72,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 - The configured Semantic Scholar API key returned `403 Forbidden` on 2026-07-30, while the unauthenticated shared endpoint returned `429`; discovery must retain arXiv/cache degradation until the key is replaced.
 - GitHub SSH read/write access is available, but the local `gh` CLI is not authenticated, so automatic PR creation through `gh` remains blocked.
 - DeepRead can still be improved with finer page-level cache/prefetch, PDF 页码级证据定位、跨论文对比和更好的长文档导航。
-- UI polish remains useful for the legacy library/sync/settings surfaces, narrow windows, and high-DPI layouts.
+- UI polish remains useful for narrow windows and high-DPI layouts; library, sync, and settings have completed the current shared-token cleanup.
 
 ## Ignored Local Files
 
@@ -214,6 +214,7 @@ Passed:
 - Opt-in PDF extraction E2E (`DIVEEND_REAL_PDF_EXTRACTION_E2E=1`) verifies managed service startup, real parsing/extraction, provider usage reporting, and exact shared-budget settlement.
 - Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
 - Browser and real-backend E2E through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, Screening decisions, and sync workflows.
+- Browser UI smoke covers 24 visible states across discovery, reading, screening, and sync with no console errors.
 - Packaged Wails build and managed PDF-service startup/shutdown lifecycle. Direct packaged-window click and Wails event-delivery verification remains pending because the macOS session was locked during the 2026-07-30 run.
 
 Notes:
