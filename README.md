@@ -206,7 +206,7 @@ Passed:
 - `go vet ./...`
 - `go build ./...`
 - `go test -race ./...`
-- `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` (0 reachable vulnerabilities with Go 1.25.12)
+- `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` (`No vulnerabilities found` with Go 1.25.12 and `x/sys` v0.44.0)
 - `cd frontend && npm test -- --run`
 - `cd frontend && npm run build`
 - `services/pdf_service/.venv/bin/python -m pytest services/pdf_service/tests`
