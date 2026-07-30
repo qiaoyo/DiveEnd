@@ -394,6 +394,20 @@ export interface DeepReadNote {
   updatedAt: string;
 }
 
+export interface DeepReadEvidence {
+  sectionId: string;
+  sectionTitle: string;
+  excerpt: string;
+}
+
+export interface DeepReadAIResponse {
+  mode: 'question' | 'summary' | string;
+  answer: string;
+  takeaway: string;
+  evidence: DeepReadEvidence[];
+  limitations: string[];
+}
+
 export interface DeepReadState {
   paperId: string;
   hasPdf: boolean;
@@ -671,8 +685,8 @@ export const defaultConfig: AppConfig = {
     enableSemanticScholar: true,
     enableArxiv: true,
     semanticScholarKeyPath: 'config/semantic_scholar.json',
-    perSourceResultLimit: 100,
-    deepStartResultLimit: 200,
+    perSourceResultLimit: 20,
+    deepStartResultLimit: 20,
     retryDurationSeconds: 60,
     retryIntervalSeconds: 1,
     requestTimeoutSeconds: 5,

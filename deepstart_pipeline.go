@@ -12,7 +12,8 @@ import (
 )
 
 const deepStartBatchDefaultPerSourceLimit = 20
-const deepStartInitialReadyLimit = 12
+const deepStartInitialReadyLimit = 20
+const deepStartEagerPreprocessLimit = 4
 
 var deepStartCacheNamePattern = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
@@ -154,6 +155,29 @@ func fillSearchPaperClassification(paper *SearchPaper, profile *PaperProfileExtr
 	}
 }
 
+func splitDeepStartEagerPreprocess(papers []SearchPaper, limit int) ([]SearchPaper, []SearchPaper) {
+	if limit <= 0 {
+		limit = deepStartEagerPreprocessLimit
+	}
+	if len(papers) <= limit {
+		return append([]SearchPaper{}, papers...), []SearchPaper{}
+	}
+
+	eager := append([]SearchPaper{}, papers[:limit]...)
+	deferred := append([]SearchPaper{}, papers[limit:]...)
+	for index := range deferred {
+		deferred[index].PreprocessStatus = "deferred"
+		deferred[index].ParseStatus = "deferred"
+		deferred[index].ExtractStatus = "deferred"
+		deferred[index].ProcessingStage = "ready"
+		deferred[index].ProcessingError = ""
+		deferred[index].ParseError = ""
+		deferred[index].ExtractError = ""
+		fillSearchPaperClassification(&deferred[index], nil)
+	}
+	return eager, deferred
+}
+
 func (a *App) searchDeepStartResultsWithPerSourceLimit(
 	ctx context.Context,
 	query string,
@@ -177,10 +201,11 @@ func (a *App) preprocessDeepStartResults(
 	papers []SearchPaper,
 	stats SearchRetrievalStats,
 ) ([]SearchPaper, deepStartBatchStats, error) {
+	eagerPapers, deferredPapers := splitDeepStartEagerPreprocess(papers, deepStartEagerPreprocessLimit)
 	batch := deepStartBatchStats{
-		Total: len(papers),
+		Total: len(eagerPapers),
 	}
-	if len(papers) == 0 {
+	if len(eagerPapers) == 0 {
 		return papers, batch, nil
 	}
 
@@ -189,12 +214,12 @@ func (a *App) preprocessDeepStartResults(
 
 	processed := make([]SearchPaper, 0, len(papers))
 	weak := a.currentWeakLLM()
-	for idx := range papers {
+	for idx := range eagerPapers {
 		if err := ctx.Err(); err != nil {
 			return nil, batch, err
 		}
 
-		paper := papers[idx]
+		paper := eagerPapers[idx]
 		cacheID := deepStartCachePaperID(paper, idx)
 		pdfPath, err := ensureManagedFileParent(
 			cacheRoot,
@@ -432,6 +457,7 @@ func (a *App) preprocessDeepStartResults(
 		batch,
 		stats,
 	)
+	processed = append(processed, deferredPapers...)
 	return processed, batch, nil
 }
 
@@ -473,7 +499,7 @@ func (a *App) emitDeepStartBatchProgress(
 		Phase:                     phase,
 		Message:                   strings.TrimSpace(message),
 		ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
-		EstimatedRemainingSeconds: estimateDeepStartETA(batch),
+		EstimatedRemainingSeconds: estimateDeepStartETAWithElapsed(batch, time.Since(startedAt)),
 		Total:                     batch.Total,
 		Completed:                 batch.Completed,
 		OverallPercent:            overall,
@@ -488,12 +514,25 @@ func (a *App) emitDeepStartBatchProgress(
 }
 
 func estimateDeepStartETA(batch deepStartBatchStats) int {
+	return estimateDeepStartETAWithElapsed(batch, 0)
+}
+
+func estimateDeepStartETAWithElapsed(batch deepStartBatchStats, elapsed time.Duration) int {
 	remaining := batch.Total - batch.Completed
 	if remaining <= 0 {
 		return 0
 	}
-	// 保守估算：每篇约 2 秒（下载 + 解析 + 抽取）
-	eta := remaining * 2
+	secondsPerPaper := 20
+	if batch.Completed > 0 && elapsed > 0 {
+		secondsPerPaper = int(elapsed.Seconds()) / batch.Completed
+		if secondsPerPaper < 5 {
+			secondsPerPaper = 5
+		}
+		if secondsPerPaper > 90 {
+			secondsPerPaper = 90
+		}
+	}
+	eta := remaining * secondsPerPaper
 	if eta < 1 {
 		return 1
 	}

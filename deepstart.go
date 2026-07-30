@@ -789,8 +789,8 @@ func (a *App) searchDeepStartResults(ctx context.Context, query string, limit in
 
 func (a *App) deepStartResultLimit() int {
 	limit := a.config.Search.DeepStartResultLimit
-	if limit < 100 {
-		limit = 200
+	if limit <= 0 {
+		limit = defaultSearchAPIConfig().DeepStartResultLimit
 	}
 	if limit > 200 {
 		limit = 200

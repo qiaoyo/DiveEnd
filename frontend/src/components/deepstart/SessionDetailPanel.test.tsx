@@ -191,7 +191,7 @@ describe('SessionDetailPanel', () => {
   it('renders sticky AI chat with suggested queries and compact paper cards', () => {
     render(<SessionDetailPanel />);
 
-    const chatTitle = screen.getByText('AI Chat');
+    const chatTitle = screen.getByText('研究助理');
     const chatSection = chatTitle.closest('section');
     expect(chatSection).toBeTruthy();
     expect(chatSection?.parentElement).toHaveClass('sticky');

@@ -69,3 +69,13 @@ export function errorToUserMessage(error: unknown, fallback: string): string {
   }
   return fallback;
 }
+
+export function isCancellationError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : '';
+  return /\bcancel+ed\b/i.test(message);
+}

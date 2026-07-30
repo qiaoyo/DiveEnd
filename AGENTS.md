@@ -26,29 +26,33 @@ Implemented:
 
 - Config persistence, secret merging, local seed loading, redacted display values.
 - SQLite migrations for folders, papers, translations, DeepStart, DeepRead, Screening, Sync records, and conflicts.
-- DeepStart search over Semantic Scholar and arXiv, query rewriting, enrichment, PDF preprocessing cache, weak extraction, AI analysis, progress events, cancellation.
-- DeepRead paper state, PDF parsing cache, notes, translation history, Wails asset-server PDF URL, bounded base64 fallback.
+- DeepStart search over Semantic Scholar and arXiv, focused default retrieval of about 20 candidates, eager PDF/weak-model preprocessing for the top 4, on-demand handling for the rest, user-triggered supplemental expansion, query rewriting, enrichment, AI analysis, progress events, cancellation.
+- DeepRead paper state, PDF parsing cache, notes, translation history, grounded AI question/summary responses with section evidence, Wails asset-server PDF URL, bounded base64 fallback.
 - Screening sessions, managed PDF upload storage, extraction progress, LLM decision tree, final import.
 - Library folder tree, folder create/delete/rename/move, paper delete, single-paper move, batch move, managed PDF/cache path maintenance.
 - Baidu sync preview, background manual sync, startup sync, periodic sync, exit sync prompt, conflict detection, conflict resolution, database restore staging/apply/cancel.
 - Security hardening around local secret files, symlink/path traversal, PDF validation, SSRF, atomic file writes, bounded HTTP reads, and user-visible error redaction.
 - Frontend route/page tests, Go regression tests, Python PDF route tests, browser smoke script.
+- Frontend primary navigation is organized around discovery, reading, and analysis; the browser fallback and desktop bridge share the same backend wrapper contract.
 
 Remaining risks:
 
 - Git history still contains previously committed local secret/scratch files and at least one historical OpenAI-style key pattern. Current tree tracking is fixed, but public release requires history rewrite and token rotation.
 - Wails desktop event delivery still needs manual verification in the packaged desktop app.
-- Real Baidu Cloud sync still needs an authorized account E2E pass.
-- DeepRead long-PDF ergonomics and UI polish remain future work.
+- Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic token refresh and secure persistence.
+- The configured Semantic Scholar key returned `403 Forbidden` on 2026-07-30 and the shared unauthenticated endpoint returned `429`; use arXiv/cache degradation until the key is replaced.
+- GitHub SSH read/write works, but `gh` CLI authentication is still required for automatic PR creation through `gh`.
+- DeepRead long-PDF ergonomics and legacy library/sync/settings UI polish remain future work.
 
 ## Reading Order
 
 1. `README.md` for product status and development commands.
 2. `AGENTS.md` for this current agent-facing summary.
 3. `docs/PROJECT_MAP.md` for the exact mapping from workflow to files and tests.
-4. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
-5. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
-6. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
+4. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
+5. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
+6. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
+7. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
 
 If a historical document conflicts with current code or this file, prefer current code, `README.md`, `AGENTS.md`, and `docs/PROJECT_MAP.md`.
 
@@ -92,6 +96,8 @@ PDF service:
 - `services/pdf_service/core/config.py`: service settings.
 - `services/pdf_service/core/llm_client.py`: OpenAI/Anthropic-compatible client.
 - `services/pdf_service/core/redaction.py`: service-side secret redaction.
+- `pdf_service_process.go`: desktop-managed local PDF service discovery, Python verification, readiness wait, and shutdown.
+- `scripts/setup_pdf_service.sh`: one-time ignored `.venv` bootstrap for local desktop use.
 
 ## Git Hygiene
 
@@ -114,6 +120,7 @@ Never stage local secrets or scratch files. The following must remain ignored:
 - `build/bin/`
 - `.pytest_cache/`
 - `__pycache__/`
+- `services/pdf_service/.venv/`
 
 Before staging or pushing, run:
 
@@ -143,7 +150,9 @@ python -m pytest services/pdf_service/tests
 bash scripts/secret_scan.sh
 ```
 
-Last run on 2026-07-19: passed. PDF service tests used `/private/tmp/diveend-pdf-test-venv/bin/python` because the default Python interpreters did not have `pytest`.
+Last full run on 2026-07-30: passed. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
+
+Known audit exception: `npm audit --omit=dev` reports a React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses client-only `HashRouter`, not RSC. The published `react-router-dom` line currently has no clean upgrade path without a React 19/Router 8 migration; do not describe the production audit as zero-vulnerability until this is resolved upstream or migrated.
 
 Extended baseline before release:
 

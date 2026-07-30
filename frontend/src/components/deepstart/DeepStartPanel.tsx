@@ -1,467 +1,362 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowRight,
+  Check,
+  Clock3,
+  FileSearch,
+  Loader2,
+  Search,
+  Square,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { BrainCircuit, Loader2, Search, Sparkles, Square } from 'lucide-react';
-import { cancelDeepStartTask, onDeepStartProgress, onSearchProgress, startDeepStartSession } from '../../lib/backend';
-import { errorToUserMessage } from '../../lib/errors';
+import {
+  cancelDeepStartTask,
+  onDeepStartProgress,
+  onSearchProgress,
+  startDeepStartSession,
+} from '../../lib/backend';
+import { errorToUserMessage, isCancellationError } from '../../lib/errors';
 import type { DeepStartProgressEvent, SearchProgressEvent } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 
-function isDeepStartCancelledError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  const message = error.message.toLowerCase();
-  return message.includes('cancelled') || message.includes('canceled');
+const researchStarters = [
+  '梳理近两年具身智能中 VLA 模型的关键路线与真实机器人评测',
+  '寻找 LLM code agent 的代表论文、技术报告和主要 benchmark',
+  '比较 RAG 与长上下文模型在复杂知识任务中的效果和成本',
+];
+
+const phaseLabels: Record<string, string> = {
+  searching: '检索候选',
+  enriching: '补全元信息',
+  downloading: '获取全文',
+  parsing: '解析论文',
+  weak_extracting: '提取结构',
+  initial_batch_ready: '首批结果可用',
+  background_processing: '补全剩余结果',
+  analyzing: '生成研究地图',
+  persisting: '保存工作区',
+  cancelling: '正在停止',
+  cancelled: '已停止',
+  completed: '完成',
+};
+
+function formatUpdatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
 
 export function DeepStartPanel() {
   const navigate = useNavigate();
-  const { activeFolderId, deepStartSessions, folders, setActiveDeepStartSession, setError } = useAppStore();
+  const {
+    activeFolderId,
+    deepStartSessions,
+    folders,
+    setActiveDeepStartSession,
+    setError,
+  } = useAppStore();
 
+  const [prompt, setPrompt] = useState('');
+  const [targetFolderId, setTargetFolderId] = useState(activeFolderId || folders[0]?.id || '');
   const [isStarting, setIsStarting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [newPrompt, setNewPrompt] = useState('');
   const [searchProgress, setSearchProgress] = useState<SearchProgressEvent | null>(null);
   const [deepStartProgress, setDeepStartProgress] = useState<DeepStartProgressEvent | null>(null);
 
-  const examplePrompts = [
-    '我想梳理这两年具身智能领域的论文',
-    'LLM code agent 的代表性论文和 tech report',
-    'VLA (Vision-Language-Action) 的最近进展',
-  ];
-
-  const previewNodes = [
-    { name: 'Long Context', count: 23, depth: 0 },
-    { name: 'VLA', count: 14, depth: 1 },
-    { name: 'Skill Learning', count: 11, depth: 2 },
-    { name: 'Sim2Real', count: 9, depth: 3 },
-    { name: 'Benchmark', count: 17, depth: 1 },
-  ];
-
-  const previewCards = [
-    { title: 'Transformers for Infinite Context Windows', venue: 'ICLR 2024', summary: '针对长上下文窗口的架构改进，强调记忆机制和推理稳定性。' },
-    { title: 'VLA Survey: Foundations and Trends', venue: 'arXiv 2025', summary: '系统归纳视觉-语言-动作模型的训练范式与数据瓶颈。' },
-    { title: 'Embodied Agents in Open-World Settings', venue: 'NeurIPS 2025', summary: '聚焦真实环境评测与安全约束，覆盖操作和导航任务。' },
-  ];
-
   useEffect(() => {
-    return onSearchProgress((progress) => {
-      setSearchProgress(progress);
-    });
-  }, []);
+    if (!targetFolderId && (activeFolderId || folders[0]?.id)) {
+      setTargetFolderId(activeFolderId || folders[0]?.id || '');
+    }
+  }, [activeFolderId, folders, targetFolderId]);
 
-  useEffect(() => {
-    return onDeepStartProgress((progress) => {
-      setDeepStartProgress(progress);
-    });
-  }, []);
+  useEffect(() => onSearchProgress(setSearchProgress), []);
+  useEffect(() => onDeepStartProgress(setDeepStartProgress), []);
 
   const progressPercent = useMemo(() => {
-    if (deepStartProgress) {
-      return deepStartProgress.overallPercent;
-    }
-    if (!searchProgress) {
-      return 0;
-    }
-    if (searchProgress.phase === 'completed') {
-      return 100;
-    }
-    if (searchProgress.totalSeconds <= 0) {
-      return 0;
-    }
-    return Math.min(100, Math.round((searchProgress.elapsedSeconds / searchProgress.totalSeconds) * 100));
+    if (deepStartProgress) return Math.max(0, Math.min(100, deepStartProgress.overallPercent || 0));
+    if (!searchProgress) return 0;
+    if (searchProgress.phase === 'completed') return 100;
+    return searchProgress.totalSeconds > 0
+      ? Math.min(95, Math.round((searchProgress.elapsedSeconds / searchProgress.totalSeconds) * 100))
+      : 4;
   }, [deepStartProgress, searchProgress]);
 
-  const phaseLabel = useMemo(() => {
-    switch (deepStartProgress?.phase) {
-      case 'enriching':
-        return '补全机构与关键词';
-      case 'downloading':
-        return '下载论文 PDF';
-      case 'parsing':
-        return '解析 PDF 内容';
-      case 'weak_extracting':
-        return '弱模型抽取';
-      case 'initial_batch_ready':
-        return '首批可用';
-      case 'background_processing':
-        return '后台补全中';
-      case 'analyzing':
-        return '生成 AI 分析';
-      case 'persisting':
-        return '保存会话';
-      case 'cancelling':
-        return '正在停止';
-      case 'cancelled':
-        return '已停止';
-      case 'completed':
-        return '准备完成';
-      default:
-        return '检索中';
-    }
-  }, [deepStartProgress?.phase]);
+  const runningSessionId = deepStartProgress?.sessionId?.trim() || '';
+  const currentPhase = deepStartProgress?.phase || (isStarting ? 'searching' : '');
+  const recentSessions = deepStartSessions.slice(0, 6);
 
-  const runningSessionId = deepStartProgress?.sessionId?.trim() ?? '';
-
-  const handleStartSession = async () => {
-    const prompt = newPrompt.trim();
-    if (!prompt) {
-      setError('请先输入研究方向或问题');
+  const handleStart = async () => {
+    const researchQuestion = prompt.trim();
+    if (!researchQuestion) {
+      setError('请输入要研究的问题、方法或领域');
       return;
     }
 
+    setError(null);
     setIsStarting(true);
     setIsCancelling(false);
+    setSearchProgress(null);
     setDeepStartProgress({
-      phase: 'searching',
       sessionId: '',
-      message: '正在检索论文候选',
+      phase: 'searching',
+      message: '正在准备多源检索',
       elapsedSeconds: 0,
       estimatedRemainingSeconds: 60,
       total: 0,
       completed: 0,
-      overallPercent: 3,
+      overallPercent: 2,
     });
-    setSearchProgress({
-      query: prompt,
-      elapsedSeconds: 0,
-      totalSeconds: 60,
-      completedSources: 0,
-      totalSources: 2,
-      sources: [
-        {
-          name: 'Semantic Scholar',
-          attempt: 0,
-          maxAttempts: 60,
-          status: 'pending',
-          success: false,
-          done: false,
-          resultCount: 0,
-          error: '',
-        },
-        {
-          name: 'arXiv',
-          attempt: 0,
-          maxAttempts: 60,
-          status: 'pending',
-          success: false,
-          done: false,
-          resultCount: 0,
-          error: '',
-        },
-      ],
-      phase: 'searching',
-      message: '',
-    });
+
     try {
-      const detail = await startDeepStartSession(
-        prompt,
-        activeFolderId || folders[0]?.id || ''
-      );
+      const detail = await startDeepStartSession(researchQuestion, targetFolderId);
       setActiveDeepStartSession(detail);
-      // 创建成功后跳转到会话详情页面
       navigate(`/session/${detail.summary.id}`);
     } catch (error) {
-      if (isDeepStartCancelledError(error)) {
-        setDeepStartProgress((prev) => ({
-          sessionId: prev?.sessionId ?? '',
+      if (isCancellationError(error)) {
+        setDeepStartProgress((previous) => ({
+          sessionId: previous?.sessionId || '',
           phase: 'cancelled',
-          message: '已停止本次探索，未保存任何新结果',
-          elapsedSeconds: prev?.elapsedSeconds ?? 0,
+          message: '本次检索已停止，没有写入未完成结果',
+          elapsedSeconds: previous?.elapsedSeconds || 0,
           estimatedRemainingSeconds: 0,
-          total: prev?.total ?? 0,
-          completed: prev?.completed ?? 0,
-          overallPercent: prev?.overallPercent ?? 0,
-          stats: prev?.stats,
+          total: previous?.total || 0,
+          completed: previous?.completed || 0,
+          overallPercent: previous?.overallPercent || 0,
+          stats: previous?.stats,
         }));
-        return;
+      } else {
+        setError(errorToUserMessage(error, '无法完成论文检索'));
       }
-      setError(errorToUserMessage(error, '创建探索会话失败'));
     } finally {
       setIsStarting(false);
       setIsCancelling(false);
     }
   };
 
-  const handleCancelSession = async () => {
-    if (!runningSessionId) {
-      return;
-    }
+  const handleCancel = async () => {
+    if (!runningSessionId) return;
     setIsCancelling(true);
-    setDeepStartProgress((prev) => ({
-      sessionId: prev?.sessionId ?? runningSessionId,
-      phase: 'cancelling',
-      message: '正在停止本次探索并撤销暂存结果',
-      elapsedSeconds: prev?.elapsedSeconds ?? 0,
-      estimatedRemainingSeconds: 1,
-      total: prev?.total ?? 0,
-      completed: prev?.completed ?? 0,
-      overallPercent: prev?.overallPercent ?? 0,
-      stats: prev?.stats,
-    }));
     try {
       await cancelDeepStartTask(runningSessionId);
     } catch (error) {
-      setError(errorToUserMessage(error, '停止探索失败'));
+      setError(errorToUserMessage(error, '停止检索失败'));
       setIsCancelling(false);
     }
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <div className="relative min-h-0 flex-1 overflow-y-auto px-6 pb-24 pt-8 lg:px-10">
-        <div className="pointer-events-none absolute left-[-120px] top-[-160px] h-[340px] w-[340px] rounded-full bg-indigo-500/25 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-[-160px] right-[-120px] h-[340px] w-[340px] rounded-full bg-violet-500/20 blur-3xl" />
+    <div className="h-full overflow-y-auto bg-[var(--de-paper)]">
+      <div className="mx-auto w-full max-w-6xl px-6 py-8 lg:px-10 lg:py-10">
+        <header className="max-w-3xl">
+          <p className="text-sm font-medium text-[var(--de-accent)]">论文发现</p>
+          <h1 className="de-display mt-2 text-3xl font-semibold leading-tight text-[var(--de-ink)]">
+            从研究问题开始检索
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--de-ink-muted)]">
+            描述你要理解的问题。系统会扩展检索词、合并多个来源、去重论文，并生成可继续追问的研究地图。
+          </p>
+        </header>
 
-        <div className="relative mx-auto max-w-6xl">
-          <div className="mb-8 text-center">
-            <p className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-white/70 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600 dark:border-indigo-500/30 dark:bg-slate-900/70 dark:text-indigo-300">
-              <Sparkles className="h-3.5 w-3.5" />
-              DeepStart Workspace
-            </p>
-            <h1 className="mt-5 text-3xl font-semibold leading-tight lg:text-4xl">
-              让检索从一个问题，直接进入可执行的论文地图
-            </h1>
-            <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-              用自然语言描述方向，DiveEnd 会自动建立分类支线、推荐阅读顺序，并把你选中的论文导入工作区。
-            </p>
-          </div>
-
-          <div className="de-glass rounded-[28px] p-5 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.45)]">
-            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/70 bg-white/80 px-4 py-3 dark:border-slate-500/30 dark:bg-slate-900/75">
-              <Search className="h-5 w-5 text-slate-400" />
-              <input
-                value={newPrompt}
-                onChange={(event) => setNewPrompt(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && !event.shiftKey && void handleStartSession()}
-                placeholder="例如：寻找最近两年 VLA 的综述、基础模型与真实机器人评测论文"
-                className="min-w-[200px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+        <section className="mt-7 border-y border-[var(--de-rule)] bg-[var(--de-surface)]">
+          <div className="grid min-h-[188px] grid-cols-1 lg:grid-cols-[1fr_220px]">
+            <div className="border-b border-[var(--de-rule)] p-5 lg:border-b-0 lg:border-r">
+              <label htmlFor="research-question" className="text-xs font-semibold text-[var(--de-ink)]">
+                研究问题
+              </label>
+              <textarea
+                id="research-question"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    void handleStart();
+                  }
+                }}
+                placeholder="例如：哪些方法真正提升了代码智能体在长任务中的可靠性？"
+                className="mt-2 min-h-[108px] w-full resize-none border-0 bg-transparent p-0 text-lg leading-8 text-[var(--de-ink)] outline-none placeholder:text-[var(--de-ink-muted)]"
+                disabled={isStarting}
               />
-              <button
-                type="button"
-                onClick={() => void handleStartSession()}
-                disabled={isStarting || !newPrompt.trim()}
-                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
-                {isStarting ? '正在创建探索会话...' : '开始探索'}
-              </button>
-              {isStarting && (
-                <button
-                  type="button"
-                  onClick={() => void handleCancelSession()}
-                  disabled={isCancelling || !runningSessionId}
-                  title={runningSessionId ? '停止当前 DeepStart 后台任务' : '正在等待后端任务 ID，拿到任务 ID 后即可停止'}
-                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200 dark:hover:bg-rose-500/20"
-                >
-                  {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
-                  {isCancelling ? '停止中...' : '停止本次探索'}
-                </button>
-              )}
-              {isStarting && !runningSessionId && (
-                <span className="text-xs text-slate-500 dark:text-slate-400">正在创建后端任务，拿到任务 ID 后可停止。</span>
-              )}
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-violet-600 dark:bg-violet-500/20 dark:text-violet-300">
-                <Sparkles className="h-4 w-4" />
-              </span>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {examplePrompts.map((example) => (
-                <button
-                  key={example}
-                  onClick={() => setNewPrompt(example)}
-                  className="rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:border-indigo-400/60 dark:hover:text-indigo-300"
+            <div className="flex flex-col justify-between p-5">
+              <div>
+                <label htmlFor="target-folder" className="text-xs font-semibold text-[var(--de-ink)]">
+                  保存到
+                </label>
+                <select
+                  id="target-folder"
+                  value={targetFolderId}
+                  onChange={(event) => setTargetFolderId(event.target.value)}
+                  className="de-field mt-2 w-full px-3 py-2 text-sm"
+                  disabled={isStarting}
                 >
-                  {example}
+                  {folders.map((folder) => (
+                    <option key={folder.id} value={folder.id}>
+                      {folder.path || folder.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void handleStart()}
+                disabled={isStarting || !prompt.trim()}
+                className="de-button-primary mt-5 inline-flex h-10 items-center justify-center gap-2 px-4 text-sm font-medium"
+              >
+                {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                {isStarting ? '检索中' : '开始检索'}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {!isStarting ? (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <span className="text-xs text-[var(--de-ink-muted)]">可从这些问题开始</span>
+            {researchStarters.map((starter) => (
+              <button
+                key={starter}
+                type="button"
+                onClick={() => setPrompt(starter)}
+                className="border-b border-transparent text-left text-xs text-[var(--de-ink-muted)] transition-colors hover:border-[var(--de-rule-strong)] hover:text-[var(--de-ink)]"
+              >
+                {starter}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {(isStarting || currentPhase === 'cancelled') && (
+          <section className="mt-6 border border-[var(--de-rule)] bg-[var(--de-surface)] p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-[var(--de-ink)]">
+                  {currentPhase === 'cancelled' ? (
+                    <Square className="h-4 w-4 text-[var(--de-danger)]" />
+                  ) : (
+                    <Loader2 className="h-4 w-4 animate-spin text-[var(--de-accent)]" />
+                  )}
+                  {phaseLabels[currentPhase] || '处理中'}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">
+                  {deepStartProgress?.message || '正在从 Semantic Scholar 与 arXiv 获取候选论文'}
+                </p>
+              </div>
+              {isStarting ? (
+                <button
+                  type="button"
+                  onClick={() => void handleCancel()}
+                  disabled={isCancelling || !runningSessionId}
+                  className="de-button-secondary inline-flex h-8 items-center gap-1.5 px-3 text-xs disabled:opacity-50"
+                  title={runningSessionId ? '停止当前检索' : '后端任务建立后即可停止'}
+                >
+                  {isCancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3" />}
+                  停止
+                </button>
+              ) : null}
+            </div>
+
+            <div className="mt-4 h-1.5 overflow-hidden bg-[var(--de-surface-muted)]">
+              <div
+                className="h-full bg-[var(--de-accent)] transition-[width] duration-150"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <div className="mt-2 flex justify-between text-xs text-[var(--de-ink-muted)]">
+              <span>{progressPercent}%</span>
+              {deepStartProgress?.estimatedRemainingSeconds ? (
+                <span>预计约 {deepStartProgress.estimatedRemainingSeconds} 秒</span>
+              ) : null}
+            </div>
+
+            {searchProgress?.sources?.length ? (
+              <div className="mt-5 divide-y divide-[var(--de-rule)] border-y border-[var(--de-rule)]">
+                {searchProgress.sources.map((source) => (
+                  <div key={source.name} className="flex items-center gap-3 py-2.5 text-xs">
+                    {source.success ? (
+                      <Check className="h-4 w-4 text-[var(--de-accent)]" />
+                    ) : (
+                      <Clock3 className="h-4 w-4 text-[var(--de-ink-muted)]" />
+                    )}
+                    <span className="font-medium text-[var(--de-ink)]">{source.name}</span>
+                    <span className="ml-auto text-[var(--de-ink-muted)]">
+                      {source.success
+                        ? `${source.resultCount} 篇`
+                        : source.status === 'failed'
+                          ? '本来源暂不可用'
+                          : `第 ${Math.max(source.attempt, 1)} 次尝试`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {deepStartProgress?.stats ? (
+              <p className="mt-4 text-xs leading-5 text-[var(--de-ink-muted)]">
+                已获取 {deepStartProgress.stats.rawCount} 条记录，去重后 {deepStartProgress.stats.dedupCount} 篇，
+                当前纳入 {deepStartProgress.stats.finalCount} 篇。
+              </p>
+            ) : null}
+          </section>
+        )}
+
+        <section className="mt-10">
+          <div className="flex items-end justify-between border-b border-[var(--de-rule)] pb-3">
+            <div>
+              <h2 className="de-display text-xl font-semibold text-[var(--de-ink)]">最近研究</h2>
+              <p className="mt-1 text-xs text-[var(--de-ink-muted)]">继续已有检索，或查看 AI 已整理的论文结构。</p>
+            </div>
+            {deepStartSessions.length > recentSessions.length ? (
+              <button
+                type="button"
+                onClick={() => navigate('/history')}
+                className="inline-flex items-center gap-1 text-xs font-medium text-[var(--de-accent)] hover:underline"
+              >
+                全部记录 <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
+
+          {recentSessions.length ? (
+            <div className="divide-y divide-[var(--de-rule)]">
+              {recentSessions.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => navigate(`/session/${session.id}`)}
+                  className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-6 px-1 py-4 text-left transition-colors hover:bg-[var(--de-surface-muted)]"
+                >
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold text-[var(--de-ink)]">
+                      {session.title || session.rootPrompt}
+                    </h3>
+                    <p className="mt-1 line-clamp-1 text-xs text-[var(--de-ink-muted)]">
+                      {session.currentQuery || session.rootPrompt}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="hidden text-xs text-[var(--de-ink-muted)] sm:block">
+                      {formatUpdatedAt(session.updatedAt)}
+                    </span>
+                    <ArrowRight className="h-4 w-4 text-[var(--de-ink-muted)] transition-colors group-hover:text-[var(--de-accent)]" />
+                  </div>
                 </button>
               ))}
             </div>
-
-            {isStarting && searchProgress && (
-              <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-500/35 dark:bg-indigo-500/10">
-                <div className="flex items-center justify-between text-xs text-indigo-700 dark:text-indigo-200">
-                  <span>{deepStartProgress?.message || '正在搜索并重试（最多 1 分钟）'}</span>
-                  <span>
-                    {deepStartProgress?.phase === 'analyzing' || deepStartProgress?.phase === 'persisting' ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        阶段：{phaseLabel}
-                      </span>
-                    ) : deepStartProgress ? (
-                      `阶段：${phaseLabel} · 预计剩余 ${deepStartProgress.estimatedRemainingSeconds}s`
-                    ) : (
-                      `${searchProgress.elapsedSeconds}s / ${searchProgress.totalSeconds}s`
-                    )}
-                  </span>
-                </div>
-                <div className="mt-2 h-2 rounded-full bg-indigo-100 dark:bg-indigo-500/20">
-                  <div className="h-2 rounded-full bg-indigo-600 transition-all" style={{ width: `${progressPercent}%` }} />
-                </div>
-                {(deepStartProgress?.phase === 'cancelling' || deepStartProgress?.phase === 'cancelled') && (
-                  <div className="mt-2 text-xs text-rose-700 dark:text-rose-300">{deepStartProgress.message}</div>
-                )}
-                {deepStartProgress?.phase === 'enriching' && (
-                  <div className="mt-2 text-xs text-indigo-700 dark:text-indigo-200">
-                    正在导入 {deepStartProgress.total} 篇论文，已完成 {deepStartProgress.completed} 篇，预计剩余 {deepStartProgress.estimatedRemainingSeconds} 秒
-                  </div>
-                )}
-                {(deepStartProgress?.phase === 'analyzing' || deepStartProgress?.phase === 'persisting') && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-200">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    正在等待 AI 返回结果
-                  </div>
-                )}
-                {deepStartProgress?.stats && (
-                  <div className="mt-2 space-y-1 text-xs text-indigo-700 dark:text-indigo-200">
-                    <div>
-                      检索统计：原始 {deepStartProgress.stats.rawCount} · 去重后 {deepStartProgress.stats.dedupCount} · 入池 {deepStartProgress.stats.finalCount}
-                    </div>
-                    {deepStartProgress.stats.originalQuery && (
-                      <div>原始问题：{deepStartProgress.stats.originalQuery}</div>
-                    )}
-                    {(deepStartProgress.stats.rewrittenQueries?.length ?? 0) > 0 && (
-                      <div>英文检索词：{(deepStartProgress.stats.rewrittenQueries ?? []).join(' | ')}</div>
-                    )}
-                    {deepStartProgress.stats.queryHits &&
-                      Object.keys(deepStartProgress.stats.queryHits).length > 0 && (
-                        <div>
-                          重写命中：
-                          {Object.entries(deepStartProgress.stats.queryHits)
-                            .map(([query, count]) => `${query}=${count}`)
-                            .join('；')}
-                        </div>
-                      )}
-                  </div>
-                )}
-                {(deepStartProgress?.phase === 'downloading' ||
-                  deepStartProgress?.phase === 'parsing' ||
-                  deepStartProgress?.phase === 'weak_extracting') && (
-                  <div className="mt-1 text-xs text-indigo-700 dark:text-indigo-200">
-                    批处理统计：成功 {deepStartProgress.successCount ?? 0} · 失败 {deepStartProgress.failedCount ?? 0} · 无链接{' '}
-                    {deepStartProgress.noPdfUrlCount ?? 0}
-                  </div>
-                )}
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {searchProgress.sources.map((source) => (
-                    <div key={source.name} className="rounded-xl border border-indigo-200 bg-white/70 px-3 py-2 text-xs dark:border-indigo-500/30 dark:bg-slate-900/60">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold">{source.name}</span>
-                        <span className={`rounded-full px-2 py-0.5 ${
-                          source.status === 'success'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200'
-                            : source.status === 'failed'
-                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200'
-                              : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200'
-                        }`}
-                        >
-                          {source.status}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-slate-600 dark:text-slate-300">
-                        attempt {source.attempt}/{source.maxAttempts}
-                        {source.success ? ` · ${source.resultCount} papers` : ''}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {deepStartSessions.length > 0 && (
-            <section className="mt-6 rounded-[24px] border border-slate-200 bg-white/75 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Recent History</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">已保存 {deepStartSessions.length} 个 DeepStart 会话，重启后会从本地数据库恢复。</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigate('/history')}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
-                >
-                  全部历史
-                </button>
-              </div>
-              <div className="mt-3 grid gap-2 md:grid-cols-3">
-                {deepStartSessions.slice(0, 3).map((session) => (
-                  <button
-                    key={session.id}
-                    type="button"
-                    onClick={() => navigate(`/session/${session.id}`)}
-                    className="rounded-2xl border border-slate-200 bg-white/80 p-3 text-left transition hover:border-indigo-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-950/70 dark:hover:border-indigo-500/50"
-                  >
-                    <div className="line-clamp-2 text-sm font-medium">{session.title || session.rootPrompt}</div>
-                    <div className="mt-2 line-clamp-1 text-xs text-slate-500 dark:text-slate-400">{session.currentQuery || session.rootPrompt}</div>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          <div className="mt-7 grid gap-6 lg:grid-cols-[0.95fr_1.35fr]">
-            <section className="de-glass rounded-[28px] p-5">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-300">Category Tree</h2>
-                <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200">Preview</span>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                {previewNodes.map((node, idx) => (
-                  <div key={node.name} className="relative" style={{ marginLeft: `${node.depth * 18}px` }}>
-                    {idx > 0 && <div className="absolute -left-4 top-0 h-3 w-3 border-b border-l border-indigo-300 dark:border-indigo-500/40" />}
-                    <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/75">
-                      <span>{node.name}</span>
-                      <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">
-                        {node.count}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="de-glass rounded-[28px] p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-300">Main Contention</h2>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                {previewCards.map((card) => (
-                  <article key={card.title} className="group rounded-2xl border border-slate-200 bg-white/80 p-4 transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/70 dark:hover:border-indigo-500/50">
-                    <div className="text-sm font-semibold leading-6">{card.title}</div>
-                    <div className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{card.venue}</div>
-                    <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{card.summary}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <div className="pointer-events-none fixed bottom-8 left-1/2 z-20 w-full max-w-[520px] -translate-x-1/2 px-6">
-            <div className="pointer-events-auto de-glass flex items-center justify-between rounded-2xl px-4 py-3 shadow-xl">
-              <div className="text-sm text-slate-600 dark:text-slate-300">
-                <span className="font-semibold text-indigo-600 dark:text-indigo-300">{newPrompt.trim() ? '1' : '0'}</span> 条探索意图已准备
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleStartSession()}
-                disabled={isStarting || !newPrompt.trim()}
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                导入探索工作区
-              </button>
+          ) : (
+            <div className="flex items-center gap-3 py-10 text-sm text-[var(--de-ink-muted)]">
+              <FileSearch className="h-5 w-5" />
+              完成第一次检索后，研究记录会出现在这里。
             </div>
-          </div>
-
-          <div className="mt-6 text-center">
-            <button
-              onClick={() => navigate('/history')}
-              className="text-sm text-slate-500 transition hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300"
-            >
-              查看探索历史 →
-            </button>
-          </div>
-        </div>
+          )}
+        </section>
       </div>
     </div>
   );

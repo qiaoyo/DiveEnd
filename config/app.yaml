@@ -32,7 +32,7 @@ pdf_service:
   port: 50051
   auto_start: true
   python_path: "python3"
-  service_script: "services/pdf_service/main.py"
+  service_script: "services/pdf_service/app/main.py"
 
 # LLM configuration paths
 llm:
@@ -44,8 +44,8 @@ search:
   enable_semantic_scholar: true
   enable_arxiv: true
   semantic_scholar_key_path: "config/semantic_scholar.json"
-  per_source_result_limit: 100
-  deepstart_result_limit: 200
+  per_source_result_limit: 20
+  deepstart_result_limit: 20
   retry_duration_seconds: 60
   retry_interval_seconds: 1
   request_timeout_seconds: 5

@@ -37,6 +37,7 @@ Purpose:
 - Apply pending cloud DB restore if needed.
 - Open or migrate SQLite DB.
 - Configure LLM, search, PDF service, sync manager, and download workers.
+- Start the managed local PDF service, wait for readiness, and stop the owned process on app shutdown.
 - Hydrate frontend initial state.
 
 Backend files:
@@ -47,6 +48,7 @@ Backend files:
 - `database.go`
 - `database_restore.go`
 - `models.go`
+- `pdf_service_process.go`
 
 Frontend files:
 
@@ -113,12 +115,16 @@ Purpose:
 - Load a library paper into a reading workspace.
 - Attach or download managed PDF files.
 - Prepare parsed markdown and sections through the PDF service.
+- Default DeepStart discovery keeps about 20 focused candidates while eagerly parsing/extracting only the top 4; remaining candidates stay available for on-demand processing.
+- Ask the strong model grounded questions or request a full-paper summary from parsed sections.
+- Return an answer, concise takeaway, section evidence, and explicit limitations.
 - Show a range-friendly Wails asset URL for PDFs, with bounded base64 fallback.
 - Save translations and notes.
 
 Backend files:
 
 - `deepread.go`
+- `clients.go`
 - `deepread_pdf_paths.go`
 - `deepread_asset_server.go`
 - `pdf_service_client.go`
@@ -135,6 +141,7 @@ Frontend files:
 Tests:
 
 - `deepread_pdf_paths_test.go`
+- `deepread_ai_test.go`
 - `pdf_service_client_test.go`
 - `local_file_actions_test.go`
 - `paper_import_assets_test.go`

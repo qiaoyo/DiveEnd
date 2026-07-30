@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { errorToUserMessage, sanitizeUserVisibleError } from './errors';
+import { errorToUserMessage, isCancellationError, sanitizeUserVisibleError } from './errors';
 
 describe('frontend error sanitization', () => {
   it('redacts common API keys and bearer/query tokens from user-visible messages', () => {
@@ -24,5 +24,11 @@ describe('frontend error sanitization', () => {
 
     expect(message.length).toBeLessThan(1300);
     expect(message).toContain('[truncated]');
+  });
+
+  it('recognizes cancellation from Error and Wails string rejections', () => {
+    expect(isCancellationError(new Error('deepstart task cancelled'))).toBe(true);
+    expect(isCancellationError('context canceled')).toBe(true);
+    expect(isCancellationError('network unavailable')).toBe(false);
   });
 });

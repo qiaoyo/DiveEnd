@@ -5,6 +5,7 @@ import { useAppStore } from '../../stores/appStore';
 import { defaultConfig } from '../../types';
 
 const backendMocks = vi.hoisted(() => ({
+  askDeepReadPaper: vi.fn(),
   getDeepReadState: vi.fn(),
   getPDFServiceStatus: vi.fn(),
   getFolderTree: vi.fn(),
@@ -202,6 +203,19 @@ describe('DeepReadPanel', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    backendMocks.askDeepReadPaper.mockResolvedValue({
+      mode: 'summary',
+      answer: '这篇论文研究具身智能体。',
+      takeaway: '核心结论',
+      evidence: [
+        {
+          sectionId: 'section-1',
+          sectionTitle: 'Abstract',
+          excerpt: 'We study embodied agents.',
+        },
+      ],
+      limitations: ['缺少真实环境实验'],
+    });
 
     useAppStore.setState({
       activePanel: 'deepread',
@@ -338,6 +352,7 @@ describe('DeepReadPanel', () => {
   it('supports folder switching and retrying failed downloads in deepread library', async () => {
     render(<DeepReadPanel />);
 
+    fireEvent.click(await screen.findByRole('button', { name: '论文库' }));
     expect(await screen.findByText('文件夹目录')).toBeInTheDocument();
     expect(await screen.findByText('论文卡片集')).toBeInTheDocument();
 
@@ -346,6 +361,7 @@ describe('DeepReadPanel', () => {
       expect(backendMocks.getPapers).toHaveBeenCalledWith('folder-2');
     });
 
+    fireEvent.click(await screen.findByRole('button', { name: '论文库' }));
     expect(await screen.findByText('no downloadable pdf url')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => {
@@ -366,12 +382,40 @@ describe('DeepReadPanel', () => {
     });
   });
 
-  it('uses light-first theme container classes for deepread workspace', async () => {
+  it('uses shared research workspace design tokens', async () => {
     const { container } = render(<DeepReadPanel />);
-    await screen.findByText('DeepRead Workspace');
+    await screen.findByText('论文阅读工作台');
 
     const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toContain('bg-slate-50');
-    expect(root.className).toContain('dark:bg-slate-950');
+    expect(root.className).toContain('bg-[var(--de-paper)]');
+    expect(root.className).toContain('text-[var(--de-ink)]');
+  });
+
+  it('requests a grounded paper summary from the DeepRead assistant', async () => {
+    backendMocks.getDeepReadState.mockResolvedValueOnce({
+      paperId: 'paper-1',
+      hasPdf: true,
+      pdfPath: '/tmp/paper-1.pdf',
+      parseStatus: 'ready',
+      parseError: '',
+      sections: [
+        { id: 'section-1', title: 'Abstract', content: 'We study embodied agents.', index: 0 },
+      ],
+      markdown: 'We study embodied agents.',
+      translations: [],
+      notes: [],
+      lastPreparedAt: new Date().toISOString(),
+    });
+
+    render(<DeepReadPanel />);
+    const summaryButton = await screen.findByRole('button', { name: '总结全文' });
+    await waitFor(() => expect(summaryButton).toBeEnabled());
+    fireEvent.click(summaryButton);
+
+    await waitFor(() => {
+      expect(backendMocks.askDeepReadPaper).toHaveBeenCalledWith('paper-1', 'section-1', '', 'summary');
+    });
+    expect(await screen.findByText('核心结论')).toBeInTheDocument();
+    expect(screen.getByText('We study embodied agents.')).toBeInTheDocument();
   });
 });

@@ -6,6 +6,7 @@ import type {
   DeepStartProgressEvent,
   DeepStartSessionDetail,
   DeepStartSessionSummary,
+  DeepReadAIResponse,
   DeepReadNote,
   DeepReadState,
   EnhancedSearchResult,
@@ -104,6 +105,12 @@ declare global {
           GetDeepReadState(paperId: string): Promise<DeepReadState>;
           PrepareDeepReadPaper(paperId: string): Promise<DeepReadState>;
           SaveDeepReadNote(paperId: string, section: string, content: string): Promise<DeepReadNote>;
+          AskDeepReadPaper(
+            paperId: string,
+            sectionId: string,
+            question: string,
+            mode: 'question' | 'summary'
+          ): Promise<DeepReadAIResponse>;
           GetDeepReadPDFURL(paperId: string): Promise<string>;
           GetDeepReadPDFBytes(paperId: string): Promise<string>;
 
@@ -347,6 +354,22 @@ function normalizeDeepReadNote(note: Partial<DeepReadNote> | null | undefined): 
     content: note?.content ?? '',
     createdAt: note?.createdAt ?? new Date().toISOString(),
     updatedAt: note?.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+function normalizeDeepReadAIResponse(
+  response: Partial<DeepReadAIResponse> | null | undefined,
+): DeepReadAIResponse {
+  return {
+    mode: response?.mode ?? 'question',
+    answer: response?.answer ?? '',
+    takeaway: response?.takeaway ?? '',
+    evidence: normalizeArray(response?.evidence).map((item) => ({
+      sectionId: item?.sectionId ?? '',
+      sectionTitle: item?.sectionTitle ?? '',
+      excerpt: item?.excerpt ?? '',
+    })),
+    limitations: normalizeArray(response?.limitations),
   };
 }
 
@@ -1812,6 +1835,36 @@ export async function saveDeepReadNote(
     content,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function askDeepReadPaper(
+  paperId: string,
+  sectionId: string,
+  question: string,
+  mode: 'question' | 'summary',
+): Promise<DeepReadAIResponse> {
+  const app = runtimeApp();
+  if (app?.AskDeepReadPaper) {
+    return normalizeDeepReadAIResponse(
+      await app.AskDeepReadPaper(paperId, sectionId, question, mode),
+    );
+  }
+  assertMockFallbackAllowed(app, 'AskDeepReadPaper');
+
+  const state = await getDeepReadState(paperId);
+  const section = state.sections.find((item) => item.id === sectionId) ?? state.sections[0];
+  return normalizeDeepReadAIResponse({
+    mode,
+    answer:
+      mode === 'summary'
+        ? `演示模式总结：${section?.content || '当前没有可总结的正文。'}`
+        : `演示模式回答：问题“${question}”需要在桌面应用中连接强模型后根据论文全文回答。`,
+    takeaway: mode === 'summary' ? '这是浏览器预览数据，不代表真实论文分析。' : '请在桌面应用中验证回答。',
+    evidence: section
+      ? [{ sectionId: section.id, sectionTitle: section.title, excerpt: section.content.slice(0, 180) }]
+      : [],
+    limitations: ['浏览器预览没有连接真实 LLM。'],
   });
 }
 

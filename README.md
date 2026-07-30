@@ -6,18 +6,19 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 
 ## 当前状态
 
-更新时间：2026-07-19
+更新时间：2026-07-29
 
 项目已完成 Phase 1-6 的功能骨架，并完成一轮 P0-P3 code review remediation。当前阶段是可靠性、真实环境验收、发布安全和体验打磨。
 
 已落地的主流程：
 
-- **DeepStart**：自然语言输入研究方向，聚合 Semantic Scholar 和 arXiv，生成 AI 分类、论文摘要、推荐路径，并导入本地文库。
+- **DeepStart**：自然语言输入研究方向，聚合 Semantic Scholar 和 arXiv，默认收敛到约 20 篇高相关候选，只为排名最前的 4 篇预取和结构抽取，其余候选按需处理；生成 AI 分类、论文摘要、推荐路径，并支持用户主动补充检索后导入本地文库。
 - **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文。
-- **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
+- **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；强模型可基于已解析章节回答问题、总结全文，并返回可跳转的论文依据和局限。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
 - **Sync**：百度云同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB。
 - **Library**：右侧论文库支持文件夹树、创建、删除、重命名、移动、单篇移动、批量移动，并同步维护 managed PDF 路径和 DeepRead cache。
 - **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
+- **当前信息架构**：一级任务收敛为“发现 / 阅读 / 分析”，研究记录、同步和设置作为工具入口；检索页不再展示伪造预览数据，阅读页默认提供可收起论文库的专注三栏工作区。
 
 ## 架构
 
@@ -49,6 +50,7 @@ Python PDF service
   |-- FastAPI
   |-- PyMuPDF4LLM/PyMuPDF PDF parsing
   |-- OpenAI/Anthropic-compatible extraction
+  |-- Desktop-managed startup, readiness, and shutdown
 ```
 
 Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/PyMuPDF**, not Marker. The Go persistence layer uses `database/sql` with `github.com/mattn/go-sqlite3`, not GORM.
@@ -57,6 +59,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 
 - [AGENTS.md](AGENTS.md): concise agent entry point and current implementation status.
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md): map from product workflows to files and tests.
+- [docs/AUTONOMOUS_DEVELOPMENT_SETUP.md](docs/AUTONOMOUS_DEVELOPMENT_SETUP.md): responsibility boundaries, design decisions, account prerequisites, and the long-running autonomous development loop.
 - [docs/superpowers/plans/2026-06-10-code-review-remediation.md](docs/superpowers/plans/2026-06-10-code-review-remediation.md): detailed remediation record.
 - [docs/superpowers/plans/2026-06-11-secret-history-remediation.md](docs/superpowers/plans/2026-06-11-secret-history-remediation.md): Git history secret cleanup plan.
 - `docs/superpowers/specs/*` and older `docs/superpowers/plans/*`: historical design and implementation plans. Treat them as background unless they conflict with `README.md`, `AGENTS.md`, or `docs/PROJECT_MAP.md`.
@@ -65,9 +68,11 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 
 - Git history still contains previously committed local files and at least one historical OpenAI-style key pattern. Current tracking is guarded, but public release requires history rewrite and credential rotation.
 - Wails desktop event bridge needs manual verification in the packaged desktop app for `deepstart-progress`, `extract-progress`, and `sync-progress`.
-- Real Baidu Cloud end-to-end sync still needs an authorized account pass.
-- DeepRead can still be improved with finer page-level cache/prefetch and better long-PDF ergonomics.
-- UI polish remains useful for dense library workflows, narrow windows, and high-DPI layouts.
+- Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic refresh and secure persistence of an expired access token.
+- The configured Semantic Scholar API key returned `403 Forbidden` on 2026-07-30, while the unauthenticated shared endpoint returned `429`; discovery must retain arXiv/cache degradation until the key is replaced.
+- GitHub SSH read/write access is available, but the local `gh` CLI is not authenticated, so automatic PR creation through `gh` remains blocked.
+- DeepRead can still be improved with finer page-level cache/prefetch, cross-section citation highlights, and better long-PDF ergonomics.
+- UI polish remains useful for the legacy library/sync/settings surfaces, narrow windows, and high-DPI layouts.
 
 ## Ignored Local Files
 
@@ -140,6 +145,14 @@ Run PDF service tests:
 python -m pytest services/pdf_service/tests
 ```
 
+Create the local managed PDF service environment once:
+
+```bash
+bash scripts/setup_pdf_service.sh
+```
+
+The desktop app then starts the service from `services/pdf_service/.venv`, waits for `/health/ready`, and stops the owned process on exit. Set `DIVEEND_PDF_SERVICE_URL` to use an externally managed service instead.
+
 Run Wails development app:
 
 ```bash
@@ -169,7 +182,7 @@ Optional local seed files are read on first startup but remain ignored:
 
 ## Verification Baseline
 
-Last local baseline: 2026-07-19.
+Last local baseline: 2026-07-30.
 
 Passed:
 
@@ -180,12 +193,14 @@ Passed:
 - `go test -race ./...`
 - `cd frontend && npm test -- --run`
 - `cd frontend && npm run build`
-- `cd frontend && npm audit --omit=dev --json` with 0 production vulnerabilities
-- `/private/tmp/diveend-pdf-test-venv/bin/python -m pytest services/pdf_service/tests`
+- `services/pdf_service/.venv/bin/python -m pytest services/pdf_service/tests`
 - `wails build`
+- Real strong and weak LLM chat-completion probes.
+- Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
+- Packaged Wails desktop flow through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, and managed PDF-service shutdown.
 
 Notes:
 
-- PDF service tests were run through a temporary venv under `/private/tmp` because the available `python` and `python3` commands did not already have `pytest`.
-- Real Baidu Cloud E2E was not run because it requires valid local credentials.
-- Wails desktop event bridge still needs manual app-level verification.
+- `npm audit --omit=dev` reports the React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses a client-only `HashRouter` and does not use RSC; the currently published `react-router-dom` line has no version that clears this advisory without a React 19/Router 8 migration. Keep this scoped exception under review.
+- The configured Semantic Scholar key returned `403 Forbidden`; arXiv fallback and permanent-error fast failure were verified.
+- The main frontend bundle remains about 788 KiB before gzip and should be split after route-level lazy loading is introduced.

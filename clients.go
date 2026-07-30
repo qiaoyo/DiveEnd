@@ -66,6 +66,16 @@ type contextQueryRewriter interface {
 	RewriteSearchQueriesWithContext(ctx context.Context, query string) ([]string, error)
 }
 
+type deepReadAssistant interface {
+	AnswerDeepReadWithContext(
+		ctx context.Context,
+		paperTitle string,
+		mode string,
+		question string,
+		sectionContext string,
+	) (*DeepReadAIResponse, error)
+}
+
 func NewLLMClient(config AppConfig) *LLMClient {
 	return NewStrongLLMClient(config)
 }
@@ -311,6 +321,108 @@ Original text:
 	}
 
 	return parsed.Translation, parsed.Summary, nil
+}
+
+func (c *LLMClient) AnswerDeepReadWithContext(
+	ctx context.Context,
+	paperTitle string,
+	mode string,
+	question string,
+	sectionContext string,
+) (*DeepReadAIResponse, error) {
+	if c.requiresAPIKey() && strings.TrimSpace(c.apiKey) == "" {
+		return nil, fmt.Errorf("missing API key for %s", c.safeProviderLabel())
+	}
+	if strings.TrimSpace(c.model) == "" {
+		return nil, fmt.Errorf("missing model for %s", c.safeProviderLabel())
+	}
+
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "summary" && mode != "question" {
+		return nil, fmt.Errorf("unsupported DeepRead AI mode")
+	}
+	question = strings.TrimSpace(question)
+	if mode == "question" && question == "" {
+		return nil, fmt.Errorf("question cannot be empty")
+	}
+	sectionContext = strings.TrimSpace(sectionContext)
+	if sectionContext == "" {
+		return nil, fmt.Errorf("paper context cannot be empty")
+	}
+
+	task := "Summarize the paper for a researcher. Explain the research question, method, evidence, conclusion, and limitations."
+	if mode == "question" {
+		task = "Answer the researcher's question using only the supplied paper context.\nQuestion: " + question
+	}
+	prompt := fmt.Sprintf(`
+You are an academic reading assistant. Use only the supplied paper context.
+
+Paper: %s
+Task: %s
+
+Rules:
+- Answer in Chinese unless the question clearly requests another language.
+- Separate what the paper states from your interpretation.
+- If the context is insufficient, say exactly what is missing.
+- Cite evidence with section IDs that exist in the context, such as "section-2".
+- Keep evidence excerpts short and verbatim. Never invent a section ID or quotation.
+- For summary mode, cover the research question, method, key evidence, conclusion, and practical reading order.
+- Return valid JSON only, without a markdown wrapper.
+
+Return this exact shape:
+{
+  "answer": "structured answer",
+  "takeaway": "one concise takeaway",
+  "evidence": [
+    {
+      "sectionId": "section-1",
+      "sectionTitle": "Abstract",
+      "excerpt": "short supporting excerpt"
+    }
+  ],
+  "limitations": ["limitation or missing evidence"]
+}
+
+Paper context:
+%s
+`, strings.TrimSpace(paperTitle), task, sectionContext)
+
+	response, err := c.chatWithContext(ctx, []llmMessage{{Role: "user", Content: prompt}})
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed DeepReadAIResponse
+	if err := json.Unmarshal([]byte(extractJSONObject(response)), &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse DeepRead assistant response: %w", err)
+	}
+	parsed.Mode = mode
+	parsed.Answer = strings.TrimSpace(parsed.Answer)
+	parsed.Takeaway = strings.TrimSpace(parsed.Takeaway)
+	parsed.Limitations = compactStrings(parsed.Limitations, 8)
+	if parsed.Answer == "" {
+		return nil, fmt.Errorf("empty DeepRead assistant response")
+	}
+
+	cleanEvidence := make([]DeepReadEvidence, 0, len(parsed.Evidence))
+	for _, item := range parsed.Evidence {
+		item.SectionID = strings.TrimSpace(item.SectionID)
+		item.SectionTitle = strings.TrimSpace(item.SectionTitle)
+		item.Excerpt = strings.TrimSpace(item.Excerpt)
+		if item.SectionID == "" || item.Excerpt == "" {
+			continue
+		}
+		excerptRunes := []rune(item.Excerpt)
+		if len(excerptRunes) > 240 {
+			item.Excerpt = string(excerptRunes[:240])
+		}
+		cleanEvidence = append(cleanEvidence, item)
+		if len(cleanEvidence) >= 6 {
+			break
+		}
+	}
+	parsed.Evidence = cleanEvidence
+	return &parsed, nil
 }
 
 func (c *LLMClient) AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error) {
@@ -1283,6 +1395,29 @@ type SearchProgressEvent struct {
 	Message          string                 `json:"message,omitempty"`
 }
 
+type searchProviderHTTPError struct {
+	statusCode int
+	detail     string
+}
+
+func (e *searchProviderHTTPError) Error() string {
+	if strings.TrimSpace(e.detail) == "" {
+		return fmt.Sprintf("request failed (%d)", e.statusCode)
+	}
+	return fmt.Sprintf("request failed (%d): %s", e.statusCode, e.detail)
+}
+
+func isRetryableSearchError(err error) bool {
+	var httpErr *searchProviderHTTPError
+	if !errors.As(err, &httpErr) {
+		return true
+	}
+	return httpErr.statusCode == http.StatusRequestTimeout ||
+		httpErr.statusCode == http.StatusTooEarly ||
+		httpErr.statusCode == http.StatusTooManyRequests ||
+		httpErr.statusCode >= http.StatusInternalServerError
+}
+
 func NewSearchClient(config AppConfig) *SearchClient {
 	searchConfig := normalizeSearchAPIConfig(config.Search)
 	retryDuration := time.Duration(searchConfig.RetryDurationSeconds) * time.Second
@@ -1604,6 +1739,9 @@ func (s *SearchClient) retrySourceSearch(
 			}
 			return papers, nil
 		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 
 		done := attempt == s.retryMax
 		if emptyErr, ok := err.(*emptyResultsVariantError); ok {
@@ -1615,6 +1753,8 @@ func (s *SearchClient) retrySourceSearch(
 				done = true
 				err = fmt.Errorf("no results after trying %d query variants", candidateCount)
 			}
+		} else if !isRetryableSearchError(err) {
+			done = true
 		}
 
 		lastErr = err
@@ -1693,10 +1833,10 @@ func (s *SearchClient) searchSemanticScholar(
 			}
 
 			if resp.StatusCode >= 400 {
-				if resp.StatusCode == http.StatusTooManyRequests {
-					return nil, fmt.Errorf("rate limited (429)")
+				return nil, &searchProviderHTTPError{
+					statusCode: resp.StatusCode,
+					detail:     redactSensitiveText(string(body)),
 				}
-				return nil, fmt.Errorf("request failed (%d): %s", resp.StatusCode, redactSensitiveText(string(body)))
 			}
 
 			var result struct {
@@ -1831,7 +1971,10 @@ func (s *SearchClient) searchArXiv(
 			return nil, err
 		}
 		if resp.StatusCode >= 400 {
-			return nil, fmt.Errorf("request failed: %s", redactSensitiveText(string(body)))
+			return nil, &searchProviderHTTPError{
+				statusCode: resp.StatusCode,
+				detail:     redactSensitiveText(string(body)),
+			}
 		}
 
 		papers, err := parseArXivXML(body)

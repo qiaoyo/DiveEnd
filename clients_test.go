@@ -362,7 +362,7 @@ func TestLLMClientAnalyzeDeepStartParsesStructuredJSON(t *testing.T) {
 	}
 }
 
-func TestSearchClientSearchRequestsAtLeast100FromSemanticAndArxiv(t *testing.T) {
+func TestSearchClientSearchUsesFocusedDefaultPerSourceLimit(t *testing.T) {
 	config := defaultAppConfig()
 	config.Search.SemanticScholarAPIKey = "semantic-key"
 	client := NewSearchClient(config)
@@ -375,8 +375,8 @@ func TestSearchClientSearchRequestsAtLeast100FromSemanticAndArxiv(t *testing.T) 
 			switch {
 			case strings.Contains(r.URL.Host, "api.semanticscholar.org"):
 				semanticCalled = true
-				if got := r.URL.Query().Get("limit"); got != "100" {
-					t.Fatalf("expected semantic limit=100, got %s", got)
+				if got := r.URL.Query().Get("limit"); got != "20" {
+					t.Fatalf("expected semantic limit=20, got %s", got)
 				}
 				if got := r.Header.Get("x-api-key"); got != "semantic-key" {
 					t.Fatalf("expected semantic api key header, got %q", got)
@@ -405,8 +405,8 @@ func TestSearchClientSearchRequestsAtLeast100FromSemanticAndArxiv(t *testing.T) 
 				}, nil
 			case strings.Contains(r.URL.Host, "export.arxiv.org"):
 				arxivCalled = true
-				if got := r.URL.Query().Get("max_results"); got != "100" {
-					t.Fatalf("expected arxiv max_results=100, got %s", got)
+				if got := r.URL.Query().Get("max_results"); got != "20" {
+					t.Fatalf("expected arxiv max_results=20, got %s", got)
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
@@ -829,6 +829,85 @@ func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.
 	}
 	if len(finalEvent.Sources) != 2 {
 		t.Fatalf("expected two source entries, got %d", len(finalEvent.Sources))
+	}
+}
+
+func TestSearchClientStopsPermanentSourceFailureAndKeepsPartialResults(t *testing.T) {
+	config := defaultAppConfig()
+	client := NewSearchClient(config)
+	client.retryMax = 60
+	client.retryInterval = 0
+
+	semanticAttempts := 0
+	arxivAttempts := 0
+	var finalProgress SearchProgressEvent
+	client.SetProgressReporter(func(progress SearchProgressEvent) {
+		if progress.Phase == "completed" {
+			finalProgress = progress
+		}
+	})
+
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch {
+			case strings.Contains(r.URL.Host, "api.semanticscholar.org"):
+				semanticAttempts++
+				return &http.Response{
+					StatusCode: http.StatusForbidden,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewBufferString(`{"message":"Forbidden"}`)),
+					Request:    r,
+				}, nil
+			case strings.Contains(r.URL.Host, "export.arxiv.org"):
+				arxivAttempts++
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body: io.NopCloser(bytes.NewBufferString(`
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2607.00001v1</id>
+    <title>Partial Search Still Works</title>
+    <summary>ArXiv remains available.</summary>
+    <published>2026-07-01T00:00:00Z</published>
+    <author><name>Author A</name></author>
+  </entry>
+</feed>
+`)),
+					Request: r,
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected host: %s", r.URL.Host)
+			}
+		}),
+	}
+
+	papers, err := client.Search("reliable agents", 20)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(papers) != 1 || papers[0].Source != "arxiv" {
+		t.Fatalf("expected one arXiv partial result, got %+v", papers)
+	}
+	if semanticAttempts != 1 {
+		t.Fatalf("expected permanent 403 to stop after one attempt, got %d", semanticAttempts)
+	}
+	if arxivAttempts != 1 {
+		t.Fatalf("expected arXiv to complete once, got %d attempts", arxivAttempts)
+	}
+
+	var semanticProgress *SearchSourceProgress
+	for index := range finalProgress.Sources {
+		if finalProgress.Sources[index].Name == searchSourceSemantic {
+			semanticProgress = &finalProgress.Sources[index]
+			break
+		}
+	}
+	if semanticProgress == nil {
+		t.Fatal("expected Semantic Scholar progress in final event")
+	}
+	if !semanticProgress.Done || semanticProgress.Status != "failed" || semanticProgress.Attempt != 1 {
+		t.Fatalf("expected terminal first-attempt failure, got %+v", semanticProgress)
 	}
 }
 

@@ -108,6 +108,42 @@ func TestPreprocessDeepStartResultsWritesMarkdownCacheAtomically(t *testing.T) {
 	}
 }
 
+func TestSplitDeepStartEagerPreprocessDefersLowerRankedCandidates(t *testing.T) {
+	papers := make([]SearchPaper, 0, 6)
+	for index := 0; index < 6; index++ {
+		papers = append(papers, SearchPaper{
+			ID:    fmt.Sprintf("paper-%d", index+1),
+			Title: fmt.Sprintf("Paper %d", index+1),
+		})
+	}
+
+	eager, deferred := splitDeepStartEagerPreprocess(papers, 4)
+	if len(eager) != 4 || len(deferred) != 2 {
+		t.Fatalf("expected 4 eager and 2 deferred, got %d and %d", len(eager), len(deferred))
+	}
+	if eager[0].ID != "paper-1" || eager[3].ID != "paper-4" {
+		t.Fatalf("expected ranking order to be preserved, got %+v", eager)
+	}
+	for _, paper := range deferred {
+		if paper.PreprocessStatus != "deferred" || paper.ParseStatus != "deferred" || paper.ExtractStatus != "deferred" {
+			t.Fatalf("expected deferred statuses, got %+v", paper)
+		}
+		if paper.ProcessingStage != "ready" {
+			t.Fatalf("expected deferred paper to remain usable, got %+v", paper)
+		}
+	}
+}
+
+func TestEstimateDeepStartETAUsesObservedThroughput(t *testing.T) {
+	batch := deepStartBatchStats{Total: 4, Completed: 2}
+	if got := estimateDeepStartETAWithElapsed(batch, 60*time.Second); got != 60 {
+		t.Fatalf("expected 60 second ETA from observed throughput, got %d", got)
+	}
+	if got := estimateDeepStartETA(deepStartBatchStats{Total: 4}); got != 80 {
+		t.Fatalf("expected conservative initial ETA, got %d", got)
+	}
+}
+
 func TestPreprocessDeepStartResultsSanitizesSessionCacheDirectory(t *testing.T) {
 	pdfService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/parse/upload" {

@@ -28,6 +28,7 @@ type App struct {
 	search               paperSearchService
 	deepStartEnricher    deepStartEnricher
 	pdfService           *PDFServiceClient
+	pdfServiceProcess    *managedPDFService
 	syncManager          *SyncManager
 	stateMu              sync.RWMutex
 	extractProgress      map[string]*ExtractProgress
@@ -80,6 +81,7 @@ func (a *App) startup(ctx context.Context) {
 	if err := a.applyConfig(config, true); err != nil {
 		log.Printf("Failed to initialize app: %v", err)
 	}
+	a.startManagedPDFService()
 	if a.config.Sync.SyncOnStartup && syncConfigured(a.config) {
 		go func() {
 			if manager := a.ensureSyncManager(); manager != nil {
@@ -94,6 +96,10 @@ func (a *App) shutdown(ctx context.Context) {
 	a.stopPeriodicSyncLoop()
 	a.cancelAllDeepStartTasks()
 	a.stopDownloadWorkers()
+	if a.pdfServiceProcess != nil {
+		a.pdfServiceProcess.Stop()
+		a.pdfServiceProcess = nil
+	}
 	a.closeMu.Lock()
 	skipShutdownSync := a.closeBypass
 	a.closeMu.Unlock()
@@ -906,6 +912,11 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 		return err
 	}
 	a.db = db
+	if recovered, err := a.db.RecoverInterruptedDeepStartSessions(); err != nil {
+		log.Printf("Failed to recover interrupted DeepStart sessions: %v", err)
+	} else if recovered > 0 {
+		log.Printf("Recovered %d interrupted DeepStart session(s)", recovered)
+	}
 	a.deepStartEnricher = NewDeepStartEnricher(a.db)
 	a.syncManager = NewSyncManager(a.db, a.config)
 	a.configureSyncManager()

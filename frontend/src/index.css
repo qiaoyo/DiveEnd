@@ -3,70 +3,94 @@
 @tailwind utilities;
 
 :root {
-  --de-primary: #4f46e5;
-  --de-ai-accent: #8b5cf6;
-  --de-bg-light: #f8fafc;
-  --de-bg-dark: #0f172a;
-  --de-surface-light: rgba(255, 255, 255, 0.76);
-  --de-surface-dark: rgba(15, 23, 42, 0.7);
-  --de-border-light: rgba(15, 23, 42, 0.1);
-  --de-border-dark: rgba(226, 232, 240, 0.12);
-  --de-text-light: #0f172a;
-  --de-text-dark: #e2e8f0;
-
-  font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --de-reading-font: "Merriweather", "Iowan Old Style", "Times New Roman", serif;
-  line-height: 1.5;
-  font-weight: 400;
+  --de-paper: #f6f7f5;
+  --de-surface: #ffffff;
+  --de-surface-muted: #eef1ee;
+  --de-ink: #18201d;
+  --de-ink-muted: #66716c;
+  --de-rule: #d8ddd9;
+  --de-rule-strong: #b8c2bc;
+  --de-accent: #176b57;
+  --de-accent-hover: #0f5948;
+  --de-accent-soft: #e0eee9;
+  --de-danger: #a44236;
+  --de-warning: #9a5b2f;
+  --de-radius: 6px;
+  --de-font-display: "Avenir Next", "Segoe UI", sans-serif;
+  --de-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif;
+  --de-font-reading: "Iowan Old Style", "Songti SC", "Times New Roman", serif;
 
   color-scheme: light;
-  color: var(--de-text-light);
-  background-color: var(--de-bg-light);
-
+  color: var(--de-ink);
+  background: var(--de-paper);
+  font-family: var(--de-font-ui);
   font-synthesis: none;
+  line-height: 1.5;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 html.dark {
+  --de-paper: #111714;
+  --de-surface: #18201d;
+  --de-surface-muted: #202925;
+  --de-ink: #edf2ef;
+  --de-ink-muted: #a7b2ac;
+  --de-rule: #303b35;
+  --de-rule-strong: #4a5851;
+  --de-accent: #59b89d;
+  --de-accent-hover: #75c9af;
+  --de-accent-soft: #1d3a31;
+  --de-danger: #e48678;
+  --de-warning: #d99a67;
   color-scheme: dark;
 }
 
-html, body {
-  margin: 0;
-  padding: 0;
+html,
+body {
+  height: 100%;
   min-width: 320px;
   min-height: 100vh;
-  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  background: radial-gradient(circle at 8% 8%, rgba(79, 70, 229, 0.12), transparent 34%),
-    radial-gradient(circle at 85% 12%, rgba(139, 92, 246, 0.12), transparent 36%),
-    var(--de-bg-light);
-  color: var(--de-text-light);
-  transition: background-color 180ms ease, color 180ms ease;
+  overflow: hidden;
+  color: var(--de-ink);
+  background: var(--de-paper);
+  letter-spacing: 0;
 }
 
-.dark body {
-  background: radial-gradient(circle at 12% 10%, rgba(99, 102, 241, 0.24), transparent 30%),
-    radial-gradient(circle at 86% 16%, rgba(139, 92, 246, 0.22), transparent 34%),
-    var(--de-bg-dark);
-  color: var(--de-text-dark);
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  letter-spacing: 0;
 }
 
-#root, #app {
-  height: 100%;
-  min-height: 100vh;
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--de-accent);
+  outline-offset: 2px;
+}
+
+#root,
+#app {
   display: flex;
+  min-height: 100vh;
+  height: 100%;
   flex-direction: column;
 }
 
-/* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -74,33 +98,104 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(79, 70, 229, 0.35);
-  border-radius: 999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(79, 70, 229, 0.55);
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: rgba(196, 181, 253, 0.34);
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(196, 181, 253, 0.52);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--de-ink-muted) 42%, transparent);
+  background-clip: padding-box;
 }
 
 .de-glass {
-  backdrop-filter: blur(16px);
-  background: var(--de-surface-light);
-  border: 1px solid var(--de-border-light);
-}
-
-.dark .de-glass {
-  background: var(--de-surface-dark);
-  border: 1px solid var(--de-border-dark);
+  border: 1px solid var(--de-rule);
+  border-radius: var(--de-radius);
+  background: var(--de-surface);
 }
 
 .de-reading {
-  font-family: var(--de-reading-font);
+  font-family: var(--de-font-reading);
+}
+
+.de-display {
+  font-family: var(--de-font-display);
+}
+
+.de-shell {
+  color: var(--de-ink);
+  background: var(--de-paper);
+}
+
+.de-panel {
+  border: 1px solid var(--de-rule);
+  border-radius: var(--de-radius);
+  background: var(--de-surface);
+}
+
+.de-muted {
+  color: var(--de-ink-muted);
+}
+
+.de-button-primary {
+  border-radius: var(--de-radius);
+  background: var(--de-accent);
+  color: #fff;
+  transition: background-color 150ms ease, opacity 150ms ease;
+}
+
+.de-button-primary:hover:not(:disabled) {
+  background: var(--de-accent-hover);
+}
+
+.de-button-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.de-button-secondary {
+  border: 1px solid var(--de-rule);
+  border-radius: var(--de-radius);
+  color: var(--de-ink);
+  background: var(--de-surface);
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.de-button-secondary:hover:not(:disabled) {
+  border-color: var(--de-rule-strong);
+  background: var(--de-surface-muted);
+}
+
+.de-field {
+  border: 1px solid var(--de-rule-strong);
+  border-radius: var(--de-radius);
+  color: var(--de-ink);
+  background: var(--de-surface);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.de-field:focus {
+  border-color: var(--de-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--de-accent) 14%, transparent);
+  outline: none;
+}
+
+.de-session [class*="rounded-2xl"],
+.de-session [class*="rounded-xl"],
+.de-read [class*="rounded-2xl"],
+.de-read [class*="rounded-xl"] {
+  border-radius: var(--de-radius);
+}
+
+.de-session [class*="backdrop-blur"],
+.de-read [class*="backdrop-blur"] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

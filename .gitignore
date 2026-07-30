@@ -24,4 +24,5 @@ frontend/package.json.md5
 __pycache__/
 *.pyc
 .pytest_cache/
+services/pdf_service/.venv/
 frontend_references/

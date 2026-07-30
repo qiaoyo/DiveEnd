@@ -8,6 +8,8 @@ export function ApplyPendingDatabaseRestore():Promise<main.DatabaseRestoreStatus
 
 export function ApplyScreeningChoice(arg1:string,arg2:Array<string>):Promise<main.ScreeningDecisionNode>;
 
+export function AskDeepReadPaper(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.DeepReadAIResponse>;
+
 export function AttachLocalPDFToPaper(arg1:string,arg2:string):Promise<main.Paper>;
 
 export function CancelDeepStartTask(arg1:string):Promise<void>;

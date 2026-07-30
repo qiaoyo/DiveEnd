@@ -14,6 +14,10 @@ export function ApplyScreeningChoice(arg1, arg2) {
   return window['go']['main']['App']['ApplyScreeningChoice'](arg1, arg2);
 }
 
+export function AskDeepReadPaper(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['AskDeepReadPaper'](arg1, arg2, arg3, arg4);
+}
+
 export function AttachLocalPDFToPaper(arg1, arg2) {
   return window['go']['main']['App']['AttachLocalPDFToPaper'](arg1, arg2);
 }

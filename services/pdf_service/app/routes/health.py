@@ -52,9 +52,7 @@ async def readiness_check():
     """
     checks = {
         "database": {"status": "up", "latency_ms": 0},
-        "pdf_parser": {"status": "up", "message": "Marker available"},
-        "llm_weak": {"status": "up", "provider": "openai"},
-        "llm_strong": {"status": "up", "provider": "anthropic"},
+        "pdf_parser": {"status": "up", "message": "PyMuPDF available"},
     }
 
     all_ready = all(

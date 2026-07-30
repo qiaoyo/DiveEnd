@@ -100,8 +100,8 @@ func defaultSearchAPIConfig() SearchAPIConfig {
 		EnableSemanticScholar:  true,
 		EnableArxiv:            true,
 		SemanticScholarKeyPath: filepath.Join("config", "semantic_scholar.json"),
-		PerSourceResultLimit:   100,
-		DeepStartResultLimit:   200,
+		PerSourceResultLimit:   20,
+		DeepStartResultLimit:   20,
 		RetryDurationSeconds:   60,
 		RetryIntervalSeconds:   1,
 		RequestTimeoutSeconds:  5,
@@ -279,10 +279,10 @@ func normalizeSearchAPIConfig(config SearchAPIConfig) SearchAPIConfig {
 	if config.SemanticScholarKeyPath == "" {
 		config.SemanticScholarKeyPath = defaults.SemanticScholarKeyPath
 	}
-	if config.PerSourceResultLimit < 100 {
+	if config.PerSourceResultLimit <= 0 {
 		config.PerSourceResultLimit = defaults.PerSourceResultLimit
 	}
-	if config.DeepStartResultLimit < 100 {
+	if config.DeepStartResultLimit <= 0 {
 		config.DeepStartResultLimit = defaults.DeepStartResultLimit
 	}
 	if config.RetryIntervalSeconds <= 0 {

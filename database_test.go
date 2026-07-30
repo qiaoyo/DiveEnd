@@ -582,3 +582,75 @@ func TestDeepStartEnrichmentCacheRoundTrip(t *testing.T) {
 		t.Fatalf("expected publication metadata to round-trip, got %+v", loaded)
 	}
 }
+
+func TestRecoverInterruptedDeepStartSessions(t *testing.T) {
+	db, err := NewDB(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDB() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	interrupted := &DeepStartSessionDetail{
+		Summary: DeepStartSessionSummary{
+			ID:                  "interrupted-session",
+			Title:               "Interrupted",
+			RootPrompt:          "prompt",
+			CurrentQuery:        "query",
+			ProcessingStatus:    "background_processing",
+			InitialReadyCount:   12,
+			TotalPlannedCount:   200,
+			BackgroundRemaining: 188,
+			CreatedAt:           time.Now().Add(-time.Hour),
+			UpdatedAt:           time.Now().Add(-time.Hour),
+		},
+		CurrentResults: []SearchPaper{{ID: "paper-1", Title: "Paper"}},
+	}
+	if err := db.UpsertDeepStartSession(interrupted); err != nil {
+		t.Fatalf("UpsertDeepStartSession(interrupted) error = %v", err)
+	}
+
+	completed := &DeepStartSessionDetail{
+		Summary: DeepStartSessionSummary{
+			ID:                  "completed-session",
+			Title:               "Completed",
+			RootPrompt:          "prompt",
+			CurrentQuery:        "query",
+			ProcessingStatus:    "completed",
+			InitialReadyCount:   20,
+			TotalPlannedCount:   20,
+			BackgroundRemaining: 0,
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
+		},
+	}
+	if err := db.UpsertDeepStartSession(completed); err != nil {
+		t.Fatalf("UpsertDeepStartSession(completed) error = %v", err)
+	}
+
+	recovered, err := db.RecoverInterruptedDeepStartSessions()
+	if err != nil {
+		t.Fatalf("RecoverInterruptedDeepStartSessions() error = %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected one recovered session, got %d", recovered)
+	}
+
+	got, err := db.GetDeepStartSession(interrupted.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetDeepStartSession(interrupted) error = %v", err)
+	}
+	if got.Summary.ProcessingStatus != "completed" || got.Summary.BackgroundRemaining != 0 {
+		t.Fatalf("expected recovered completed state, got %+v", got.Summary)
+	}
+	if got.Summary.TotalPlannedCount != got.Summary.InitialReadyCount {
+		t.Fatalf("expected total planned to match saved ready count, got %+v", got.Summary)
+	}
+
+	recoveredAgain, err := db.RecoverInterruptedDeepStartSessions()
+	if err != nil {
+		t.Fatalf("RecoverInterruptedDeepStartSessions(second) error = %v", err)
+	}
+	if recoveredAgain != 0 {
+		t.Fatalf("expected idempotent second recovery, got %d", recoveredAgain)
+	}
+}

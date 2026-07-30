@@ -7,6 +7,7 @@ import {
   Folder,
   Languages,
   Loader2,
+  MessageSquare,
   Minus,
   Plus,
   RefreshCw,
@@ -16,6 +17,7 @@ import {
 import { Document, Page, pdfjs } from 'react-pdf';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
+  askDeepReadPaper,
   getDeepReadPDFBytes,
   getDeepReadPDFURL,
   getDeepReadState,
@@ -32,7 +34,14 @@ import {
   translatePaperSection,
 } from '../../lib/backend';
 import { errorToUserMessage } from '../../lib/errors';
-import type { DeepReadState, Folder as FolderRecord, FolderNode, Paper, PDFServiceStatus } from '../../types';
+import type {
+  DeepReadAIResponse,
+  DeepReadState,
+  Folder as FolderRecord,
+  FolderNode,
+  Paper,
+  PDFServiceStatus,
+} from '../../types';
 import { useAppStore } from '../../stores/appStore';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
@@ -118,13 +127,13 @@ function statusLabel(status: string): string {
 function statusStyle(status: string): string {
   switch ((status || '').toLowerCase()) {
     case 'downloaded':
-      return 'border-emerald-300 bg-emerald-100/80 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200';
+      return 'border-[var(--de-rule)] bg-[var(--de-surface-muted)] text-[var(--de-accent)]';
     case 'failed':
-      return 'border-rose-300 bg-rose-100/80 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200';
+      return 'border-[var(--de-rule)] bg-[var(--de-surface-muted)] text-[var(--de-danger)]';
     case 'downloading':
-      return 'border-indigo-300 bg-indigo-100/80 text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200';
+      return 'border-[var(--de-rule)] bg-[var(--de-surface-muted)] text-[var(--de-accent)]';
     default:
-      return 'border-amber-300 bg-amber-100/80 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200';
+      return 'border-[var(--de-rule)] bg-[var(--de-surface-muted)] text-[var(--de-warning)]';
   }
 }
 
@@ -166,6 +175,7 @@ export function DeepReadPanel() {
   const [folderTree, setFolderTree] = useState<FolderNode[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState('');
+  const [showLibrary, setShowLibrary] = useState(() => !selectedPaper);
   const [retryingPaperId, setRetryingPaperId] = useState('');
   const [retryingFolder, setRetryingFolder] = useState(false);
   const [attachingPaperId, setAttachingPaperId] = useState('');
@@ -186,6 +196,10 @@ export function DeepReadPanel() {
   const [pdfResourceURL, setPDFResourceURL] = useState('');
   const [pdfBytes, setPDFBytes] = useState<Uint8Array | null>(null);
   const [translationError, setTranslationError] = useState('');
+  const [aiQuestion, setAIQuestion] = useState('');
+  const [aiResponse, setAIResponse] = useState<DeepReadAIResponse | null>(null);
+  const [askingAI, setAskingAI] = useState(false);
+  const [aiError, setAIError] = useState('');
   const [manualURLDrafts, setManualURLDrafts] = useState<Record<string, string>>({});
   const [manualURLPanelPaperId, setManualURLPanelPaperId] = useState<string | null>(null);
   const [submittingManualURLPaperId, setSubmittingManualURLPaperId] = useState('');
@@ -414,6 +428,9 @@ export function DeepReadPanel() {
   }, [activeFolderId, loadingDownloads, selectedPaper, setPapers, setSelectedPaper]);
 
   useEffect(() => {
+    setAIResponse(null);
+    setAIError('');
+    setAIQuestion('');
     if (!selectedPaperId) {
       setDeepReadState(null);
       setSelectedSectionId('');
@@ -559,6 +576,39 @@ export function DeepReadPanel() {
       setError(message);
     } finally {
       setIsTranslating(false);
+    }
+  };
+
+  const handleAskAI = async (mode: 'question' | 'summary') => {
+    if (!selectedPaper) {
+      setError('请先选择一篇论文');
+      return;
+    }
+    if (deepReadState?.parseStatus !== 'ready') {
+      setError('请先准备阅读内容，再使用 AI 分析');
+      return;
+    }
+    if (mode === 'question' && !aiQuestion.trim()) {
+      setError('请输入你想向论文提出的问题');
+      return;
+    }
+
+    setAskingAI(true);
+    setAIError('');
+    try {
+      const response = await askDeepReadPaper(
+        selectedPaper.id,
+        selectedSection?.id || '',
+        mode === 'question' ? aiQuestion.trim() : '',
+        mode,
+      );
+      setAIResponse(response);
+    } catch (error) {
+      const message = errorToUserMessage(error, mode === 'summary' ? '生成论文总结失败' : '论文问答失败');
+      setAIError(message);
+      setError(message);
+    } finally {
+      setAskingAI(false);
     }
   };
 
@@ -742,13 +792,17 @@ export function DeepReadPanel() {
   const isMissingPDF = parseStatus === 'missing_pdf';
   const selectedPaperURL = selectedPaper?.url || '';
 
+  useEffect(() => {
+    setShowLibrary(!selectedPaper);
+  }, [selectedPaperId]);
+
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <div className="border-b border-slate-200/80 bg-white/80 px-4 py-2.5 backdrop-blur-md dark:border-slate-700/80 dark:bg-slate-900/80">
+    <div className="de-read flex h-full min-h-0 flex-col overflow-hidden bg-[var(--de-paper)] text-[var(--de-ink)]">
+      <div className="border-b border-[var(--de-rule)] bg-[var(--de-surface)] px-4 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">DeepRead Workspace</p>
-            <h2 className="truncate text-sm font-semibold">{selectedPaper?.title || '选择右侧论文开始阅读'}</h2>
+            <p className="text-xs font-medium text-[var(--de-accent)]">论文阅读工作台</p>
+            <h2 className="truncate text-sm font-semibold">{selectedPaper?.title || '从论文库选择一篇论文'}</h2>
             {pdfServiceStatus && (
               <p className={`mt-1 text-xs ${pdfServiceStatus.ready ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
                 PDF 服务：{pdfServiceStatus.ready ? 'ready' : '需要检查'}{pdfServiceStatus.message ? ` · ${pdfServiceStatus.message}` : ''}
@@ -758,9 +812,18 @@ export function DeepReadPanel() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setShowLibrary((value) => !value)}
+              className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+              aria-pressed={showLibrary}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              {showLibrary ? '收起论文库' : '论文库'}
+            </button>
+            <button
+              type="button"
               onClick={() => void handlePrepare()}
               disabled={preparing || !selectedPaper}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-300/70 bg-indigo-100 px-3 py-1.5 text-xs text-indigo-700 transition hover:bg-indigo-200 disabled:opacity-60 dark:border-indigo-400/50 dark:bg-indigo-500/20 dark:text-indigo-100 dark:hover:bg-indigo-500/30"
+              className="de-button-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60"
             >
               {preparing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               {preparing ? '处理中' : '准备阅读内容'}
@@ -770,7 +833,7 @@ export function DeepReadPanel() {
                 href={selectedPaperURL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 transition hover:border-indigo-400 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:text-indigo-100"
+                className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
               >
                 打开网页
                 <ExternalLink className="h-3.5 w-3.5" />
@@ -780,10 +843,10 @@ export function DeepReadPanel() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-3 p-3 xl:grid-cols-[280px_1fr_360px]">
-        <aside className="min-h-0 rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
+      <div className="relative grid min-h-0 flex-1 gap-2 p-2 lg:grid-cols-[210px_minmax(0,1fr)]">
+        <aside className="min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
           <div className="rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/70 dark:bg-slate-900/75">
-            <h3 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Outline</h3>
+            <h3 className="text-xs font-semibold text-[var(--de-ink-muted)]">论文章节</h3>
             <div className="mt-3 max-h-44 space-y-2 overflow-y-auto">
               {sections.length > 0 ? (
                 sections.map((item) => (
@@ -954,14 +1017,14 @@ export function DeepReadPanel() {
           </div>
         </aside>
 
-        <section className="grid min-h-0 gap-3 xl:grid-cols-[1.45fr_1fr]">
+        <section className="grid min-h-0 gap-2 lg:grid-cols-[minmax(360px,1.5fr)_minmax(280px,0.9fr)]">
           <div className="min-h-0 rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
-            <h3 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">PDF Original Text</h3>
+            <h3 className="text-xs font-semibold text-[var(--de-ink-muted)]">论文原文</h3>
             <div className="mt-3 min-h-0 rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/70">
               {!selectedPaper && (
                 <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
                   <BookOpen className="mb-3 h-10 w-10 text-slate-400 dark:text-slate-500" />
-                  <p className="text-sm text-slate-600 dark:text-slate-300">从右侧选择一篇论文开始阅读</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">从论文库选择一篇论文开始阅读</p>
                 </div>
               )}
 
@@ -1060,24 +1123,104 @@ export function DeepReadPanel() {
             </div>
           </div>
 
-          <aside className="min-h-0 rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
+          <aside className="min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
             <div className="space-y-3">
-              <div className="rounded-xl border border-indigo-300/70 bg-indigo-50 p-3 dark:border-indigo-400/40 dark:bg-indigo-500/10">
-                <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-indigo-700 dark:text-indigo-200">
+              <div className="border border-[var(--de-rule)] bg-[var(--de-surface)] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="flex items-center gap-2 text-xs font-semibold text-[var(--de-ink)]">
+                    <MessageSquare className="h-3.5 w-3.5 text-[var(--de-accent)]" />
+                    AI 阅读助手
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => void handleAskAI('summary')}
+                    disabled={askingAI || !selectedPaper || parseStatus !== 'ready'}
+                    className="text-xs font-medium text-[var(--de-accent)] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    总结全文
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] leading-5 text-[var(--de-ink-muted)]">
+                  回答优先参考当前章节，并引用论文中的证据位置。
+                </p>
+                <textarea
+                  value={aiQuestion}
+                  onChange={(event) => setAIQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      void handleAskAI('question');
+                    }
+                  }}
+                  placeholder="这篇论文的核心假设是什么？实验是否真正支持结论？"
+                  className="de-field mt-2 min-h-[72px] w-full resize-none px-2.5 py-2 text-xs leading-5"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleAskAI('question')}
+                  disabled={askingAI || !selectedPaper || !aiQuestion.trim() || parseStatus !== 'ready'}
+                  className="de-button-primary mt-2 inline-flex h-8 items-center gap-1.5 px-3 text-xs font-medium"
+                >
+                  {askingAI ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                  {askingAI ? '正在阅读论文' : '基于论文回答'}
+                </button>
+
+                {aiError ? (
+                  <p className="mt-2 text-xs leading-5 text-[var(--de-danger)]">{aiError}</p>
+                ) : null}
+                {aiResponse ? (
+                  <div className="mt-3 border-t border-[var(--de-rule)] pt-3">
+                    {aiResponse.takeaway ? (
+                      <p className="text-sm font-semibold leading-6 text-[var(--de-ink)]">{aiResponse.takeaway}</p>
+                    ) : null}
+                    <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-[var(--de-ink)]">
+                      {aiResponse.answer}
+                    </p>
+                    {aiResponse.evidence.length ? (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-[11px] font-semibold text-[var(--de-ink-muted)]">论文依据</p>
+                        {aiResponse.evidence.map((evidence, index) => (
+                          <button
+                            key={`${evidence.sectionId}-${index}`}
+                            type="button"
+                            onClick={() => setSelectedSectionId(evidence.sectionId)}
+                            className="block w-full border-t border-[var(--de-rule)] pt-2 text-left"
+                          >
+                            <span className="text-[11px] font-medium text-[var(--de-accent)]">
+                              {evidence.sectionTitle || evidence.sectionId}
+                            </span>
+                            <span className="mt-1 block text-[11px] leading-5 text-[var(--de-ink-muted)]">
+                              “{evidence.excerpt}”
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {aiResponse.limitations.length ? (
+                      <p className="mt-3 text-[11px] leading-5 text-[var(--de-ink-muted)]">
+                        限制：{aiResponse.limitations.join('；')}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="border border-[var(--de-rule)] bg-[var(--de-surface)] p-3">
+                <h3 className="flex items-center gap-2 text-xs font-semibold text-[var(--de-ink)]">
                   <Languages className="h-3.5 w-3.5" />
-                  AI Translation
+                  翻译与摘要
                 </h3>
                 <textarea
                   value={originalText}
                   onChange={(event) => setOriginalText(event.target.value)}
                   placeholder="选择章节后可编辑待翻译内容"
-                  className="mt-2 min-h-[120px] w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs leading-6 outline-none dark:border-slate-700 dark:bg-slate-950/60"
+                  className="de-field mt-2 min-h-[120px] w-full px-2.5 py-2 text-xs leading-6"
                 />
                 <button
                   type="button"
                   onClick={() => void handleTranslate()}
                   disabled={isTranslating || !selectedPaper}
-                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
+                  className="de-button-primary mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60"
                 >
                   {isTranslating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Languages className="h-3.5 w-3.5" />}
                   {isTranslating ? '处理中' : '生成翻译与摘要'}
@@ -1094,22 +1237,22 @@ export function DeepReadPanel() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-violet-300/70 bg-violet-50 p-3 dark:border-violet-400/40 dark:bg-violet-500/10">
-                <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-violet-700 dark:text-violet-200">
+              <div className="border border-[var(--de-rule)] bg-[var(--de-surface)] p-3">
+                <h3 className="flex items-center gap-2 text-xs font-semibold text-[var(--de-ink)]">
                   <BookText className="h-3.5 w-3.5" />
-                  Notes
+                  阅读笔记
                 </h3>
                 <textarea
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}
                   placeholder="记录你的阅读笔记"
-                  className="mt-2 min-h-[90px] w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs leading-6 outline-none dark:border-slate-700 dark:bg-slate-950/60"
+                  className="de-field mt-2 min-h-[90px] w-full px-2.5 py-2 text-xs leading-6"
                 />
                 <button
                   type="button"
                   onClick={() => void handleSaveNote()}
                   disabled={savingNote || !selectedPaper}
-                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-violet-400/70 px-3 py-1.5 text-xs text-violet-700 transition hover:bg-violet-100 disabled:opacity-60 dark:border-violet-500/60 dark:text-violet-100 dark:hover:bg-violet-500/10"
+                  className="de-button-secondary mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60"
                 >
                   {savingNote ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                   {savingNote ? '保存中' : '保存笔记'}
@@ -1117,7 +1260,7 @@ export function DeepReadPanel() {
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                <h3 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">History</h3>
+                <h3 className="text-xs font-semibold text-[var(--de-ink-muted)]">翻译记录</h3>
                 <div className="mt-2 max-h-36 space-y-2 overflow-y-auto">
                   {translationHistory.length > 0 ? (
                     translationHistory.map((record) => (
@@ -1131,7 +1274,7 @@ export function DeepReadPanel() {
                   )}
                 </div>
                 <div className="mt-3 border-t border-slate-200 pt-2 dark:border-slate-700">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Notes History</p>
+                  <p className="text-[11px] font-semibold text-[var(--de-ink-muted)]">笔记记录</p>
                   <div className="mt-2 max-h-28 space-y-2 overflow-y-auto">
                     {noteHistory.length > 0 ? (
                       noteHistory.map((note) => (
@@ -1150,7 +1293,8 @@ export function DeepReadPanel() {
           </aside>
         </section>
 
-        <aside className="min-h-0 rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
+        {showLibrary ? (
+        <aside className="absolute bottom-2 right-2 top-2 z-20 w-[320px] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700/80 dark:bg-slate-900">
           <div className="rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/70 dark:bg-slate-900/75">
             <h3 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">文件夹目录</h3>
             <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{currentFolder?.path || '未选择目录'}</p>
@@ -1165,7 +1309,7 @@ export function DeepReadPanel() {
 
           <div className="mt-3 min-h-0 rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/70 dark:bg-slate-900/75">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              <h3 className="flex items-center gap-2 text-xs font-semibold text-[var(--de-ink-muted)]">
                 <FileText className="h-3.5 w-3.5" />
                 论文卡片集
               </h3>
@@ -1206,7 +1350,10 @@ export function DeepReadPanel() {
                     >
                       <button
                         type="button"
-                        onClick={() => setSelectedPaper(paper)}
+                        onClick={() => {
+                          setSelectedPaper(paper);
+                          setShowLibrary(false);
+                        }}
                         className="w-full text-left"
                       >
                         <h4 className="line-clamp-2 font-medium text-slate-800 dark:text-slate-100">{paper.title}</h4>
@@ -1303,6 +1450,7 @@ export function DeepReadPanel() {
             </div>
           </div>
         </aside>
+        ) : null}
       </div>
     </div>
   );

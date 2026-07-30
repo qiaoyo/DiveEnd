@@ -470,6 +470,20 @@ type DeepReadNote struct {
 	UpdatedAt time.Time `json:"updatedAt" ts_type:"string"`
 }
 
+type DeepReadEvidence struct {
+	SectionID    string `json:"sectionId"`
+	SectionTitle string `json:"sectionTitle"`
+	Excerpt      string `json:"excerpt"`
+}
+
+type DeepReadAIResponse struct {
+	Mode        string             `json:"mode"`
+	Answer      string             `json:"answer"`
+	Takeaway    string             `json:"takeaway"`
+	Evidence    []DeepReadEvidence `json:"evidence"`
+	Limitations []string           `json:"limitations"`
+}
+
 type DeepReadState struct {
 	PaperID        string              `json:"paperId"`
 	HasPDF         bool                `json:"hasPdf"`

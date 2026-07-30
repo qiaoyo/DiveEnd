@@ -1,83 +1,74 @@
-import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '../../stores/appStore';
+import { ArrowRight, FileSearch, Plus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { useNavigate } from 'react-router-dom';
+import { useAppStore } from '../../stores/appStore';
 
 export function HistoryPanel() {
   const navigate = useNavigate();
   const { deepStartSessions } = useAppStore();
 
-  const handleSessionClick = (sessionId: string) => {
-    navigate(`/session/${sessionId}`);
-  };
-
   return (
-    <div className="flex h-full flex-col bg-stone-50 dark:bg-stone-900">
-      <div className="border-b border-stone-200 bg-white px-6 py-4 dark:border-stone-700 dark:bg-stone-800">
-        <div className="flex items-center justify-between">
+    <div className="h-full overflow-y-auto bg-[var(--de-paper)]">
+      <div className="mx-auto w-full max-w-5xl px-6 py-8 lg:px-10 lg:py-10">
+        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--de-rule)] pb-5">
           <div>
-            <h2 className="text-2xl font-bold text-stone-900 dark:text-stone-100">
-              探索历史
-            </h2>
-            <p className="text-sm text-stone-600 dark:text-stone-400 mt-1">
-              共 {deepStartSessions.length} 个探索会话
+            <p className="text-sm font-medium text-[var(--de-accent)]">研究记录</p>
+            <h1 className="de-display mt-2 text-3xl font-semibold text-[var(--de-ink)]">已保存的检索</h1>
+            <p className="mt-2 text-sm text-[var(--de-ink-muted)]">
+              {deepStartSessions.length ? `共 ${deepStartSessions.length} 个研究工作区` : '还没有研究工作区'}
             </p>
           </div>
           <button
-            onClick={() => navigate('/deepstart')}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            type="button"
+            onClick={() => navigate('/')}
+            className="de-button-primary inline-flex h-9 items-center gap-2 px-3 text-sm font-medium"
           >
-            新建探索
+            <Plus className="h-4 w-4" />
+            新建检索
           </button>
-        </div>
-      </div>
+        </header>
 
-      <div className="flex-1 overflow-y-auto p-6">
         {deepStartSessions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="text-6xl mb-4">📭</div>
-            <h3 className="text-xl font-semibold text-stone-700 dark:text-stone-300 mb-2">
-              还没有探索记录
-            </h3>
-            <p className="text-stone-600 dark:text-stone-400 mb-6">
-              开始你的第一次论文探索之旅
+          <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
+            <FileSearch className="h-8 w-8 text-[var(--de-ink-muted)]" />
+            <h2 className="de-display mt-5 text-xl font-semibold text-[var(--de-ink)]">从一个研究问题开始</h2>
+            <p className="mt-2 max-w-md text-sm leading-6 text-[var(--de-ink-muted)]">
+              检索完成后，论文分组、AI 分析与筛选状态会保存在这里。
             </p>
             <button
-              onClick={() => navigate('/deepstart')}
-              className="rounded-lg bg-blue-600 px-6 py-3 text-white font-medium hover:bg-blue-700 transition-colors"
+              type="button"
+              onClick={() => navigate('/')}
+              className="de-button-secondary mt-6 inline-flex h-9 items-center gap-2 px-4 text-sm"
             >
-              开始探索
+              前往发现
+              <ArrowRight className="h-4 w-4" />
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="divide-y divide-[var(--de-rule)]">
             {deepStartSessions.map((session) => (
               <button
                 key={session.id}
-                onClick={() => handleSessionClick(session.id)}
-                className="group rounded-xl border-2 border-stone-200 bg-white p-5 text-left transition-all hover:border-blue-400 hover:shadow-lg dark:border-stone-700 dark:bg-stone-800 dark:hover:border-blue-600"
+                type="button"
+                onClick={() => navigate(`/session/${session.id}`)}
+                className="group grid w-full grid-cols-1 gap-3 px-1 py-5 text-left transition-colors hover:bg-[var(--de-surface-muted)] sm:grid-cols-[minmax(0,1fr)_180px_24px] sm:items-center"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="font-semibold text-stone-900 dark:text-stone-100 line-clamp-2 flex-1">
-                    {session.title}
-                  </h3>
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-semibold text-[var(--de-ink)]">
+                    {session.title || session.rootPrompt}
+                  </h2>
+                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--de-ink-muted)]">
+                    {session.rootPrompt}
+                  </p>
                 </div>
-
-                <p className="text-sm text-stone-600 dark:text-stone-400 line-clamp-2 mb-3">
-                  {session.rootPrompt}
-                </p>
-
-                <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-500">
-                  <span>
-                    {formatDistanceToNow(new Date(session.updatedAt), {
-                      addSuffix: true,
-                      locale: zhCN,
-                    })}
-                  </span>
-                  <span className="opacity-0 group-hover:opacity-100 transition-opacity">
-                    点击继续 →
-                  </span>
+                <div className="text-xs text-[var(--de-ink-muted)]">
+                  <p>{session.processingStatus === 'completed' ? '分析完成' : '处理中'}</p>
+                  <p className="mt-1">
+                    {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true, locale: zhCN })}
+                  </p>
                 </div>
+                <ArrowRight className="hidden h-4 w-4 text-[var(--de-ink-muted)] transition-colors group-hover:text-[var(--de-accent)] sm:block" />
               </button>
             ))}
           </div>

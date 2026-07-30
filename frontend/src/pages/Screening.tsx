@@ -9,10 +9,10 @@ type ScreeningStage = 'upload' | 'extract' | 'screen' | 'results';
 
 const stageOrder: ScreeningStage[] = ['upload', 'extract', 'screen', 'results'];
 const stageLabel: Record<ScreeningStage, string> = {
-  upload: '1. Queue',
-  extract: '2. Extracting',
-  screen: '3. AI Screening',
-  results: '4. Results',
+  upload: '导入',
+  extract: '内容提取',
+  screen: '标准筛选',
+  results: '结果入库',
 };
 
 export const Screening: React.FC = () => {
@@ -239,31 +239,32 @@ export const Screening: React.FC = () => {
   };
 
   const renderSteps = () => (
-    <div className="flex flex-wrap gap-2">
-      {stageOrder.map((stage) => {
+    <ol className="flex flex-wrap items-center border-y border-[var(--de-rule)]">
+      {stageOrder.map((stage, index) => {
         const active = currentStage === stage;
         const completed = stageOrder.indexOf(stage) < stageOrder.indexOf(currentStage);
         return (
-          <div
+          <li
             key={stage}
-            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+            className={`flex items-center gap-2 border-r border-[var(--de-rule)] px-4 py-2 text-xs font-medium transition-colors ${
               active
-                ? 'border-violet-400 bg-violet-600 text-white'
+                ? 'bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
                 : completed
-                  ? 'border-indigo-300 bg-indigo-100 text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/20 dark:text-indigo-200'
-                  : 'border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                  ? 'text-[var(--de-ink)]'
+                  : 'text-[var(--de-ink-muted)]'
             }`}
           >
+            <span>{completed ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}</span>
             {stageLabel[stage]}
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 
   const renderUploadCard = () => (
-    <div className="de-glass rounded-2xl p-5">
-      <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Upload & Progress</h3>
+    <div className="de-glass p-5">
+      <h3 className="text-base font-semibold text-[var(--de-ink)]">导入待分析论文</h3>
       <div
         onDragEnter={(event) => {
           event.preventDefault();
@@ -278,10 +279,10 @@ export const Screening: React.FC = () => {
           setDropActive(false);
         }}
         onDrop={(event) => void handleDrop(event)}
-        className={`mt-4 rounded-2xl border border-dashed px-5 py-10 text-center transition ${
+        className={`mt-4 border border-dashed px-5 py-10 text-center transition-colors ${
           dropActive
-            ? 'border-violet-400 bg-violet-100/70 dark:bg-violet-500/15'
-            : 'border-slate-300 bg-white/60 dark:border-slate-600 dark:bg-slate-900/60'
+            ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)]'
+            : 'border-[var(--de-rule-strong)] bg-[var(--de-surface)]'
         }`}
       >
         <FileUp className="mx-auto h-8 w-8 text-slate-400" />
@@ -295,12 +296,12 @@ export const Screening: React.FC = () => {
               type="button"
               onClick={() => void handleNativePicker()}
               disabled={isBusy}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
+              className="de-button-primary px-4 py-2 text-sm font-medium disabled:opacity-60"
             >
               {isBusy ? '处理中...' : '选择 PDF 文件'}
             </button>
           ) : (
-            <label className="cursor-pointer rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500">
+            <label className="de-button-primary cursor-pointer px-4 py-2 text-sm font-medium">
             <input
               type="file"
               multiple
@@ -347,13 +348,13 @@ export const Screening: React.FC = () => {
   );
 
   const renderExtractCard = () => (
-    <div className="de-glass rounded-2xl p-5">
-      <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">提取论文内容</h3>
+    <div className="de-glass p-5">
+      <h3 className="text-base font-semibold text-[var(--de-ink)]">提取论文内容</h3>
       <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
         通过 Python PDF 服务抽取 markdown，并调用强模型生成结构化字段。
       </p>
-      <div className="mt-4 h-2 rounded-full bg-slate-200 dark:bg-slate-800">
-        <div className="h-2 rounded-full bg-violet-600 transition-all" style={{ width: `${extractionPercent}%` }} />
+      <div className="mt-4 h-1.5 bg-[var(--de-surface-muted)]">
+        <div className="h-1.5 bg-[var(--de-accent)] transition-[width] duration-150" style={{ width: `${extractionPercent}%` }} />
       </div>
       <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
         已处理 {extractionProgress?.completed ?? 0} / {extractionProgress?.total ?? papers.length}
@@ -390,7 +391,7 @@ export const Screening: React.FC = () => {
     if (currentStage === 'extract') {
       return (
         <div className="de-glass rounded-2xl p-5">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Decision Tree</h3>
+          <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选标准</h3>
           <div className="mt-4 rounded-2xl border border-slate-200 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/75">
             <p className="text-sm text-slate-600 dark:text-slate-300">解析完成后，AI 将在这里生成可交互的筛选节点。</p>
           </div>
@@ -401,12 +402,12 @@ export const Screening: React.FC = () => {
     if (currentStage === 'screen' && currentNode) {
       return (
         <div className="de-glass rounded-2xl p-5">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Decision Tree</h3>
+          <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选标准</h3>
 
-          <div className="mt-4 rounded-2xl border border-violet-300 bg-violet-50/80 p-4 dark:border-violet-500/40 dark:bg-violet-500/15">
-            <div className="flex items-center gap-2 text-sm font-semibold text-violet-700 dark:text-violet-200">
+          <div className="mt-4 border border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--de-accent)]">
               <Sparkles className="h-4 w-4" />
-              AI Question
+              当前判断
             </div>
             <p className="mt-2 text-sm leading-7">{currentNode.message}</p>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">维度：{currentNode.dimension}</p>
@@ -465,7 +466,7 @@ export const Screening: React.FC = () => {
     if (currentStage === 'results') {
       return (
         <div className="de-glass rounded-2xl p-5">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Results</h3>
+          <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选结果</h3>
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/40 dark:bg-emerald-500/15">
             <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-200">
               <CheckCircle2 className="h-4 w-4" />
@@ -486,7 +487,7 @@ export const Screening: React.FC = () => {
 
     return (
       <div className="de-glass rounded-2xl p-5">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Decision Tree</h3>
+        <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选标准</h3>
         <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">上传完成后会自动进入提取和筛选流程。</p>
       </div>
     );
@@ -495,15 +496,15 @@ export const Screening: React.FC = () => {
   const showActionBar = currentStage === 'screen' || currentStage === 'results';
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <div className="border-b border-slate-200/80 bg-white/70 px-6 py-4 backdrop-blur-md dark:border-slate-700/50 dark:bg-slate-900/55">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--de-paper)] text-[var(--de-ink)]">
+      <div className="border-b border-[var(--de-rule)] bg-[var(--de-surface)] px-6 py-4">
         <div className="mx-auto max-w-6xl">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <Filter className="h-5 w-5 text-violet-600" />
-            Screening Pipeline
+          <h2 className="de-display flex items-center gap-2 text-2xl font-semibold">
+            <Filter className="h-5 w-5 text-[var(--de-accent)]" />
+            批量论文分析
           </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
-            真实链路：上传 PDF ➜ 结构化提取 ➜ AI 决策树筛选 ➜ 导入文库
+            导入 PDF，提取研究内容，按你的标准筛选并保存到文库。
           </p>
           <div className="mt-4">{renderSteps()}</div>
         </div>
@@ -524,7 +525,7 @@ export const Screening: React.FC = () => {
 
             {(currentStage === 'results' || currentStage === 'screen') && resultPapers.length > 0 && (
               <div className="de-glass rounded-2xl p-4">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Selected Papers</h3>
+                <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">保留论文</h3>
                 <div className="mt-3 space-y-2">
                   {resultPapers.map((paper) => (
                     <div key={paper.id} className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">

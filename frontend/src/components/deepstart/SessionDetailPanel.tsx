@@ -10,7 +10,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  Sparkles,
+  Search,
   X,
 } from 'lucide-react';
 import {
@@ -29,7 +29,7 @@ import {
   undoDeepStartNarrow,
   updateDeepStartSelections,
 } from '../../lib/backend';
-import { errorToUserMessage, sanitizeUserVisibleError } from '../../lib/errors';
+import { errorToUserMessage, isCancellationError, sanitizeUserVisibleError } from '../../lib/errors';
 import { useAppStore } from '../../stores/appStore';
 import type {
   DeepStartDirection,
@@ -50,14 +50,6 @@ type ChatRuntimeState = {
   eta: number;
   message: string;
 };
-
-function isDeepStartCancelledError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  const message = error.message.toLowerCase();
-  return message.includes('cancelled') || message.includes('canceled');
-}
 
 function runtimeMessage(message: string | undefined, fallback: string): string {
   return sanitizeUserVisibleError((message || fallback).trim());
@@ -721,7 +713,7 @@ export function SessionDetailPanel() {
       }));
     } catch (error) {
       setOptimisticUserMessage('');
-      if (isDeepStartCancelledError(error)) {
+      if (isCancellationError(error)) {
         setChatRuntime({
           status: 'cancelled',
           phase: 'cancelled',
@@ -801,7 +793,7 @@ export function SessionDetailPanel() {
         message: '新一轮候选已准备完成',
       }));
     } catch (error) {
-      if (isDeepStartCancelledError(error)) {
+      if (isCancellationError(error)) {
         setChatRuntime((prev) => ({
           ...prev,
           status: 'cancelled',
@@ -861,7 +853,7 @@ export function SessionDetailPanel() {
         message: `补充检索完成，当前候选池 ${detail.currentResults.length} 篇`,
       });
     } catch (error) {
-      if (isDeepStartCancelledError(error)) {
+      if (isCancellationError(error)) {
         setChatRuntime((prev) => ({
           ...prev,
           status: 'cancelled',
@@ -1282,26 +1274,26 @@ export function SessionDetailPanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <div className="border-b border-slate-200/80 bg-white/70 px-6 py-4 backdrop-blur-md dark:border-slate-700/50 dark:bg-slate-900/55">
+    <div className="de-session flex h-full min-h-0 flex-col overflow-hidden bg-[var(--de-paper)] text-[var(--de-ink)]">
+      <div className="border-b border-[var(--de-rule)] bg-[var(--de-surface)] px-6 py-3">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3">
           <button
             onClick={() => navigate('/history')}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+            className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
           >
             <ArrowLeft className="h-4 w-4" />
             返回历史
           </button>
 
           <div className="min-w-[220px] flex-1">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Current Session</p>
-            <h2 className="truncate text-base font-semibold">{activeDeepStartSession.summary.title}</h2>
+            <p className="text-xs font-medium text-[var(--de-accent)]">研究工作区</p>
+            <h2 className="de-display truncate text-lg font-semibold">{activeDeepStartSession.summary.title}</h2>
           </div>
 
           <select
             value={activeTargetFolderId}
             onChange={(event) => void handleTargetFolderChange(event.target.value)}
-            className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900/80"
+            className="de-field px-3 py-2 text-sm"
           >
             {folderOptions.map((folder) => (
               <option key={folder.id} value={folder.id}>
@@ -1313,16 +1305,16 @@ export function SessionDetailPanel() {
           <button
             onClick={handleCreateFolder}
             disabled={isCreatingFolder}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+            className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-60"
           >
             <FolderPlus className="h-4 w-4" />
             新建文件夹
           </button>
         </div>
 
-        <div className="mx-auto mt-3 max-w-7xl rounded-2xl border border-white/80 bg-white/85 p-3 shadow-sm dark:border-slate-500/30 dark:bg-slate-900/80">
+        <div className="mx-auto mt-3 max-w-7xl border-t border-[var(--de-rule)] pt-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Sparkles className="h-4 w-4 text-violet-500" />
+            <Search className="h-4 w-4 text-[var(--de-ink-muted)]" />
             <input
               type="text"
               value={rerunQuery}
@@ -1334,7 +1326,7 @@ export function SessionDetailPanel() {
             <button
               onClick={() => void handleRerun()}
               disabled={isRerunBlocked}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-sm text-white transition hover:bg-indigo-500 disabled:opacity-60"
+              className="de-button-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm disabled:opacity-60"
             >
               {busyAction === 'rerunning' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               重搜
@@ -1352,7 +1344,7 @@ export function SessionDetailPanel() {
               type="button"
               onClick={() => void handleUndoNarrow()}
               disabled={Boolean(busyAction)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+              className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busyAction === 'undoing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeft className="h-4 w-4" />}
               回退上一轮
@@ -1362,10 +1354,10 @@ export function SessionDetailPanel() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28">
-        <div className="sticky top-0 z-30 -mx-6 border-b border-indigo-100 bg-slate-50/95 px-6 py-4 shadow-sm backdrop-blur-md dark:border-slate-700 dark:bg-slate-950/95">
-          <section className="mx-auto max-w-7xl rounded-2xl border border-indigo-200/70 bg-white p-4 shadow-sm dark:border-indigo-500/30 dark:bg-slate-900">
+        <div className="sticky top-0 z-30 -mx-6 border-b border-[var(--de-rule)] bg-[var(--de-paper)] px-6 py-3">
+          <section className="mx-auto max-w-7xl border border-[var(--de-rule)] bg-[var(--de-surface)] p-4">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">AI Chat</h3>
+              <h3 className="text-sm font-semibold text-[var(--de-ink)]">研究助理</h3>
               <button
                 type="button"
                 onClick={() => setChatCollapsed((value) => !value)}
@@ -1380,12 +1372,12 @@ export function SessionDetailPanel() {
               <div className="mt-3 space-y-3">
                 {chatRuntime.status !== 'idle' && chatRuntime.message && (
                   <div
-                    className={`rounded-xl border px-3 py-2 text-xs ${
+                    className={`border border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-3 py-2 text-xs ${
                       chatRuntime.status === 'failed'
-                        ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-200'
+                        ? 'text-[var(--de-danger)]'
                         : chatRuntime.status === 'cancelled'
-                          ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200'
-                          : 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200'
+                          ? 'text-[var(--de-warning)]'
+                          : 'text-[var(--de-ink)]'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -1399,9 +1391,9 @@ export function SessionDetailPanel() {
                     </div>
                     {(chatRuntime.status === 'running' || chatRuntime.status === 'cancelling') && !isChatThinking && (
                       <>
-                        <div className="mt-2 h-1.5 rounded-full bg-indigo-100/80 dark:bg-indigo-500/20">
+                        <div className="mt-2 h-1.5 bg-[var(--de-surface-muted)]">
                           <div
-                            className="h-1.5 rounded-full bg-indigo-600 transition-all dark:bg-indigo-300"
+                            className="h-1.5 bg-[var(--de-accent)] transition-[width] duration-150"
                             style={{ width: `${Math.max(0, Math.min(100, chatRuntime.percent))}%` }}
                           />
                         </div>
@@ -1415,10 +1407,10 @@ export function SessionDetailPanel() {
                   {chatMessages.map((message) => (
                     <div
                       key={message.id}
-                      className={`rounded-xl px-3 py-2 text-xs leading-6 ${
+                      className={`px-3 py-2 text-xs leading-6 ${
                         message.role === 'assistant'
-                          ? 'bg-white/80 text-slate-600 dark:bg-slate-900/80 dark:text-slate-200'
-                          : 'ml-4 bg-indigo-600 text-white'
+                          ? 'border-l-2 border-[var(--de-rule-strong)] text-[var(--de-ink)]'
+                          : 'ml-4 bg-[var(--de-accent)] text-white'
                       }`}
                     >
                       {message.content}
@@ -1433,7 +1425,7 @@ export function SessionDetailPanel() {
                                   setReplyInput(query);
                                   replyInputRef.current?.focus();
                                 }}
-                                className="rounded-full border border-slate-200 bg-white/90 px-2.5 py-1 text-[11px] text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                                className="border-b border-[var(--de-rule)] px-1 py-1 text-[11px] text-[var(--de-ink-muted)] transition-colors hover:border-[var(--de-accent)] hover:text-[var(--de-accent)]"
                               >
                                 {query}
                               </button>

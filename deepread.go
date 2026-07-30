@@ -15,6 +15,8 @@ import (
 
 var deepReadBase64FallbackMaxBytes int64 = 16 * 1024 * 1024
 
+const deepReadAIContextMaxRunes = 48000
+
 func (a *App) GetDeepReadState(paperID string) (*DeepReadState, error) {
 	if err := a.ensureReady(); err != nil {
 		return nil, err
@@ -221,6 +223,121 @@ func (a *App) SaveDeepReadNote(paperID, section, content string) (*DeepReadNote,
 		return nil, err
 	}
 	return note, nil
+}
+
+func (a *App) AskDeepReadPaper(paperID, sectionID, question, mode string) (*DeepReadAIResponse, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+
+	paperID = strings.TrimSpace(paperID)
+	if paperID == "" {
+		return nil, fmt.Errorf("paper id cannot be empty")
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "question"
+	}
+	if mode != "question" && mode != "summary" {
+		return nil, fmt.Errorf("mode must be question or summary")
+	}
+	question = strings.TrimSpace(question)
+	if mode == "question" && question == "" {
+		return nil, fmt.Errorf("question cannot be empty")
+	}
+
+	paper, err := a.db.GetPaperByID(paperID)
+	if err != nil {
+		return nil, err
+	}
+	state, err := a.GetDeepReadState(paperID)
+	if err != nil {
+		return nil, err
+	}
+	if state.ParseStatus != "ready" || len(state.Sections) == 0 {
+		return nil, fmt.Errorf("paper content is not ready; prepare the PDF before using the AI reading assistant")
+	}
+
+	assistant, ok := a.currentStrongLLM().(deepReadAssistant)
+	if !ok || assistant == nil {
+		return nil, fmt.Errorf("strong LLM does not support the DeepRead assistant")
+	}
+	contextText := buildDeepReadAIContext(state.Sections, sectionID, deepReadAIContextMaxRunes)
+	if strings.TrimSpace(contextText) == "" {
+		return nil, fmt.Errorf("paper context is empty")
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return assistant.AnswerDeepReadWithContext(ctx, paper.Title, mode, question, contextText)
+}
+
+func buildDeepReadAIContext(sections []DeepReadSection, selectedSectionID string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	selectedSectionID = strings.TrimSpace(selectedSectionID)
+	priorityTerms := []string{"abstract", "introduction", "method", "approach", "experiment", "result", "discussion", "conclusion", "limitation"}
+
+	ordered := make([]DeepReadSection, 0, len(sections))
+	seen := make(map[string]struct{}, len(sections))
+	appendSection := func(section DeepReadSection) {
+		if strings.TrimSpace(section.Content) == "" {
+			return
+		}
+		key := strings.TrimSpace(section.ID)
+		if key == "" {
+			key = fmt.Sprintf("section-%d", section.Index+1)
+			section.ID = key
+		}
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		ordered = append(ordered, section)
+	}
+
+	if selectedSectionID != "" {
+		for _, section := range sections {
+			if strings.TrimSpace(section.ID) == selectedSectionID {
+				appendSection(section)
+				break
+			}
+		}
+	}
+	for _, term := range priorityTerms {
+		for _, section := range sections {
+			if strings.Contains(strings.ToLower(section.Title), term) {
+				appendSection(section)
+			}
+		}
+	}
+	for _, section := range sections {
+		appendSection(section)
+	}
+
+	var builder strings.Builder
+	remaining := maxRunes
+	for _, section := range ordered {
+		header := fmt.Sprintf("[%s] %s\n", section.ID, strings.TrimSpace(section.Title))
+		content := strings.TrimSpace(section.Content)
+		block := header + content + "\n\n"
+		runes := []rune(block)
+		if len(runes) > remaining {
+			if remaining <= len([]rune(header))+64 {
+				break
+			}
+			runes = runes[:remaining]
+		}
+		builder.WriteString(string(runes))
+		remaining -= len(runes)
+		if remaining <= 0 {
+			break
+		}
+	}
+	return strings.TrimSpace(builder.String())
 }
 
 func (a *App) GetDeepReadPDFBytes(paperID string) (string, error) {

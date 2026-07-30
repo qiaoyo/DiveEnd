@@ -1544,6 +1544,26 @@ func (db *DB) ListDeepStartSessions() ([]DeepStartSessionSummary, error) {
 	return sessions, rows.Err()
 }
 
+func (db *DB) RecoverInterruptedDeepStartSessions() (int64, error) {
+	if db == nil || db.conn == nil {
+		return 0, fmt.Errorf("database is not initialized")
+	}
+	result, err := db.conn.Exec(`
+		UPDATE deepstart_sessions
+		SET processing_status = 'completed',
+		    background_remaining = 0,
+		    total_planned_count = CASE
+		        WHEN initial_ready_count > 0 THEN initial_ready_count
+		        ELSE total_planned_count
+		    END
+		WHERE processing_status = 'background_processing'
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (db *DB) GetDeepStartSession(sessionID string) (*DeepStartSessionDetail, error) {
 	var detail DeepStartSessionDetail
 	var targetFolderID sql.NullString
