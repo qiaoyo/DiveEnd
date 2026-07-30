@@ -165,6 +165,19 @@ Build Wails app:
 wails build
 ```
 
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs the credential-free macOS baseline on pull requests and protected development branches:
+
+- tracked-file secret scan;
+- Go test, vet, build, and race detector;
+- frontend tests and production build;
+- critical-level production dependency audit;
+- PDF service tests on Python 3.13;
+- packaged Wails desktop build.
+
+Real LLM, Semantic Scholar, and Baidu E2E remain explicit local checks and are never supplied with personal credentials in routine CI.
+
 ## Runtime Configuration
 
 Runtime config is stored in the user config directory, not in tracked project files:

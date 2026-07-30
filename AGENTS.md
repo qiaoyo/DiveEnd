@@ -165,3 +165,5 @@ node frontend/scripts/ui-smoke.mjs
 ```
 
 Real Baidu sync tests are opt-in and require valid local credentials. Do not assume they can run in a clean environment.
+
+Routine remote verification is defined in `.github/workflows/ci.yml`. It must remain credential-free: use mocks and fixtures in CI, and keep real LLM, Semantic Scholar, and Baidu checks as explicit local E2E.

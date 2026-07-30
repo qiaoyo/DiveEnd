@@ -315,6 +315,7 @@ Use this table to pick tests for a change:
 | Sync/Baidu | `go test ./... -run 'Test(Sync|Baidu|DatabaseRestore)'` |
 | Frontend | `cd frontend && npm test -- --run` |
 | PDF service | `python -m pytest services/pdf_service/tests` |
+| Remote CI | `.github/workflows/ci.yml` |
 | Security scan | `bash scripts/secret_scan.sh` |
 
 Full release baseline:
