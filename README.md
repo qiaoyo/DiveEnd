@@ -100,6 +100,8 @@ Use the `.example` files under `config/` and `baiduyun_token.json.example` as te
 
 ## Development
 
+Go 1.25.12 or newer in the 1.25 line is required. With `GOTOOLCHAIN=auto` (the Go default), the version declared in `go.mod` is downloaded automatically.
+
 Install frontend dependencies:
 
 ```bash
@@ -204,6 +206,7 @@ Passed:
 - `go vet ./...`
 - `go build ./...`
 - `go test -race ./...`
+- `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` (0 reachable vulnerabilities with Go 1.25.12)
 - `cd frontend && npm test -- --run`
 - `cd frontend && npm run build`
 - `services/pdf_service/.venv/bin/python -m pytest services/pdf_service/tests`

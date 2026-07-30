@@ -13,6 +13,7 @@ The current implementation is:
 - Frontend: React 18, TypeScript, Vite, Tailwind CSS, Radix UI, Framer Motion, Zustand, react-pdf.
 - Desktop bridge: Wails v2.
 - Backend: Go, `database/sql`, SQLite via `github.com/mattn/go-sqlite3`.
+- Go toolchain: minimum `1.25.12`; older 1.25 patch releases contain reachable standard-library vulnerabilities.
 - PDF microservice: Python FastAPI, PyMuPDF4LLM/PyMuPDF, OpenAI/Anthropic-compatible extraction.
 - Sync: Baidu Cloud PCS.
 
@@ -159,6 +160,7 @@ Extended baseline before release:
 ```bash
 go build ./...
 go test -race ./...
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 wails build
 cd frontend && npm audit --omit=dev --json
 node frontend/scripts/ui-smoke.mjs
