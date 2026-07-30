@@ -336,6 +336,7 @@ Use this table to pick tests for a change:
 | Library moves/deletes | `go test ./... -run 'Test(MovePaper|MovePapers|DeletePaper|Folder)'` |
 | Sync/Baidu | `go test ./... -run 'Test(Sync|Baidu|DatabaseRestore)'` |
 | Frontend | `cd frontend && npm test -- --run` |
+| Browser UI | `node frontend/scripts/ui-smoke.mjs` (set `UI_SMOKE_WIDTH` and `UI_SMOKE_HEIGHT` for narrow-window checks) |
 | PDF service | `python -m pytest services/pdf_service/tests` |
 | Remote CI | `.github/workflows/ci.yml` |
 | Security scan | `bash scripts/secret_scan.sh` |
@@ -353,6 +354,9 @@ cd frontend && npm audit --omit=dev --json
 python -m pytest services/pdf_service/tests
 bash scripts/secret_scan.sh
 wails build
+node frontend/scripts/ui-smoke.mjs
+UI_SMOKE_WIDTH=900 UI_SMOKE_HEIGHT=900 node frontend/scripts/ui-smoke.mjs
+UI_SMOKE_WIDTH=720 UI_SMOKE_HEIGHT=900 node frontend/scripts/ui-smoke.mjs
 ```
 
 ## Release Notes For Agents

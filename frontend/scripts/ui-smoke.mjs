@@ -7,7 +7,11 @@ import path from 'node:path';
 import net from 'node:net';
 
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
-const DEFAULT_VIEWPORT = { width: 1440, height: 1000, deviceScaleFactor: 1 };
+const DEFAULT_VIEWPORT = {
+  width: Number(process.env.UI_SMOKE_WIDTH || 1440),
+  height: Number(process.env.UI_SMOKE_HEIGHT || 1000),
+  deviceScaleFactor: 1,
+};
 const OUTPUT_ROOT = process.env.UI_SMOKE_OUTPUT || path.join(tmpdir(), `diveend-ui-smoke-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 const CHROME_PATHS = [
   process.env.UI_SMOKE_CHROME,
@@ -488,6 +492,18 @@ class SmokePage {
     }
   }
 
+  async assertNoHorizontalOverflow() {
+    const layout = await this.eval(() => ({
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      bodyWidth: document.body.scrollWidth,
+    }));
+    const contentWidth = Math.max(layout.documentWidth, layout.bodyWidth);
+    if (contentWidth > layout.viewportWidth + 1) {
+      throw new Error(`Horizontal overflow detected: content ${contentWidth}px, viewport ${layout.viewportWidth}px`);
+    }
+  }
+
   async assertStartButtonDisabled() {
     const disabled = await this.eval(() => {
       const buttons = Array.from(document.querySelectorAll('button'));
@@ -517,6 +533,7 @@ async function main() {
   const page = await createPage(cdp, baseURL);
 
   const shot = async (name, description) => {
+    await page.assertNoHorizontalOverflow();
     const file = path.join(OUTPUT_ROOT, `${String(report.length + 1).padStart(2, '0')}-${name}.png`);
     await page.screenshot(file);
     report.push({ name, description, file });
@@ -605,6 +622,7 @@ async function main() {
       '',
       `Generated: ${new Date().toISOString()}`,
       `Base URL: ${baseURL}`,
+      `Viewport: ${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}`,
       '',
       '## Screenshots',
       '',

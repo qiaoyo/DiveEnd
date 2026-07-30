@@ -42,7 +42,7 @@ Remaining risks:
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic token refresh and secure persistence.
 - The configured Semantic Scholar key returned `403 Forbidden` on 2026-07-30 and the shared unauthenticated endpoint returned `429`; use arXiv/cache degradation until the key is replaced.
 - GitHub SSH read/write works, but `gh` CLI authentication is still required for automatic PR creation through `gh`.
-- DeepRead page-level evidence navigation, cross-paper analysis, narrow-window behavior, and high-DPI polish remain future work; library, sync, and settings have completed the current shared-token cleanup.
+- DeepRead page-level evidence navigation, cross-paper analysis, and high-DPI polish remain future work; library, sync, and settings have completed the current shared-token cleanup, and the main workflows pass 900 px and 720 px smoke coverage without page-level horizontal overflow.
 
 ## Reading Order
 
@@ -150,7 +150,7 @@ python -m pytest services/pdf_service/tests
 bash scripts/secret_scan.sh
 ```
 
-Last full run on 2026-07-30: Go test/vet/race, all 70 frontend tests, 18 PDF service tests, frontend build, Wails build, secret scan, and the 24-state browser UI smoke passed. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
+Last full run on 2026-07-30: Go test/vet/race, all 70 frontend tests, 18 PDF service tests, frontend build, Wails build, secret scan, and the 24-state browser UI smoke at 1440, 900, and 720 px widths passed. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
 
 Known audit exception: `npm audit --omit=dev` reports a React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses client-only `HashRouter`, not RSC. The published `react-router-dom` line currently has no clean upgrade path without a React 19/Router 8 migration; do not describe the production audit as zero-vulnerability until this is resolved upstream or migrated.
 
