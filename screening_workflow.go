@@ -387,20 +387,25 @@ func (a *App) AnalyzePapers(sessionID string) (*ScreeningDecisionNode, error) {
 		return nil, err
 	}
 
-	if err := a.persistScreeningNode(sessionID, node, nil); err != nil {
+	nodePayload, err := json.Marshal(node)
+	if err != nil {
 		return nil, err
 	}
-	if err := a.db.UpdateScreeningSessionStatus(sessionID, "screen", detail.Session.TotalPapers); err != nil {
-		return nil, err
-	}
+	updatedCandidates := make([]ScreeningPaper, 0, len(candidates))
 	for _, paper := range candidates {
 		if paper.Status != "screening" {
 			paper.Status = "screening"
 			paper.UpdatedAt = time.Now()
-			if err := a.db.UpsertScreeningPaper(&paper); err != nil {
-				return nil, err
-			}
 		}
+		updatedCandidates = append(updatedCandidates, paper)
+	}
+	if err := a.db.ApplyInitialScreeningDecision(
+		sessionID,
+		updatedCandidates,
+		string(nodePayload),
+		detail.Session.TotalPapers,
+	); err != nil {
+		return nil, err
 	}
 
 	return node, nil
@@ -444,6 +449,7 @@ func (a *App) ApplyScreeningChoice(sessionID string, selectedOptions []string) (
 	}
 
 	var nextPapers []ScreeningPaper
+	updatedPapers := make([]ScreeningPaper, 0, len(currentSet))
 	for _, paper := range detail.Papers {
 		if _, ok := currentSetMap[paper.ID]; !ok {
 			if paper.Status != "rejected" {
@@ -463,9 +469,7 @@ func (a *App) ApplyScreeningChoice(sessionID string, selectedOptions []string) (
 			paper.Reason = fmt.Sprintf("Filtered out by %s", detail.CurrentNode.Dimension)
 		}
 		paper.UpdatedAt = time.Now()
-		if err := a.db.UpsertScreeningPaper(&paper); err != nil {
-			return nil, err
-		}
+		updatedPapers = append(updatedPapers, paper)
 	}
 
 	pathHistory := append([]PathHistoryItem{}, detail.PathHistory...)
@@ -477,20 +481,35 @@ func (a *App) ApplyScreeningChoice(sessionID string, selectedOptions []string) (
 	if err != nil {
 		return nil, err
 	}
-	if err := a.db.UpdateScreeningSessionPathHistory(sessionID, string(pathHistoryJSON)); err != nil {
-		return nil, err
-	}
-
 	selectedOptionsJSON, err := json.Marshal(selectedOptions)
 	if err != nil {
 		return nil, err
 	}
 
-	node, err := a.buildNextScreeningNode(detail.Session.Title, nextPapers, pathHistory)
+	taskCtx, taskToken, err := a.beginScreeningTask(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	if err := a.persistScreeningNode(sessionID, node, selectedOptionsJSON); err != nil {
+	defer a.finishScreeningTask(sessionID, taskToken)
+
+	node, err := a.buildNextScreeningNodeWithContext(taskCtx, detail.Session.Title, nextPapers, pathHistory)
+	if err != nil {
+		if isScreeningTaskCancelled(err) {
+			return nil, ErrScreeningTaskCancelled
+		}
+		return nil, err
+	}
+	nodeJSON, err := json.Marshal(node)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.db.ApplyScreeningDecision(
+		sessionID,
+		updatedPapers,
+		string(nodeJSON),
+		string(selectedOptionsJSON),
+		string(pathHistoryJSON),
+	); err != nil {
 		return nil, err
 	}
 

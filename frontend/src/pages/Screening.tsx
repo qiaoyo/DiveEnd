@@ -231,9 +231,14 @@ export const Screening: React.FC = () => {
       setDetail(nextDetail);
       setCurrentStage(nextNode.nodeType === 'complete' ? 'results' : 'screen');
     } catch (cause) {
-      setError(errorToUserMessage(cause, '提交筛选选择失败'));
+      if (isCancellationError(cause)) {
+        setError(null);
+      } else {
+        setError(errorToUserMessage(cause, '提交筛选选择失败'));
+      }
     } finally {
       setIsBusy(false);
+      setIsCancelling(false);
     }
   };
 
@@ -311,9 +316,9 @@ export const Screening: React.FC = () => {
             : 'border-[var(--de-rule-strong)] bg-[var(--de-surface)]'
         }`}
       >
-        <FileUp className="mx-auto h-8 w-8 text-slate-400" />
-        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">上传待筛选论文</p>
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        <FileUp className="mx-auto h-8 w-8 text-[var(--de-ink-muted)]" />
+        <p className="mt-3 text-sm text-[var(--de-ink)]">上传待筛选论文</p>
+        <p className="mt-1 text-xs text-[var(--de-ink-muted)]">
           拖拽 PDF 到这里，或者使用文件选择器。
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -328,14 +333,14 @@ export const Screening: React.FC = () => {
             </button>
           ) : (
             <label className="de-button-primary cursor-pointer px-4 py-2 text-sm font-medium">
-            <input
-              type="file"
-              multiple
-              accept=".pdf"
-              className="hidden"
-              onChange={(event) => void handleInputChange(event)}
-            />
-            {isBusy ? '处理中...' : '选择 PDF 文件'}
+              <input
+                type="file"
+                multiple
+                accept=".pdf"
+                className="hidden"
+                onChange={(event) => void handleInputChange(event)}
+              />
+              {isBusy ? '处理中...' : '选择 PDF 文件'}
             </label>
           )}
           {showDemoSamples && (
@@ -343,7 +348,7 @@ export const Screening: React.FC = () => {
               type="button"
               onClick={() => void startScreeningWithPaths(['/mock/survey.pdf', '/mock/benchmark.pdf'])}
               disabled={isBusy}
-              className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="de-button-secondary px-4 py-2 text-sm disabled:opacity-60"
             >
               使用演示样本
             </button>
@@ -352,16 +357,16 @@ export const Screening: React.FC = () => {
       </div>
 
       {papers.length > 0 && (
-        <div className="mt-4 space-y-2 rounded-2xl border border-slate-200 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/75">
+        <div className="mt-4 divide-y divide-[var(--de-rule)] border-y border-[var(--de-rule)]">
           {papers.map((paper) => (
-            <div key={paper.id} className="flex items-center justify-between rounded-lg bg-slate-100/70 px-3 py-2 text-xs dark:bg-slate-800/70">
+            <div key={paper.id} className="flex items-center justify-between gap-3 px-1 py-2.5 text-xs">
               <span className="truncate">{paper.fileName}</span>
-              <span className={`rounded-full px-2 py-0.5 ${
+              <span className={`shrink-0 rounded-[var(--de-radius)] border px-2 py-0.5 ${
                 paper.status === 'extracted' || paper.status === 'selected'
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200'
+                  ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
                   : paper.status === 'extracting'
-                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200'
-                    : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'
+                    ? 'border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] text-[var(--de-warning)]'
+                    : 'border-[var(--de-rule)] bg-[var(--de-surface-muted)] text-[var(--de-ink-muted)]'
               }`}
               >
                 {paper.status}
@@ -376,19 +381,19 @@ export const Screening: React.FC = () => {
   const renderExtractCard = () => (
     <div className="de-glass p-5">
       <h3 className="text-base font-semibold text-[var(--de-ink)]">提取论文内容</h3>
-      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+      <p className="mt-2 text-sm text-[var(--de-ink-muted)]">
         通过 Python PDF 服务抽取 markdown，并调用强模型生成结构化字段。
       </p>
       <div className="mt-4 h-1.5 bg-[var(--de-surface-muted)]">
         <div className="h-1.5 bg-[var(--de-accent)] transition-[width] duration-150" style={{ width: `${extractionPercent}%` }} />
       </div>
-      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+      <p className="mt-2 text-xs text-[var(--de-ink-muted)]">
         已处理 {extractionProgress?.completed ?? 0} / {extractionProgress?.total ?? papers.length}
         {extractionProgress?.currentFile ? ` · 当前：${extractionProgress.currentFile}` : ''}
       </p>
 
       {error && (
-        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-500/15 dark:text-rose-200">
+        <div className="mt-4 border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-3 py-2 text-sm text-[var(--de-danger)]">
           {error}
         </div>
       )}
@@ -407,14 +412,14 @@ export const Screening: React.FC = () => {
         <button
           onClick={() => sessionId && void runExtraction(sessionId)}
           disabled={!sessionId || isBusy}
-          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="de-button-primary px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isBusy ? '重试中...' : '重新提取'}
         </button>
         {papers.some((paper) => paper.status === 'extracted') && (
           <button
             onClick={() => sessionId && void proceedToAnalysis(sessionId)}
-            className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="de-button-secondary px-4 py-2 text-sm"
           >
             基于已完成论文继续筛选
           </button>
@@ -426,10 +431,10 @@ export const Screening: React.FC = () => {
   const renderDecisionTree = () => {
     if (currentStage === 'extract') {
       return (
-        <div className="de-glass rounded-2xl p-5">
+        <div className="de-panel p-5">
           <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选标准</h3>
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/75">
-            <p className="text-sm text-slate-600 dark:text-slate-300">解析完成后，AI 将在这里生成可交互的筛选节点。</p>
+          <div className="mt-4 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-4">
+            <p className="text-sm text-[var(--de-ink-muted)]">解析完成后，AI 将在这里生成可交互的筛选节点。</p>
           </div>
         </div>
       );
@@ -437,7 +442,7 @@ export const Screening: React.FC = () => {
 
     if (currentStage === 'screen' && currentNode) {
       return (
-        <div className="de-glass rounded-2xl p-5">
+        <div className="de-panel p-5">
           <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选标准</h3>
 
           <div className="mt-4 border border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-4">
@@ -446,11 +451,11 @@ export const Screening: React.FC = () => {
               当前判断
             </div>
             <p className="mt-2 text-sm leading-7">{currentNode.message}</p>
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">维度：{currentNode.dimension}</p>
+            <p className="mt-2 text-xs text-[var(--de-ink-muted)]">维度：{currentNode.dimension}</p>
           </div>
 
           {history.length > 0 && (
-            <div className="mt-4 rounded-xl border border-slate-200 bg-white/75 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/75 dark:text-slate-200">
+            <div className="mt-4 border-y border-[var(--de-rule)] px-1 py-3 text-xs text-[var(--de-ink-muted)]">
               {history.map((step, index) => (
                 <div key={`${step.dimension}-${index}`} className="mb-1 last:mb-0">
                   <span className="font-semibold">{step.dimension}：</span>{step.choice}
@@ -466,15 +471,15 @@ export const Screening: React.FC = () => {
                 <button
                   key={option.key}
                   onClick={() => toggleOption(option.key)}
-                  className={`rounded-xl border p-3 text-left text-sm transition ${
+                  className={`rounded-[var(--de-radius)] border p-3 text-left text-sm transition-colors ${
                     isSelected
-                      ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-500/50 dark:bg-indigo-500/15'
-                      : 'border-slate-200 bg-white/80 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-900/80 dark:hover:border-indigo-500/50'
+                      ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)]'
+                      : 'border-[var(--de-rule)] bg-[var(--de-surface)] hover:border-[var(--de-rule-strong)]'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <span>{option.label}</span>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-700 dark:text-slate-200">
+                    <span className="rounded-[var(--de-radius)] bg-[var(--de-surface-muted)] px-2 py-0.5 text-xs text-[var(--de-ink-muted)]">
                       {option.count}
                     </span>
                   </div>
@@ -484,16 +489,28 @@ export const Screening: React.FC = () => {
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-500 dark:text-slate-300">
+            <p className="text-xs text-[var(--de-ink-muted)]">
               已选择 {selectedOptions.length} 个选项
             </p>
-            <button
-              onClick={() => void handleContinue()}
-              disabled={selectedOptions.length === 0 || isBusy}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isBusy ? '处理中...' : '继续下一步'}
-            </button>
+            <div className="flex items-center gap-2">
+              {isBusy ? (
+                <button
+                  type="button"
+                  onClick={() => void handleCancelTask()}
+                  disabled={isCancelling}
+                  className="de-button-secondary px-3 py-2 text-sm text-[var(--de-danger)]"
+                >
+                  {isCancelling ? '正在停止' : '停止任务'}
+                </button>
+              ) : null}
+              <button
+                onClick={() => void handleContinue()}
+                disabled={selectedOptions.length === 0 || isBusy}
+                className="de-button-primary px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isBusy ? '处理中...' : '继续下一步'}
+              </button>
+            </div>
           </div>
         </div>
       );
@@ -501,19 +518,19 @@ export const Screening: React.FC = () => {
 
     if (currentStage === 'results') {
       return (
-        <div className="de-glass rounded-2xl p-5">
+        <div className="de-panel p-5">
           <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选结果</h3>
-          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/40 dark:bg-emerald-500/15">
-            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-200">
+          <div className="mt-4 border-y border-[var(--de-rule)] bg-[var(--de-accent-soft)] p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--de-accent)]">
               <CheckCircle2 className="h-4 w-4" />
               筛选完成
             </div>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-200">
+            <p className="mt-2 text-sm text-[var(--de-ink)]">
               总计 {detail?.session.totalPapers ?? papers.length} 篇，保留 {resultPapers.length} 篇。
             </p>
           </div>
           {importedPapers.length > 0 && (
-            <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200">
+            <p className="mt-4 border border-[var(--de-accent)] bg-[var(--de-accent-soft)] px-3 py-2 text-sm text-[var(--de-accent)]">
               已成功导入 {importedPapers.length} 篇论文到文库。
             </p>
           )}
@@ -522,9 +539,9 @@ export const Screening: React.FC = () => {
     }
 
     return (
-      <div className="de-glass rounded-2xl p-5">
+      <div className="de-panel p-5">
         <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">筛选标准</h3>
-        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">上传完成后会自动进入提取和筛选流程。</p>
+        <p className="mt-3 text-sm text-[var(--de-ink-muted)]">上传完成后会自动进入提取和筛选流程。</p>
       </div>
     );
   };
@@ -539,7 +556,7 @@ export const Screening: React.FC = () => {
             <Filter className="h-5 w-5 text-[var(--de-accent)]" />
             批量论文分析
           </h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+          <p className="mt-1 text-sm text-[var(--de-ink-muted)]">
             导入 PDF，提取研究内容，按你的标准筛选并保存到文库。
           </p>
           <div className="mt-4">{renderSteps()}</div>
@@ -553,20 +570,20 @@ export const Screening: React.FC = () => {
           </div>
           <div className="space-y-5">
             {error && currentStage !== 'extract' && (
-              <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-500/15 dark:text-rose-200">
+              <div className="border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-4 py-3 text-sm text-[var(--de-danger)]">
                 {error}
               </div>
             )}
             {renderDecisionTree()}
 
             {(currentStage === 'results' || currentStage === 'screen') && resultPapers.length > 0 && (
-              <div className="de-glass rounded-2xl p-4">
+              <div className="de-panel p-4">
                 <h3 className="text-sm font-semibold text-[var(--de-ink-muted)]">保留论文</h3>
-                <div className="mt-3 space-y-2">
+                <div className="mt-3 divide-y divide-[var(--de-rule)] border-y border-[var(--de-rule)]">
                   {resultPapers.map((paper) => (
-                    <div key={paper.id} className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                    <div key={paper.id} className="px-1 py-3">
                       <div className="text-sm font-medium">{paper.title || paper.fileName}</div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-300">{paper.authors || paper.fileName}</div>
+                      <div className="mt-1 text-xs text-[var(--de-ink-muted)]">{paper.authors || paper.fileName}</div>
                     </div>
                   ))}
                 </div>
@@ -578,23 +595,23 @@ export const Screening: React.FC = () => {
 
       {showActionBar && (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-6xl -translate-x-1/2 px-6">
-          <div className="pointer-events-auto mx-auto flex max-w-xl items-center justify-between rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-xl backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/90">
-            <div className="text-sm text-slate-600 dark:text-slate-200">
-              保留 <span className="font-semibold text-indigo-600 dark:text-indigo-300">{resultPapers.length}</span> 篇论文
+          <div className="pointer-events-auto mx-auto flex max-w-xl items-center justify-between rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-4 py-3 shadow-md">
+            <div className="text-sm text-[var(--de-ink-muted)]">
+              保留 <span className="font-semibold text-[var(--de-accent)]">{resultPapers.length}</span> 篇论文
             </div>
             <div className="flex gap-2">
               {currentStage === 'results' && importedPapers.length === 0 && (
                 <button
                   onClick={() => void handleImport()}
                   disabled={isBusy || resultPapers.length === 0}
-                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="de-button-primary px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : '导入到文库'}
                 </button>
               )}
               <button
                 onClick={resetFlow}
-                className="rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="de-button-secondary px-4 py-2 text-sm"
               >
                 开始新的筛选
               </button>

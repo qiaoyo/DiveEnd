@@ -10,6 +10,10 @@ import (
 	"github.com/google/uuid"
 )
 
+type screeningSQLExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // screening 相关的数据库迁移方法
 func (db *DB) migrateScreening() error {
 	statements := []string{
@@ -171,6 +175,10 @@ func (db *DB) DeleteScreeningSession(sessionID string) error {
 
 // UpsertScreeningPaper 创建或更新筛选论文
 func (db *DB) UpsertScreeningPaper(paper *ScreeningPaper) error {
+	return upsertScreeningPaper(db.conn, paper)
+}
+
+func upsertScreeningPaper(execer screeningSQLExecer, paper *ScreeningPaper) error {
 	now := time.Now()
 	if paper.ID == "" {
 		paper.ID = uuid.NewString()
@@ -182,7 +190,7 @@ func (db *DB) UpsertScreeningPaper(paper *ScreeningPaper) error {
 		paper.UpdatedAt = now
 	}
 
-	_, err := db.conn.Exec(`
+	_, err := execer.Exec(`
 		INSERT INTO screening_papers (
 			id, session_id, file_name, file_path, file_size, status,
 			title, authors, abstract, full_text, sections_json,
@@ -226,6 +234,76 @@ func (db *DB) UpsertScreeningPaper(paper *ScreeningPaper) error {
 		return fmt.Errorf("failed to upsert screening paper: %w", err)
 	}
 
+	return nil
+}
+
+func (db *DB) ApplyScreeningDecision(
+	sessionID string,
+	papers []ScreeningPaper,
+	currentNodeJSON string,
+	selectedOptionsJSON string,
+	pathHistoryJSON string,
+) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin screening decision transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	for index := range papers {
+		if err := upsertScreeningPaper(tx, &papers[index]); err != nil {
+			return err
+		}
+	}
+	result, err := tx.Exec(`
+		UPDATE screening_sessions
+		SET current_node_json = ?, selected_options_json = ?, path_history_json = ?, updated_at = ?
+		WHERE id = ?
+	`, currentNodeJSON, selectedOptionsJSON, pathHistoryJSON, time.Now(), sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update screening decision: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return fmt.Errorf("screening session not found")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit screening decision: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) ApplyInitialScreeningDecision(
+	sessionID string,
+	papers []ScreeningPaper,
+	currentNodeJSON string,
+	totalPapers int,
+) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin initial screening transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	for index := range papers {
+		if err := upsertScreeningPaper(tx, &papers[index]); err != nil {
+			return err
+		}
+	}
+	result, err := tx.Exec(`
+		UPDATE screening_sessions
+		SET status = 'screen', total_papers = ?, current_node_json = ?,
+		    selected_options_json = '[]', updated_at = ?
+		WHERE id = ?
+	`, totalPapers, currentNodeJSON, time.Now(), sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to initialize screening decision: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return fmt.Errorf("screening session not found")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit initial screening decision: %w", err)
+	}
 	return nil
 }
 

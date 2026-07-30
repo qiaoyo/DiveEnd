@@ -13,7 +13,7 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 已落地的主流程：
 
 - **DeepStart**：自然语言输入研究方向，聚合 Semantic Scholar 和 arXiv，执行最多 3 个重写 query 后统一按标题/摘要相关性和年份排序，默认收敛到约 20 篇高相关候选；每篇保留可核查的标题/摘要命中解释，只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
-- **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文；长时间抽取和首次分析可非破坏性停止，保留已完成论文供重试。
+- **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文；抽取、首次分析和后续决策均可非破坏性停止，节点、路径和论文状态以 SQLite 事务一次提交，取消或模型失败不会留下半完成选择。
 - **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；低延迟问答优先走弱模型，全文总结走强模型，二者都只保留能在已解析章节中逐字验证的依据。长论文上下文按问题相关性和核心章节公平分配，AI 请求可主动取消。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
 - **Sync**：百度云同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB。
 - **Library**：右侧论文库支持文件夹树、创建、删除、重命名、移动、单篇移动、批量移动，并同步维护 managed PDF 路径和 DeepRead cache。

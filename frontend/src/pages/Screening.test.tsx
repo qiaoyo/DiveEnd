@@ -289,6 +289,34 @@ describe('Screening page', () => {
     expect(screen.getByRole('button', { name: '重新提取' })).toBeEnabled();
   });
 
+  it('stops an in-flight screening decision and keeps the current choice', async () => {
+    backendMocks.applyScreeningChoice.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => {
+        backendMocks.cancelScreeningTask.mockImplementationOnce(async () => {
+          reject(new Error('screening task cancelled'));
+        });
+      }),
+    );
+
+    const { container } = render(<Screening />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: {
+        files: [new File(['pdf'], 'paper-1.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    expect(await screen.findByText('按研究子方向筛选')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('综述'));
+    fireEvent.click(screen.getByRole('button', { name: '继续下一步' }));
+    fireEvent.click(await screen.findByRole('button', { name: '停止任务' }));
+
+    await waitFor(() => expect(backendMocks.cancelScreeningTask).toHaveBeenCalledWith('session-1'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '继续下一步' })).toBeEnabled());
+    expect(screen.getByText('按研究子方向筛选')).toBeInTheDocument();
+    expect(screen.queryByText('screening task cancelled')).not.toBeInTheDocument();
+  });
+
   it('shows safe path-resolution errors for file input failures', async () => {
     backendMocks.resolveFilePaths.mockImplementationOnce(() => {
       throw new Error('resolve failed api_key=sk-screening-secret and access_token=screening-token-secret');

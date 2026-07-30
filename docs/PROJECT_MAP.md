@@ -168,8 +168,8 @@ Purpose:
 - Select PDFs through native picker or path resolution.
 - Copy PDFs into `DataPath/screening/<session>/<paper>/`.
 - Extract content through the PDF service.
-- Stop extraction or initial AI analysis without deleting the session; completed papers remain available for retry or partial continuation.
-- Build and traverse an LLM decision tree.
+- Stop extraction, initial AI analysis, or later decision generation without deleting the session; completed papers and the last committed decision remain available.
+- Build and traverse an LLM decision tree; initial and subsequent decisions atomically persist the node, path, session state, and affected paper states.
 - Import selected papers into the library.
 
 Backend files:
