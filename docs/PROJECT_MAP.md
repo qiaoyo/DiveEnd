@@ -240,6 +240,7 @@ Purpose:
 - Resolve file conflicts.
 - Stage remote database restore safely and apply/cancel through user confirmation.
 - Emit `sync-progress` events while preserving polling fallback.
+- Present preflight, live progress, history, conflicts, restore confirmation, and automation settings in one restrained Chinese-language workspace.
 
 Backend files:
 

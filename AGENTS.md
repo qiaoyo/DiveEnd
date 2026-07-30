@@ -33,7 +33,7 @@ Implemented:
 - Baidu sync preview, background manual sync, startup sync, periodic sync, exit sync prompt, conflict detection, conflict resolution, database restore staging/apply/cancel.
 - Security hardening around local secret files, symlink/path traversal, PDF validation, SSRF, atomic file writes, bounded HTTP reads, and user-visible error redaction.
 - Frontend route/page tests, Go regression tests, Python PDF route tests, browser smoke script.
-- Frontend primary navigation is organized around discovery, reading, and analysis; workspace routes are lazy-loaded, the DeepStart session workspace uses the shared restrained research-tool tokens, and the browser fallback and desktop bridge share the same backend wrapper contract.
+- Frontend primary navigation is organized around discovery, reading, and analysis; workspace routes are lazy-loaded, DeepStart/Screening/Sync use the shared restrained research-tool tokens, and the browser fallback and desktop bridge share the same backend wrapper contract.
 
 Remaining risks:
 
@@ -42,7 +42,7 @@ Remaining risks:
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic token refresh and secure persistence.
 - The configured Semantic Scholar key returned `403 Forbidden` on 2026-07-30 and the shared unauthenticated endpoint returned `429`; use arXiv/cache degradation until the key is replaced.
 - GitHub SSH read/write works, but `gh` CLI authentication is still required for automatic PR creation through `gh`.
-- DeepRead page-level evidence navigation, cross-paper analysis, and legacy library/sync UI polish remain future work; the settings route no longer retains the obsolete collapsible-sidebar interaction.
+- DeepRead page-level evidence navigation, cross-paper analysis, and legacy library UI polish remain future work; the settings route no longer retains the obsolete collapsible-sidebar interaction.
 
 ## Reading Order
 

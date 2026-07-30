@@ -356,25 +356,25 @@ export const Sync: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex h-full min-h-0 items-center justify-center">
-        <div className="de-glass rounded-2xl px-8 py-8 text-center">
-          <RefreshCw className="mx-auto mb-3 h-8 w-8 animate-spin text-indigo-600" />
-          <p className="text-sm text-slate-600 dark:text-slate-200">正在加载同步状态...</p>
+        <div className="de-panel px-8 py-8 text-center">
+          <RefreshCw className="mx-auto mb-3 h-8 w-8 animate-spin text-[var(--de-accent)]" />
+          <p className="text-sm text-[var(--de-ink-muted)]">正在加载同步状态...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <div className="border-b border-slate-200/80 bg-white/70 px-6 py-4 backdrop-blur-md dark:border-slate-700/50 dark:bg-slate-900/55">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--de-paper)] text-[var(--de-ink)]">
+      <div className="border-b border-[var(--de-rule)] bg-[var(--de-surface)] px-6 py-4">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <Cloud className="h-5 w-5 text-indigo-600" />
-              Sync & Polish
+            <h2 className="de-display flex items-center gap-2 text-xl font-semibold">
+              <Cloud className="h-5 w-5 text-[var(--de-accent)]" />
+              云端同步
             </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
-              真实读取后端同步状态、冲突列表和历史记录。
+            <p className="mt-1 text-sm text-[var(--de-ink-muted)]">
+              百度网盘 · {syncStatus.enabled ? '已连接' : '未连接'} · 最后同步 {formatTimestamp(syncStatus.lastSync)}
             </p>
           </div>
 
@@ -382,7 +382,7 @@ export const Sync: React.FC = () => {
             <button
               onClick={() => void handleRefresh()}
               disabled={isRefreshing}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+              className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               刷新
@@ -390,18 +390,18 @@ export const Sync: React.FC = () => {
             <button
               onClick={() => void handleRefreshBaiduToken()}
               disabled={isRefreshingToken || isRefreshing || isLoadingPreview || syncIsActive || !syncStatus.enabled}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100"
+              className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshingToken ? 'animate-spin' : ''}`} />
-              {isRefreshingToken ? '刷新 token 中...' : 'Refresh Token'}
+              {isRefreshingToken ? '正在更新凭证...' : '更新凭证'}
             </button>
             <button
               onClick={() => void handleSyncNow()}
               disabled={isRefreshing || isRefreshingToken || isLoadingPreview || syncIsActive || !syncStatus.enabled}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="de-button-primary inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-              {isRefreshing || syncIsActive ? '同步中...' : isLoadingPreview ? '预检中...' : 'Manual Sync'}
+              {isRefreshing || syncIsActive ? '同步中...' : isLoadingPreview ? '正在检查...' : '检查并同步'}
             </button>
           </div>
         </div>
@@ -410,77 +410,77 @@ export const Sync: React.FC = () => {
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-6xl space-y-5">
           {error && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-500/15 dark:text-rose-200">
+            <div className="border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-4 py-3 text-sm text-[var(--de-danger)]">
               {error}
             </div>
           )}
 
           {isPreviewOpen && syncPreview && (
-            <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
-              <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-950">
+            <section className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+              <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] p-5 shadow-lg">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-300">Sync Preflight</p>
+                    <p className="text-xs font-medium text-[var(--de-accent)]">同步预检</p>
                     <h3 className="mt-1 text-lg font-semibold">确认本次百度云同步</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                    <p className="mt-2 text-sm leading-6 text-[var(--de-ink-muted)]">
                       DiveEnd 将先上传当前数据库快照、manifest 和已管理的论文 PDF。请确认文件数量和总大小后再开始。
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsPreviewOpen(false)}
-                    className="rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="de-button-secondary px-3 py-1.5 text-sm"
                   >
                     关闭
                   </button>
                 </div>
 
                 {syncPreview.warning && (
-                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100">
+                  <div className="mt-4 border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-3 py-2 text-sm text-[var(--de-warning)]">
                     {syncPreview.warning}
                   </div>
                 )}
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <div className="text-xs text-slate-500 dark:text-slate-400">文件数</div>
+                <div className="mt-4 grid gap-0 border-y border-[var(--de-rule)] sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="border-r border-[var(--de-rule)] p-3 last:border-r-0">
+                    <div className="text-xs text-[var(--de-ink-muted)]">文件数</div>
                     <div className="mt-1 text-lg font-semibold">{syncPreview.totalFiles}</div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <div className="text-xs text-slate-500 dark:text-slate-400">总大小</div>
+                  <div className="border-r border-[var(--de-rule)] p-3 last:border-r-0">
+                    <div className="text-xs text-[var(--de-ink-muted)]">总大小</div>
                     <div className="mt-1 text-lg font-semibold">{formatBytes(syncPreview.totalBytes)}</div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <div className="text-xs text-slate-500 dark:text-slate-400">论文 PDF</div>
+                  <div className="border-r border-[var(--de-rule)] p-3 last:border-r-0">
+                    <div className="text-xs text-[var(--de-ink-muted)]">论文 PDF</div>
                     <div className="mt-1 text-lg font-semibold">{syncPreview.paperPdfCount} · {formatBytes(syncPreview.paperPdfBytes)}</div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <div className="text-xs text-slate-500 dark:text-slate-400">数据库快照</div>
+                  <div className="p-3">
+                    <div className="text-xs text-[var(--de-ink-muted)]">数据库快照</div>
                     <div className="mt-1 text-lg font-semibold">{formatBytes(syncPreview.databaseBytes)}</div>
                   </div>
                 </div>
 
-                <div className="mt-4 space-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                <div className="mt-4 space-y-1 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-3 text-xs text-[var(--de-ink-muted)]">
                   <div className="break-all">本地数据：{syncPreview.dataPath}</div>
                   <div className="break-all">远端目录：{syncPreview.remoteRoot}</div>
                   <div>Token 文件：{syncPreview.tokenFile}</div>
                 </div>
 
-                <div className="mt-4 max-h-56 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                <div className="mt-4 max-h-56 overflow-y-auto border border-[var(--de-rule)]">
                   {(syncPreview.files || []).slice(0, 20).map((file) => (
-                    <div key={file.key} className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0 dark:border-slate-800">
+                    <div key={file.key} className="flex items-center justify-between gap-3 border-b border-[var(--de-rule)] px-3 py-2 text-xs last:border-b-0">
                       <div className="min-w-0">
                         <div className="truncate font-medium">{file.key}</div>
-                        <div className="truncate text-slate-500 dark:text-slate-400">{file.remotePath}</div>
+                        <div className="truncate text-[var(--de-ink-muted)]">{file.remotePath}</div>
                       </div>
-                      <div className="shrink-0 text-right text-slate-500 dark:text-slate-400">
+                      <div className="shrink-0 text-right text-[var(--de-ink-muted)]">
                         <div>{file.kind}</div>
                         <div>{formatBytes(file.size)}</div>
                       </div>
                     </div>
                   ))}
                   {syncPreview.files.length > 20 && (
-                    <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                    <div className="px-3 py-2 text-xs text-[var(--de-ink-muted)]">
                       仅展示前 20 个文件，剩余 {syncPreview.files.length - 20} 个文件会一并同步。
                     </div>
                   )}
@@ -490,7 +490,7 @@ export const Sync: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsPreviewOpen(false)}
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="de-button-secondary px-4 py-2 text-sm"
                   >
                     暂不上传
                   </button>
@@ -498,7 +498,7 @@ export const Sync: React.FC = () => {
                     type="button"
                     onClick={() => void handleConfirmSync()}
                     disabled={isRefreshing || syncIsActive}
-                    className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="de-button-primary px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     确认开始同步
                   </button>
@@ -508,7 +508,7 @@ export const Sync: React.FC = () => {
           )}
 
           {databaseRestore.pending && (
-            <section className="rounded-2xl border border-amber-300 bg-amber-50/90 p-4 text-sm text-amber-900 dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-100">
+            <section className="border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] p-4 text-sm text-[var(--de-ink)]">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 font-semibold">
@@ -528,7 +528,7 @@ export const Sync: React.FC = () => {
                     type="button"
                     onClick={() => void handleApplyDatabaseRestore()}
                     disabled={isApplyingRestore}
-                    className="rounded-xl bg-amber-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60"
+                    className="de-button-primary px-3 py-2 text-xs font-semibold disabled:opacity-60"
                   >
                     {isApplyingRestore ? '应用中...' : '立即应用并刷新'}
                   </button>
@@ -536,7 +536,7 @@ export const Sync: React.FC = () => {
                     type="button"
                     onClick={() => void handleCancelDatabaseRestore()}
                     disabled={isApplyingRestore}
-                    className="rounded-xl border border-amber-300 bg-white/70 px-3 py-2 text-xs font-medium text-amber-800 transition hover:bg-white disabled:opacity-60 dark:border-amber-400/40 dark:bg-slate-900/40 dark:text-amber-100"
+                    className="de-button-secondary px-3 py-2 text-xs font-medium disabled:opacity-60"
                   >
                     暂不恢复
                   </button>
@@ -546,36 +546,33 @@ export const Sync: React.FC = () => {
           )}
 
           <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-            <div className="de-glass rounded-2xl p-4">
-              <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Local Data</h3>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="de-panel p-4">
+              <h3 className="text-sm font-semibold text-[var(--de-ink)]">本地数据</h3>
+              <dl className="mt-3 grid grid-cols-2 border-y border-[var(--de-rule)]">
                 {dashboardCards.map((card) => (
-                  <div key={card.label} className="rounded-xl border border-slate-200 bg-white/80 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/80">
-                    <div className="text-xs text-slate-500 dark:text-slate-300">{card.label}</div>
-                    <div className={`mt-1 text-lg font-semibold ${card.accent ? 'text-rose-600 dark:text-rose-300' : ''}`}>
+                  <div key={card.label} className="border-b border-r border-[var(--de-rule)] px-3 py-3 even:border-r-0">
+                    <dt className="text-xs text-[var(--de-ink-muted)]">{card.label}</dt>
+                    <dd className={`mt-1 text-lg font-semibold ${card.accent ? 'text-[var(--de-danger)]' : ''}`}>
                       {card.value}
-                    </div>
+                    </dd>
                   </div>
                 ))}
-              </div>
+              </dl>
             </div>
 
-            <div className="de-glass rounded-2xl p-4">
-              <h3 className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-300">Baidu Cloud Sync</h3>
+            <div className="de-panel p-4">
+              <h3 className="text-sm font-semibold text-[var(--de-ink)]">百度网盘</h3>
               <div className="mt-3 flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className={`h-2.5 w-2.5 rounded-full ${syncStatus.enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                    <span className="text-sm font-medium">{syncStatus.enabled ? 'Connected' : 'Disconnected'}</span>
+                    <Cloud className={`h-4 w-4 ${syncStatus.enabled ? 'text-[var(--de-accent)]' : 'text-[var(--de-ink-muted)]'}`} />
+                    <span className="text-sm font-medium">{syncStatus.enabled ? '已连接' : '未连接'}</span>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">
-                    Provider: {syncStatus.provider.replace('_', ' ')} · 最后同步 {formatTimestamp(syncStatus.lastSync)}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
-                    Token file: baiduyun_token.json · 使用 Refresh Token 可在同步前手动更新 access token。
+                  <p className="mt-2 text-xs text-[var(--de-ink-muted)]">
+                    服务：{syncStatus.provider.replace('_', ' ')} · 最后同步 {formatTimestamp(syncStatus.lastSync)}
                   </p>
                   {tokenRefreshMessage && (
-                    <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-100">
+                    <p className="mt-2 border border-[var(--de-rule)] bg-[var(--de-accent-soft)] px-3 py-2 text-xs text-[var(--de-accent)]">
                       {tokenRefreshMessage}
                     </p>
                   )}
@@ -583,110 +580,113 @@ export const Sync: React.FC = () => {
               </div>
 
               {(syncStatus.syncInProgress || syncProgress.currentFile || syncProgress.message) && (
-                <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/80">
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-300">
+                <div className="mt-4 border-y border-[var(--de-rule)] p-3">
+                  <div className="flex items-center justify-between text-xs text-[var(--de-ink-muted)]">
                     <span>{syncProgress.message || syncProgress.currentFile || '准备中'}</span>
                     <span>{syncProgress.completed}/{syncProgress.total}</span>
                   </div>
-                  <div className="mt-2 h-2 rounded-full bg-slate-200 dark:bg-slate-800">
-                    <div className="h-2 rounded-full bg-indigo-600 transition-all" style={{ width: `${progressPercent}%` }} />
+                  <div className="mt-2 h-1.5 bg-[var(--de-surface-muted)]">
+                    <div className="h-1.5 bg-[var(--de-accent)] transition-[width]" style={{ width: `${progressPercent}%` }} />
                   </div>
                 </div>
               )}
             </div>
           </section>
 
-          <section className="de-glass rounded-2xl p-4">
-            <div className="flex border-b border-slate-200 dark:border-slate-700">
+          <section className="de-panel p-4">
+            <div className="flex border-b border-[var(--de-rule)]">
               <button
                 onClick={() => setActiveTab('history')}
                 className={`px-4 py-2 text-sm font-medium ${
                   activeTab === 'history'
-                    ? 'border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-300'
-                    : 'text-slate-500 dark:text-slate-300'
+                    ? 'border-b-2 border-[var(--de-accent)] text-[var(--de-ink)]'
+                    : 'border-b-2 border-transparent text-[var(--de-ink-muted)]'
                 }`}
               >
-                Sync History
+                同步记录
               </button>
               <button
                 onClick={() => setActiveTab('conflicts')}
                 className={`px-4 py-2 text-sm font-medium ${
                   activeTab === 'conflicts'
-                    ? 'border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-300'
-                    : 'text-slate-500 dark:text-slate-300'
+                    ? 'border-b-2 border-[var(--de-accent)] text-[var(--de-ink)]'
+                    : 'border-b-2 border-transparent text-[var(--de-ink-muted)]'
                 }`}
               >
-                Conflict Resolution
+                冲突处理
               </button>
             </div>
 
             {activeTab === 'history' ? (
-              <div className="mt-4 space-y-3">
+              <div className="mt-4">
                 {syncHistory.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-6 text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-300">
+                  <div className="border-y border-dashed border-[var(--de-rule-strong)] p-6 text-sm text-[var(--de-ink-muted)]">
                     暂无同步活动记录。
                   </div>
                 ) : (
-                  syncHistory.map((item) => (
-                    <div key={item.id} className="rounded-xl border border-slate-200 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/80">
+                  <div className="divide-y divide-[var(--de-rule)] border-y border-[var(--de-rule)]">
+                    {syncHistory.map((item) => (
+                    <div key={item.id} className="p-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-medium">{item.fileName}</p>
-                        <span className={`rounded-full px-2.5 py-1 text-xs ${
+                        <span className={`rounded-[var(--de-radius)] border px-2.5 py-1 text-xs ${
                           item.status === 'success'
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200'
+                            ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
                             : item.status === 'failed'
-                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200'
-                              : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200'
+                              ? 'border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] text-[var(--de-danger)]'
+                              : 'border-[var(--de-rule)] bg-[var(--de-surface-muted)] text-[var(--de-warning)]'
                         }`}
                         >
                           {item.status}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
+                      <p className="mt-1 text-xs text-[var(--de-ink-muted)]">
                         {syncRecordMessage(item)} · {item.type} · {formatTimestamp(item.completedAt || item.createdAt)}
                       </p>
                       {item.errorMessage && (
-                        <p className="mt-2 text-xs text-rose-600 dark:text-rose-200">{item.errorMessage}</p>
+                        <p className="mt-2 text-xs text-[var(--de-danger)]">{item.errorMessage}</p>
                       )}
                     </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
             ) : (
-              <div className="mt-4 space-y-3">
+              <div className="mt-4">
                 {syncConflicts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-6 text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-300">
+                  <div className="border-y border-dashed border-[var(--de-rule-strong)] p-6 text-sm text-[var(--de-ink-muted)]">
                     暂无待处理冲突。
                   </div>
                 ) : (
-                  syncConflicts.map((conflict) => (
-                    <div key={conflict.id} className="rounded-xl border border-slate-200 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/80">
+                  <div className="divide-y divide-[var(--de-rule)] border-y border-[var(--de-rule)]">
+                    {syncConflicts.map((conflict) => (
+                    <div key={conflict.id} className="py-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-semibold">{conflict.fileName}</p>
                         <div className="flex flex-wrap gap-2 text-[11px]">
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                          <span className="rounded-[var(--de-radius)] bg-[var(--de-surface-muted)] px-2 py-1 text-[var(--de-ink-muted)]">
                             {conflictKindLabel(conflict.fileKind)}
                           </span>
-                          <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200">
+                          <span className="rounded-[var(--de-radius)] bg-[var(--de-surface-muted)] px-2 py-1 text-[var(--de-warning)]">
                             {conflictNewerLabel(conflict.newerSide)}
                           </span>
                         </div>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
-                        Diff View · 大小差异 {formatBytes(Math.abs((conflict.remoteSize || 0) - (conflict.localSize || 0)))} · 解决前会把被覆盖版本保留到 .sync-conflicts
+                      <p className="mt-1 text-xs text-[var(--de-ink-muted)]">
+                        大小差异 {formatBytes(Math.abs((conflict.remoteSize || 0) - (conflict.localSize || 0)))} · 被覆盖版本会保留到 .sync-conflicts
                       </p>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-800/70">
-                          <div className="font-medium text-slate-700 dark:text-slate-100">Local Version</div>
-                          <div className="mt-2 space-y-1 text-slate-500 dark:text-slate-300">
+                        <div className="border border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-3 text-xs">
+                          <div className="font-medium text-[var(--de-ink)]">本地版本</div>
+                          <div className="mt-2 space-y-1 text-[var(--de-ink-muted)]">
                             <div>修改时间：{formatTimestamp(conflict.localTime)}</div>
                             <div>文件大小：{formatBytes(conflict.localSize)}</div>
                             <div className="break-all">{conflict.localPath || '(无路径信息)'}</div>
                           </div>
                         </div>
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-800/70">
-                          <div className="font-medium text-slate-700 dark:text-slate-100">Cloud Version</div>
-                          <div className="mt-2 space-y-1 text-slate-500 dark:text-slate-300">
+                        <div className="border border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-3 text-xs">
+                          <div className="font-medium text-[var(--de-ink)]">云端版本</div>
+                          <div className="mt-2 space-y-1 text-[var(--de-ink-muted)]">
                             <div>修改时间：{formatTimestamp(conflict.remoteTime)}</div>
                             <div>文件大小：{formatBytes(conflict.remoteSize)}</div>
                             <div className="break-all">{conflict.remotePath || '(无路径信息)'}</div>
@@ -696,30 +696,32 @@ export const Sync: React.FC = () => {
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           onClick={() => void handleResolveConflict(conflict.id, 'local')}
-                          className="rounded-xl border border-slate-300 bg-white/70 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                          className="de-button-secondary px-3 py-1.5 text-xs"
                         >
-                          ← Keep Local
+                          保留本地版本
                         </button>
                         <button
                           onClick={() => void handleResolveConflict(conflict.id, 'remote')}
-                          className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-500"
+                          className="de-button-primary px-3 py-1.5 text-xs font-medium"
                         >
-                          Keep Cloud →
+                          使用云端版本
                         </button>
                       </div>
                     </div>
-                  ))
+                    ))}
+                  </div>
                 )}
               </div>
             )}
           </section>
 
-          <section className="de-glass rounded-2xl p-4">
-            <h3 className="text-sm font-semibold">Settings</h3>
+          <section className="de-panel p-4">
+            <h3 className="text-sm font-semibold">自动同步设置</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-5">
-              <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-3 text-sm dark:border-slate-700 dark:bg-slate-900/80">
-                <span>Auto-sync on startup</span>
+              <label className="flex items-center justify-between border border-[var(--de-rule)] bg-[var(--de-surface)] px-3 py-3 text-sm">
+                <span>启动时同步</span>
                 <input
+                  aria-label="启动时同步"
                   type="checkbox"
                   checked={syncSettings.syncOnStartup}
                   disabled={isSavingSyncSettings}
@@ -727,9 +729,10 @@ export const Sync: React.FC = () => {
                   className="h-4 w-4"
                 />
               </label>
-              <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-3 text-sm dark:border-slate-700 dark:bg-slate-900/80">
-                <span>Sync before exit</span>
+              <label className="flex items-center justify-between border border-[var(--de-rule)] bg-[var(--de-surface)] px-3 py-3 text-sm">
+                <span>退出前同步</span>
                 <input
+                  aria-label="退出前同步"
                   type="checkbox"
                   checked={syncSettings.syncBeforeExit}
                   disabled={isSavingSyncSettings}
@@ -737,9 +740,10 @@ export const Sync: React.FC = () => {
                   className="h-4 w-4"
                 />
               </label>
-              <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-3 text-sm dark:border-slate-700 dark:bg-slate-900/80">
-                <span>Auto-sync pending changes</span>
+              <label className="flex items-center justify-between border border-[var(--de-rule)] bg-[var(--de-surface)] px-3 py-3 text-sm">
+                <span>定时同步变更</span>
                 <input
+                  aria-label="定时同步变更"
                   type="checkbox"
                   checked={syncSettings.autoSync}
                   disabled={isSavingSyncSettings}
@@ -747,13 +751,14 @@ export const Sync: React.FC = () => {
                   className="h-4 w-4"
                 />
               </label>
-              <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-3 text-sm dark:border-slate-700 dark:bg-slate-900/80">
-                <span>Interval (min)</span>
+              <label className="flex items-center justify-between gap-3 border border-[var(--de-rule)] bg-[var(--de-surface)] px-3 py-3 text-sm">
+                <span>间隔（分钟）</span>
                 <select
+                  aria-label="同步间隔（分钟）"
                   value={syncSettings.syncInterval}
                   disabled={isSavingSyncSettings || !syncSettings.autoSync}
                   onChange={(event) => void handleSaveSyncSettings({ syncInterval: Number(event.target.value) || defaultSyncSettings.syncInterval })}
-                  className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-950"
+                  className="w-24 rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-2 py-1 text-sm"
                 >
                   {(syncIntervalOptions.includes(syncSettings.syncInterval)
                     ? syncIntervalOptions
@@ -765,31 +770,32 @@ export const Sync: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-3 text-sm dark:border-slate-700 dark:bg-slate-900/80">
-                <span>Conflict strategy</span>
+              <label className="flex items-center justify-between gap-3 border border-[var(--de-rule)] bg-[var(--de-surface)] px-3 py-3 text-sm">
+                <span>冲突策略</span>
                 <select
+                  aria-label="冲突策略"
                   value={syncSettings.conflictResolution}
                   disabled={isSavingSyncSettings}
                   onChange={(event) => void handleSaveSyncSettings({
                     conflictResolution: event.target.value as SyncSettings['conflictResolution'],
                   })}
-                  className="w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-950"
+                  className="w-28 rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-2 py-1 text-sm"
                 >
-                  <option value="timestamp">Newest</option>
-                  <option value="manual">Manual</option>
-                  <option value="local">Local</option>
-                  <option value="remote">Cloud</option>
+                  <option value="timestamp">保留较新</option>
+                  <option value="manual">手动处理</option>
+                  <option value="local">保留本地</option>
+                  <option value="remote">使用云端</option>
                 </select>
               </label>
             </div>
 
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200">
+            <div className="mt-3 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-3 text-xs text-[var(--de-ink-muted)]">
               <div className="flex items-center gap-2 font-semibold">
                 <ShieldAlert className="h-3.5 w-3.5" />
-                同步能力说明
+                数据库保护
               </div>
               <p className="mt-1 leading-6">
-                本页读取真实同步状态、历史和冲突，并支持手动同步；设置会保存到本地配置。“自动同步待上传项”会按间隔检查本地变化，并在退出时检测到待上传项时提示或执行关闭前兜底同步。冲突策略为 Manual 时保留冲突列表给你选择；其他策略会尝试自动处理。数据库云端覆盖会先进入安全暂存区，不会在应用运行时直接替换当前数据库。
+                云端数据库会先进入暂存区；确认恢复时先备份本地数据库，再执行替换。
               </p>
             </div>
           </section>

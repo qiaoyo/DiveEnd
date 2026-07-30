@@ -107,7 +107,7 @@ describe('Sync page', () => {
   it('renders backend state and updates progress from sync-progress events', async () => {
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
     expect(backendMocks.onSyncProgress).toHaveBeenCalledTimes(1);
 
     act(() => {
@@ -142,8 +142,8 @@ describe('Sync page', () => {
   it('refreshes Baidu access token from the Sync toolbar', async () => {
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh Token' }));
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '更新凭证' }));
 
     await waitFor(() => {
       expect(backendMocks.refreshBaiduToken).toHaveBeenCalledTimes(1);
@@ -155,8 +155,8 @@ describe('Sync page', () => {
   it('previews files before triggering manual sync', async () => {
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Manual Sync' }));
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '检查并同步' }));
 
     expect(await screen.findByText('确认本次百度云同步')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
@@ -190,9 +190,9 @@ describe('Sync page', () => {
 
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '同步中...' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Refresh Token' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '更新凭证' })).toBeDisabled();
     expect(backendMocks.getSyncPreview).not.toHaveBeenCalled();
   });
 
@@ -214,7 +214,7 @@ describe('Sync page', () => {
 
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
     expect(screen.getByText(/Conflict resolved by keeping cloud version · download ·/)).toBeInTheDocument();
   });
 
@@ -248,8 +248,8 @@ describe('Sync page', () => {
 
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Conflict Resolution'));
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('冲突处理'));
 
     expect(screen.getByText('SQLite 数据库')).toBeInTheDocument();
     expect(screen.getByText('云端较新')).toBeInTheDocument();
@@ -262,7 +262,7 @@ describe('Sync page', () => {
   it('treats legacy completed progress events as terminal', async () => {
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
 
     act(() => {
       syncProgressListener?.({
@@ -285,8 +285,8 @@ describe('Sync page', () => {
 
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
-    const startupToggle = screen.getByLabelText('Auto-sync on startup') as HTMLInputElement;
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
+    const startupToggle = screen.getByLabelText('启动时同步') as HTMLInputElement;
     expect(startupToggle.checked).toBe(false);
 
     fireEvent.click(startupToggle);
@@ -311,9 +311,9 @@ describe('Sync page', () => {
 
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
 
-    const autoSyncToggle = screen.getByLabelText('Auto-sync pending changes') as HTMLInputElement;
+    const autoSyncToggle = screen.getByLabelText('定时同步变更') as HTMLInputElement;
     expect(autoSyncToggle.checked).toBe(false);
 
     fireEvent.click(autoSyncToggle);
@@ -331,7 +331,7 @@ describe('Sync page', () => {
       expect(autoSyncToggle.checked).toBe(true);
     });
 
-    const intervalSelect = screen.getByLabelText('Interval (min)') as HTMLSelectElement;
+    const intervalSelect = screen.getByLabelText('同步间隔（分钟）') as HTMLSelectElement;
     fireEvent.change(intervalSelect, { target: { value: '60' } });
 
     await waitFor(() => {
@@ -344,7 +344,7 @@ describe('Sync page', () => {
       });
     });
 
-    const strategySelect = screen.getByLabelText('Conflict strategy') as HTMLSelectElement;
+    const strategySelect = screen.getByLabelText('冲突策略') as HTMLSelectElement;
     fireEvent.change(strategySelect, { target: { value: 'manual' } });
 
     await waitFor(() => {
@@ -363,9 +363,9 @@ describe('Sync page', () => {
 
     render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
 
-    const exitToggle = screen.getByLabelText('Sync before exit') as HTMLInputElement;
+    const exitToggle = screen.getByLabelText('退出前同步') as HTMLInputElement;
     expect(exitToggle.checked).toBe(false);
 
     fireEvent.click(exitToggle);
@@ -383,14 +383,14 @@ describe('Sync page', () => {
       expect(exitToggle.checked).toBe(true);
     });
 
-    const autoSyncToggle = screen.getByLabelText('Auto-sync pending changes') as HTMLInputElement;
+    const autoSyncToggle = screen.getByLabelText('定时同步变更') as HTMLInputElement;
     expect(autoSyncToggle.checked).toBe(false);
   });
 
   it('unsubscribes from sync progress events on unmount', async () => {
     const { unmount } = render(<Sync />);
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('已连接')).toBeInTheDocument();
     unmount();
 
     expect(unsubscribe).toHaveBeenCalledTimes(1);
