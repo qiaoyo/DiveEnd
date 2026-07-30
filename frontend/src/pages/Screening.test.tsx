@@ -243,7 +243,7 @@ describe('Screening page', () => {
 
     expect(await screen.findByText('按研究子方向筛选')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('综述'));
+    fireEvent.click(screen.getByRole('button', { name: /^综述(?:\s|$)/ }));
     fireEvent.click(screen.getByRole('button', { name: '继续下一步' }));
 
     expect(await screen.findByText('筛选完成')).toBeInTheDocument();
@@ -318,7 +318,7 @@ describe('Screening page', () => {
     });
 
     expect(await screen.findByText('按研究子方向筛选')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('综述'));
+    fireEvent.click(screen.getByRole('button', { name: /^综述(?:\s|$)/ }));
     fireEvent.click(screen.getByRole('button', { name: '继续下一步' }));
     fireEvent.click(await screen.findByRole('button', { name: '停止任务' }));
 
