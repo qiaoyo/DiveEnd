@@ -1,15 +1,40 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { AlertCircle, Loader2, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
-import { DeepReadPanel } from '../deepread/DeepReadPanel';
-import { DeepStartPanel } from '../deepstart/DeepStartPanel';
-import { SessionDetailPanel } from '../deepstart/SessionDetailPanel';
-import { HistoryPanel } from '../history/HistoryPanel';
-import { SettingsPanel } from '../settings/SettingsPanel';
-import { Screening } from '../../pages/Screening';
-import { Sync } from '../../pages/Sync';
 import { useAppStore } from '../../stores/appStore';
 import { GlobalNav } from './GlobalNav';
+
+const DeepStartPanel = lazy(() =>
+  import('../deepstart/DeepStartPanel').then((module) => ({ default: module.DeepStartPanel })),
+);
+const SessionDetailPanel = lazy(() =>
+  import('../deepstart/SessionDetailPanel').then((module) => ({ default: module.SessionDetailPanel })),
+);
+const HistoryPanel = lazy(() =>
+  import('../history/HistoryPanel').then((module) => ({ default: module.HistoryPanel })),
+);
+const DeepReadPanel = lazy(() =>
+  import('../deepread/DeepReadPanel').then((module) => ({ default: module.DeepReadPanel })),
+);
+const Screening = lazy(() =>
+  import('../../pages/Screening').then((module) => ({ default: module.Screening })),
+);
+const Sync = lazy(() => import('../../pages/Sync').then((module) => ({ default: module.Sync })));
+const SettingsPanel = lazy(() =>
+  import('../settings/SettingsPanel').then((module) => ({ default: module.SettingsPanel })),
+);
+
+function WorkspaceLoading() {
+  return (
+    <div
+      className="flex h-full items-center justify-center gap-2 text-sm text-[var(--de-ink-muted)]"
+      role="status"
+    >
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      正在打开研究工作区
+    </div>
+  );
+}
 
 function WorkspaceContent({ pathname }: { pathname: string }) {
   if (pathname === '/' || pathname === '/deepstart') return <DeepStartPanel />;
@@ -61,12 +86,11 @@ export function AppLayout() {
 
       <main className="min-h-0 flex-1">
         {isHydrating ? (
-          <div className="flex h-full items-center justify-center gap-2 text-sm text-[var(--de-ink-muted)]">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            正在打开研究工作区
-          </div>
+          <WorkspaceLoading />
         ) : (
-          <WorkspaceContent pathname={pathname} />
+          <Suspense fallback={<WorkspaceLoading />}>
+            <WorkspaceContent pathname={pathname} />
+          </Suspense>
         )}
       </main>
     </div>

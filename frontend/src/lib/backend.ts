@@ -20,6 +20,7 @@ import type {
   ImportPapersWithAssetsResult,
   InitialState,
   LocalStorageOverview,
+  LLMUsageSnapshot,
   Paper,
   PDFServiceStatus,
   SaveConfigResult,
@@ -49,6 +50,7 @@ declare global {
           GetInitialState(): Promise<InitialState>;
           GetSecretPrefill(): Promise<ConfigSecretPrefill>;
           GetPDFServiceStatus(): Promise<PDFServiceStatus>;
+          GetLLMUsage(): Promise<LLMUsageSnapshot>;
           SaveConfig(config: AppConfig): Promise<SaveConfigResult>;
           SearchPapers(query: string, limit: number): Promise<SearchPaper[]>;
           EnhancedSearchPapers(
@@ -805,6 +807,20 @@ export async function getPDFServiceStatus(): Promise<PDFServiceStatus> {
   }
   assertMockFallbackAllowed(app, 'GetPDFServiceStatus');
   return { enabled: false, url: '', healthy: false, ready: false, checkedAt: new Date().toISOString(), message: 'PDF service status is only available in the desktop app.' };
+}
+
+export async function getLLMUsage(): Promise<LLMUsageSnapshot> {
+  const app = runtimeApp();
+  if (app?.GetLLMUsage) {
+    return app.GetLLMUsage();
+  }
+  assertMockFallbackAllowed(app, 'GetLLMUsage');
+  return {
+    date: new Date().toISOString().slice(0, 10),
+    usedTokens: 0,
+    limit: defaultConfig.dailyLLMTokenBudget,
+    remaining: defaultConfig.dailyLLMTokenBudget,
+  };
 }
 
 export async function saveConfig(config: AppConfig): Promise<SaveConfigResult> {

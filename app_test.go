@@ -232,6 +232,42 @@ func (panicDeepStartLLM) TranslateSection(section, originalText string) (string,
 	return "", "", nil
 }
 
+func TestDeepStartSearchUsesAllRewrittenQueriesBeforeRanking(t *testing.T) {
+	app := NewApp()
+	app.weakLLM = fakeWeakLLM{rewrittenQuery: []string{"code agents", "software engineering agents", "agent benchmark"}}
+	search := &fakeSearch{
+		results: map[string][]SearchPaper{
+			"code agents": {
+				{ID: "generic", Title: "Generic Agents", Abstract: "An overview.", Year: 2026},
+			},
+			"software engineering agents": {
+				{ID: "software", Title: "Software Engineering Agents", Abstract: "Agents that repair code.", Year: 2025},
+			},
+			"agent benchmark": {
+				{ID: "benchmark", Title: "A Benchmark for Code Agents", Abstract: "Software engineering tasks.", Year: 2024},
+			},
+		},
+	}
+	app.search = search
+
+	results, _, stats, err := app.deepStartSearchWithRewrittenQueries(context.Background(), "code agent benchmark", 20, 20)
+	if err != nil {
+		t.Fatalf("deepStartSearchWithRewrittenQueries() error = %v", err)
+	}
+	if len(search.calls) != 3 {
+		t.Fatalf("expected all rewritten queries to run, got %v", search.calls)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected merged results from all queries, got %+v", results)
+	}
+	if results[0].ID != "benchmark" {
+		t.Fatalf("expected relevance ranking to put benchmark first, got %+v", results)
+	}
+	if len(stats.QueryHits) != 3 {
+		t.Fatalf("expected hit stats for every rewritten query, got %+v", stats.QueryHits)
+	}
+}
+
 func (panicDeepStartLLM) AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error) {
 	panic("AnalyzeDeepStart should not be called when search results are empty")
 }

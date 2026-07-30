@@ -41,6 +41,7 @@ export interface BaiduCloudConfig {
 export interface AppConfig {
   llm: LLMConfig;
   weakLLM: LLMConfig;
+  dailyLLMTokenBudget: number;
   search: SearchAPIConfig;
   baiduCloud: BaiduCloudConfig;
   sync: SyncSettings;
@@ -48,6 +49,13 @@ export interface AppConfig {
   leftPanelWidth: number;
   rightPanelWidth: number;
   dataPath: string;
+}
+
+export interface LLMUsageSnapshot {
+  date: string;
+  usedTokens: number;
+  limit: number;
+  remaining: number;
 }
 
 export interface Folder {
@@ -681,6 +689,7 @@ export const defaultConfig: AppConfig = {
     disableResponseStorage: true,
     clearApiKey: false,
   },
+  dailyLLMTokenBudget: 100_000_000,
   search: {
     enableSemanticScholar: true,
     enableArxiv: true,

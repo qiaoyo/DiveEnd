@@ -102,6 +102,10 @@ export function GetInitialState() {
   return window['go']['main']['App']['GetInitialState']();
 }
 
+export function GetLLMUsage() {
+  return window['go']['main']['App']['GetLLMUsage']();
+}
+
 export function GetLocalStorageOverview() {
   return window['go']['main']['App']['GetLocalStorageOverview']();
 }

@@ -25,6 +25,7 @@ type App struct {
 	llm                  llmService // legacy alias for strong llm
 	strongLLM            llmService
 	weakLLM              weakLLMService
+	llmTokenBudget       *dailyTokenBudget
 	search               paperSearchService
 	deepStartEnricher    deepStartEnricher
 	pdfService           *PDFServiceClient
@@ -875,8 +876,13 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.stopPeriodicSyncLoop()
 	previousConfig := a.config
 	a.config = normalizeAppConfig(config)
-	a.strongLLM = NewStrongLLMClient(a.config)
-	a.weakLLM = NewWeakLLMClient(a.config)
+	a.llmTokenBudget = newDailyTokenBudget(a.config.DataPath, a.config.DailyLLMTokenBudget)
+	strongLLM := NewStrongLLMClient(a.config)
+	strongLLM.tokenBudget = a.llmTokenBudget
+	weakLLM := NewWeakLLMClient(a.config)
+	weakLLM.tokenBudget = a.llmTokenBudget
+	a.strongLLM = strongLLM
+	a.weakLLM = weakLLM
 	a.llm = a.strongLLM
 	searchClient := NewSearchClient(a.config)
 	searchClient.SetProgressReporter(func(progress SearchProgressEvent) {
@@ -923,6 +929,13 @@ func (a *App) applyConfig(config AppConfig, reloadDB bool) error {
 	a.configurePeriodicSyncLoop()
 	a.startDownloadWorkers()
 	return nil
+}
+
+func (a *App) GetLLMUsage() LLMUsageSnapshot {
+	if a.llmTokenBudget == nil {
+		return LLMUsageSnapshot{Limit: defaultDailyLLMTokenBudget, Remaining: defaultDailyLLMTokenBudget}
+	}
+	return a.llmTokenBudget.Snapshot()
 }
 
 func (a *App) configureSyncManager() {

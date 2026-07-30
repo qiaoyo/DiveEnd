@@ -6,18 +6,18 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 
 ## 当前状态
 
-更新时间：2026-07-29
+更新时间：2026-07-30
 
 项目已完成 Phase 1-6 的功能骨架，并完成一轮 P0-P3 code review remediation。当前阶段是可靠性、真实环境验收、发布安全和体验打磨。
 
 已落地的主流程：
 
-- **DeepStart**：自然语言输入研究方向，聚合 Semantic Scholar 和 arXiv，默认收敛到约 20 篇高相关候选，只为排名最前的 4 篇预取和结构抽取，其余候选按需处理；生成 AI 分类、论文摘要、推荐路径，并支持用户主动补充检索后导入本地文库。
+- **DeepStart**：自然语言输入研究方向，聚合 Semantic Scholar 和 arXiv，执行最多 3 个重写 query 后统一按标题/摘要相关性和年份排序，默认收敛到约 20 篇高相关候选；只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
 - **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文。
 - **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；强模型可基于已解析章节回答问题、总结全文，并返回可跳转的论文依据和局限。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
 - **Sync**：百度云同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB。
 - **Library**：右侧论文库支持文件夹树、创建、删除、重命名、移动、单篇移动、批量移动，并同步维护 managed PDF 路径和 DeepRead cache。
-- **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
+- **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、每日共享 LLM token 硬预算与本地计量、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
 - **当前信息架构**：一级任务收敛为“发现 / 阅读 / 分析”，研究记录、同步和设置作为工具入口；检索页不再展示伪造预览数据，阅读页默认提供可收起论文库的专注三栏工作区。
 
 ## 架构
@@ -209,6 +209,8 @@ Passed:
 - `services/pdf_service/.venv/bin/python -m pytest services/pdf_service/tests`
 - `wails build`
 - Real strong and weak LLM chat-completion probes.
+- Opt-in strong/weak LLM budget E2E (`DIVEEND_REAL_LLM_E2E=1`) verifies provider usage accounting and restart persistence.
+- Opt-in retrieval E2E (`DIVEEND_REAL_SEARCH_E2E=1`) verifies all rewritten queries, permanent Semantic Scholar failure degradation, arXiv results, and top-five topic relevance.
 - Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
 - Packaged Wails desktop flow through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, and managed PDF-service shutdown.
 
@@ -216,4 +218,4 @@ Notes:
 
 - `npm audit --omit=dev` reports the React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses a client-only `HashRouter` and does not use RSC; the currently published `react-router-dom` line has no version that clears this advisory without a React 19/Router 8 migration. Keep this scoped exception under review.
 - The configured Semantic Scholar key returned `403 Forbidden`; arXiv fallback and permanent-error fast failure were verified.
-- The main frontend bundle remains about 788 KiB before gzip and should be split after route-level lazy loading is introduced.
+- Workspace pages now load by route: the common entry bundle is about 236 KiB before gzip, while the roughly 407 KiB PDF reader chunk loads only when DeepRead is opened.

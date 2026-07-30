@@ -5,6 +5,7 @@ import { defaultConfig } from '../../types';
 
 const backendMocks = vi.hoisted(() => ({
   getSecretPrefill: vi.fn(),
+  getLLMUsage: vi.fn(),
   saveConfig: vi.fn(),
 }));
 
@@ -34,6 +35,12 @@ describe('SettingsPanel', () => {
       baiduToken: '',
       hasBaiduToken: false,
     });
+    backendMocks.getLLMUsage.mockResolvedValue({
+      date: '2026-07-30',
+      usedTokens: 1234,
+      limit: 100_000_000,
+      remaining: 99_998_766,
+    });
     backendMocks.saveConfig.mockImplementation(async (incomingConfig) => ({
       config: {
         ...incomingConfig,
@@ -60,7 +67,7 @@ describe('SettingsPanel', () => {
     fireEvent.change(screen.getByDisplayValue('/Users/example/DiveEndData'), {
       target: { value: '/Users/example/NewDiveEndData' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '凭据' }));
+    fireEvent.click(screen.getByRole('tab', { name: '凭据' }));
 
     const strongKeyInput = screen.getAllByPlaceholderText('sk-...')[0];
     fireEvent.change(strongKeyInput, { target: { value: 'sk-new-key' } });

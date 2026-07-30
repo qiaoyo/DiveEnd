@@ -47,6 +47,7 @@ type BaiduCloudConfig struct {
 type AppConfig struct {
 	LLM                   LLMConfig        `json:"llm"`
 	WeakLLM               LLMConfig        `json:"weakLLM"`
+	DailyLLMTokenBudget   int64            `json:"dailyLLMTokenBudget"`
 	Search                SearchAPIConfig  `json:"search"`
 	BaiduCloud            BaiduCloudConfig `json:"baiduCloud"`
 	Sync                  SyncSettings     `json:"sync"`

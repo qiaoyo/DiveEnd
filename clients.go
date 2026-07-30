@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type llmService interface {
@@ -49,6 +50,7 @@ type LLMClient struct {
 	disableResponseStorage bool
 	reasoningEffort        string
 	httpClient             *http.Client
+	tokenBudget            *dailyTokenBudget
 }
 
 type contextLLMService interface {
@@ -679,6 +681,12 @@ func (c *LLMClient) chatResponses(messages []llmMessage) (string, error) {
 }
 
 func (c *LLMClient) chatResponsesWithContext(ctx context.Context, messages []llmMessage) (string, error) {
+	reservation, err := c.reserveTokenBudget(messages, 8192)
+	if err != nil {
+		return "", err
+	}
+	defer reservation.Cancel()
+
 	reqBody := map[string]any{
 		"model": c.model,
 		"input": messagesToPrompt(messages),
@@ -716,7 +724,27 @@ func (c *LLMClient) chatResponsesWithContext(ctx context.Context, messages []llm
 		return "", fmt.Errorf("%s responses request failed: %s", c.safeProviderLabel(), redactSensitiveText(string(body)))
 	}
 
-	return parseResponsesText(body)
+	text, err := parseResponsesText(body)
+	if err != nil {
+		return "", err
+	}
+	var usage struct {
+		Usage struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+			TotalTokens  int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	_ = json.Unmarshal(body, &usage)
+	actualTokens := usage.Usage.TotalTokens
+	if actualTokens <= 0 {
+		actualTokens = usage.Usage.InputTokens + usage.Usage.OutputTokens
+	}
+	if actualTokens <= 0 {
+		actualTokens = estimateMessageTokens(messages) + estimateTextTokens(text)
+	}
+	reservation.Finish(actualTokens)
+	return text, nil
 }
 
 func (c *LLMClient) chatOpenAI(messages []llmMessage) (string, error) {
@@ -724,6 +752,12 @@ func (c *LLMClient) chatOpenAI(messages []llmMessage) (string, error) {
 }
 
 func (c *LLMClient) chatOpenAIWithContext(ctx context.Context, messages []llmMessage) (string, error) {
+	reservation, err := c.reserveTokenBudget(messages, 8192)
+	if err != nil {
+		return "", err
+	}
+	defer reservation.Cancel()
+
 	reqBody := struct {
 		Model    string       `json:"model"`
 		Messages []llmMessage `json:"messages"`
@@ -766,6 +800,11 @@ func (c *LLMClient) chatOpenAIWithContext(ctx context.Context, messages []llmMes
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int64 `json:"prompt_tokens"`
+			CompletionTokens int64 `json:"completion_tokens"`
+			TotalTokens      int64 `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
@@ -774,7 +813,16 @@ func (c *LLMClient) chatOpenAIWithContext(ctx context.Context, messages []llmMes
 		return "", fmt.Errorf("no response from openai")
 	}
 
-	return result.Choices[0].Message.Content, nil
+	content := result.Choices[0].Message.Content
+	actualTokens := result.Usage.TotalTokens
+	if actualTokens <= 0 {
+		actualTokens = result.Usage.PromptTokens + result.Usage.CompletionTokens
+	}
+	if actualTokens <= 0 {
+		actualTokens = estimateMessageTokens(messages) + estimateTextTokens(content)
+	}
+	reservation.Finish(actualTokens)
+	return content, nil
 }
 
 func (c *LLMClient) chatAnthropic(messages []llmMessage) (string, error) {
@@ -782,6 +830,12 @@ func (c *LLMClient) chatAnthropic(messages []llmMessage) (string, error) {
 }
 
 func (c *LLMClient) chatAnthropicWithContext(ctx context.Context, messages []llmMessage) (string, error) {
+	reservation, err := c.reserveTokenBudget(messages, 4096)
+	if err != nil {
+		return "", err
+	}
+	defer reservation.Cancel()
+
 	reqBody := struct {
 		Model     string       `json:"model"`
 		Messages  []llmMessage `json:"messages"`
@@ -824,6 +878,10 @@ func (c *LLMClient) chatAnthropicWithContext(ctx context.Context, messages []llm
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		Usage struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
@@ -839,7 +897,32 @@ func (c *LLMClient) chatAnthropicWithContext(ctx context.Context, messages []llm
 		}
 	}
 
-	return text.String(), nil
+	content := text.String()
+	actualTokens := result.Usage.InputTokens + result.Usage.OutputTokens
+	if actualTokens <= 0 {
+		actualTokens = estimateMessageTokens(messages) + estimateTextTokens(content)
+	}
+	reservation.Finish(actualTokens)
+	return content, nil
+}
+
+func (c *LLMClient) reserveTokenBudget(messages []llmMessage, maxOutputTokens int64) (*tokenReservation, error) {
+	if c.tokenBudget == nil {
+		return &tokenReservation{}, nil
+	}
+	reservation, err := c.tokenBudget.Reserve(messages, maxOutputTokens)
+	if err != nil {
+		return nil, fmt.Errorf("%s request blocked: %w", c.safeProviderLabel(), err)
+	}
+	return reservation, nil
+}
+
+func estimateTextTokens(text string) int64 {
+	runes := utf8.RuneCountInString(strings.TrimSpace(text))
+	if runes == 0 {
+		return 0
+	}
+	return int64((runes + 3) / 4)
 }
 
 func messagesToPrompt(messages []llmMessage) string {
@@ -1689,10 +1772,7 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 		// 但这里我们选择静默处理，让用户至少能看到部分结果
 	}
 
-	// 按年份排序（新的在前）
-	sort.Slice(papers, func(i, j int) bool {
-		return papers[i].Year > papers[j].Year
-	})
+	papers = rankSearchPapersByQueries(papers, []string{query})
 
 	if len(papers) > limit {
 		papers = papers[:limit]
@@ -2193,6 +2273,75 @@ func searchPaperQualityScore(paper SearchPaper) int {
 	score += len(strings.TrimSpace(paper.Abstract)) / 80
 	score += len(paper.Tags)
 	return score
+}
+
+func rankSearchPapersByQueries(papers []SearchPaper, queries []string) []SearchPaper {
+	ranked := append([]SearchPaper(nil), papers...)
+	tokens := make([]string, 0, 24)
+	phrases := make([]string, 0, len(queries))
+	primaryTokens := map[string]struct{}{}
+	for queryIndex, query := range queries {
+		normalized := strings.ToLower(strings.TrimSpace(query))
+		if normalized == "" {
+			continue
+		}
+		phrases = append(phrases, normalized)
+		queryTokens := extractDeepStartMessageTokens(normalized)
+		tokens = append(tokens, queryTokens...)
+		if queryIndex == 0 {
+			for _, token := range queryTokens {
+				primaryTokens[token] = struct{}{}
+			}
+		}
+	}
+	tokens = uniqueStrings(tokens)
+
+	score := func(paper SearchPaper) int {
+		title := strings.ToLower(strings.TrimSpace(paper.Title))
+		abstract := strings.ToLower(strings.TrimSpace(paper.Abstract))
+		value := 0
+		for index, phrase := range phrases {
+			titleWeight := 30
+			abstractWeight := 12
+			if index == 0 {
+				titleWeight = 120
+				abstractWeight = 40
+			}
+			if strings.Contains(title, phrase) {
+				value += titleWeight
+			} else if strings.Contains(abstract, phrase) {
+				value += abstractWeight
+			}
+		}
+		for _, token := range tokens {
+			titleWeight := 18
+			abstractWeight := 5
+			if _, primary := primaryTokens[token]; primary {
+				titleWeight = 36
+				abstractWeight = 10
+			}
+			if strings.Contains(title, token) {
+				value += titleWeight
+			}
+			if strings.Contains(abstract, token) {
+				value += abstractWeight
+			}
+		}
+		return value
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		leftScore := score(ranked[i])
+		rightScore := score(ranked[j])
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		if ranked[i].Year != ranked[j].Year {
+			return ranked[i].Year > ranked[j].Year
+		}
+		return strings.ToLower(ranked[i].Title) < strings.ToLower(ranked[j].Title)
+	})
+	return ranked
 }
 
 func extractJSONObject(raw string) string {

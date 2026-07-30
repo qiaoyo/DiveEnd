@@ -145,6 +145,16 @@ func (a *App) deepStartSearchWithRewrittenQueries(
 	lastStats := SearchRetrievalStats{Query: strings.TrimSpace(originalQuery)}
 	successfulQueries := 0
 	failedQueries := make([]string, 0, len(queries))
+	queryLimit := limit
+	if len(queries) > 1 && limit <= 50 {
+		queryLimit = ((limit + len(queries) - 1) / len(queries)) * 2
+		if queryLimit < 8 {
+			queryLimit = 8
+		}
+		if queryLimit > limit {
+			queryLimit = limit
+		}
+	}
 
 	for _, rewrittenQuery := range queries {
 		if err := ctx.Err(); err != nil {
@@ -158,9 +168,9 @@ func (a *App) deepStartSearchWithRewrittenQueries(
 		if configurable, ok := a.search.(interface {
 			SearchWithPerSourceLimit(ctx context.Context, query string, limit int, perSourceLimit int) ([]SearchPaper, error)
 		}); ok && perSourceLimit > 0 {
-			papers, err = configurable.SearchWithPerSourceLimit(ctx, rewrittenQuery, limit, perSourceLimit)
+			papers, err = configurable.SearchWithPerSourceLimit(ctx, rewrittenQuery, queryLimit, perSourceLimit)
 		} else {
-			papers, err = a.search.SearchWithContext(ctx, rewrittenQuery, limit)
+			papers, err = a.search.SearchWithContext(ctx, rewrittenQuery, queryLimit)
 		}
 		queryStats := a.search.LastSearchStats()
 		if strings.TrimSpace(queryStats.Query) == "" {
@@ -191,15 +201,16 @@ func (a *App) deepStartSearchWithRewrittenQueries(
 		successfulQueries++
 		stats.QueryHits[rewrittenQuery] = len(papers)
 		results = mergeSearchPaperPools(results, papers)
-		if len(results) >= limit {
-			results = results[:limit]
-			break
-		}
 	}
 
+	results = rankSearchPapersByQueries(results, append([]string{originalQuery}, queries...))
+	dedupCount := len(results)
+	if len(results) > limit {
+		results = results[:limit]
+	}
 	stats.Query = strings.TrimSpace(firstNonEmpty(lastStats.Query, originalQuery))
 	stats.RawCount = totalRaw
-	stats.DedupCount = len(results)
+	stats.DedupCount = dedupCount
 	stats.FinalCount = len(results)
 	if stats.RawCount == 0 && len(results) > 0 {
 		stats.RawCount = len(results)

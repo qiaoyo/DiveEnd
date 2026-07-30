@@ -52,6 +52,8 @@ export function GetFolders():Promise<Array<main.Folder>>;
 
 export function GetInitialState():Promise<main.InitialState>;
 
+export function GetLLMUsage():Promise<main.LLMUsageSnapshot>;
+
 export function GetLocalStorageOverview():Promise<main.LocalStorageOverview>;
 
 export function GetPDFServiceStatus():Promise<main.PDFServiceStatus>;

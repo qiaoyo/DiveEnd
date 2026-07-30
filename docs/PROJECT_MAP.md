@@ -88,6 +88,7 @@ Backend files:
 - `deepstart_pipeline.go`
 - `deepstart_background.go`
 - `clients.go`
+- `llm_budget.go`
 - `llm_context.go`
 - `paper_import_assets.go`
 
@@ -99,11 +100,15 @@ Frontend files:
 - `frontend/src/components/deepstart/SearchResults.tsx`
 - `frontend/src/components/deepstart/SearchPanel.tsx`
 - `frontend/src/lib/backend.ts`
+- `frontend/src/components/settings/SettingsPanel.tsx` (daily budget and usage)
 
 Tests:
 
 - `app_test.go`
 - `clients_test.go`
+- `llm_budget_test.go`
+- `llm_real_e2e_test.go` (opt-in real providers)
+- `search_real_e2e_test.go` (opt-in weak rewrite + live search)
 - `deepstart_enrichment_test.go`
 - `deepstart_pipeline_test.go`
 - `frontend/src/components/deepstart/SessionDetailPanel.test.tsx`
@@ -309,6 +314,8 @@ Use this table to pick tests for a change:
 | --- | --- |
 | Config/startup | `go test ./... -run 'Test(LoadAppConfig|AppSaveConfig|Startup|DatabaseRestore)'` |
 | DeepStart | `go test ./... -run 'Test(AppDeepStart|SearchClient|PreprocessDeepStart|DeepStartEnricher)'` |
+| Real retrieval | `DIVEEND_REAL_SEARCH_E2E=1 go test ./... -run TestRealDeepStartRetrievalE2E -v` |
+| Real LLM budget | `DIVEEND_REAL_LLM_E2E=1 go test ./... -run TestRealStrongAndWeakLLMBudgetE2E -v` |
 | DeepRead/PDF | `go test ./... -run 'Test(DeepRead|PDFServiceClient|AttachLocalPDF|DownloadPDF)'` |
 | Screening | `go test ./... -run 'Test(AppScreening|UploadScreening|CancelScreening)'` |
 | Library moves/deletes | `go test ./... -run 'Test(MovePaper|MovePapers|DeletePaper|Folder)'` |

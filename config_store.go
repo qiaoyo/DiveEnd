@@ -115,13 +115,14 @@ func defaultAppConfig() AppConfig {
 	}
 
 	return AppConfig{
-		LLM:             defaultAnthropicLLMConfig(),
-		WeakLLM:         defaultWeakLLMConfig(),
-		Search:          defaultSearchAPIConfig(),
-		Theme:           "light",
-		LeftPanelWidth:  280,
-		RightPanelWidth: 340,
-		DataPath:        filepath.Join(homeDir, "DiveEndData"),
+		LLM:                 defaultAnthropicLLMConfig(),
+		WeakLLM:             defaultWeakLLMConfig(),
+		DailyLLMTokenBudget: defaultDailyLLMTokenBudget,
+		Search:              defaultSearchAPIConfig(),
+		Theme:               "light",
+		LeftPanelWidth:      280,
+		RightPanelWidth:     340,
+		DataPath:            filepath.Join(homeDir, "DiveEndData"),
 		BaiduCloud: BaiduCloudConfig{
 			Enabled: false,
 			Quota:   0,
@@ -138,6 +139,9 @@ func normalizeAppConfig(config AppConfig) AppConfig {
 		config.WeakLLM = defaults.WeakLLM
 	} else {
 		config.WeakLLM = normalizeLLMConfig(config.WeakLLM)
+	}
+	if config.DailyLLMTokenBudget <= 0 {
+		config.DailyLLMTokenBudget = defaults.DailyLLMTokenBudget
 	}
 	config.Search = normalizeSearchAPIConfig(config.Search)
 	config.BaiduCloud = normalizeBaiduCloudConfig(config.BaiduCloud)

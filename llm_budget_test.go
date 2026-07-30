@@ -1,0 +1,59 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestDailyTokenBudgetReservesSettlesAndPersists(t *testing.T) {
+	dataPath := t.TempDir()
+	budget := newDailyTokenBudget(dataPath, 100)
+
+	reservation, err := budget.Reserve([]llmMessage{{Role: "user", Content: "0123456789"}}, 20)
+	if err != nil {
+		t.Fatalf("reserve budget: %v", err)
+	}
+	reservation.Finish(7)
+
+	snapshot := budget.Snapshot()
+	if snapshot.UsedTokens != 7 || snapshot.Remaining != 93 {
+		t.Fatalf("unexpected snapshot after settlement: %+v", snapshot)
+	}
+
+	reloaded := newDailyTokenBudget(dataPath, 100)
+	reloadedSnapshot := reloaded.Snapshot()
+	if reloadedSnapshot.UsedTokens != 7 {
+		t.Fatalf("expected persisted usage, got %+v", reloadedSnapshot)
+	}
+}
+
+func TestDailyTokenBudgetCancelsFailedRequestAndRejectsOverflow(t *testing.T) {
+	budget := newDailyTokenBudget(t.TempDir(), 10)
+	reservation, err := budget.Reserve(nil, 8)
+	if err != nil {
+		t.Fatalf("reserve budget: %v", err)
+	}
+	reservation.Cancel()
+	if snapshot := budget.Snapshot(); snapshot.UsedTokens != 0 {
+		t.Fatalf("expected cancellation to release reservation, got %+v", snapshot)
+	}
+
+	_, err = budget.Reserve([]llmMessage{{Role: "user", Content: strings.Repeat("x", 40)}}, 1)
+	if err == nil {
+		t.Fatal("expected request over daily budget to be rejected")
+	}
+}
+
+func TestDailyTokenBudgetSettlesRequestThatCrossesDateBoundary(t *testing.T) {
+	budget := newDailyTokenBudget(t.TempDir(), 100)
+	reservation := &tokenReservation{
+		budget:   budget,
+		reserved: 20,
+		date:     "2000-01-01",
+	}
+	reservation.Finish(7)
+
+	if snapshot := budget.Snapshot(); snapshot.UsedTokens != 7 {
+		t.Fatalf("expected new-day usage without subtracting old reservation, got %+v", snapshot)
+	}
+}

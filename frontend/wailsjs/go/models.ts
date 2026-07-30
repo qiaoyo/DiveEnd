@@ -115,6 +115,7 @@ export namespace main {
 	export class AppConfig {
 	    llm: LLMConfig;
 	    weakLLM: LLMConfig;
+	    dailyLLMTokenBudget: number;
 	    search: SearchAPIConfig;
 	    baiduCloud: BaiduCloudConfig;
 	    sync: SyncSettings;
@@ -137,6 +138,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.llm = this.convertValues(source["llm"], LLMConfig);
 	        this.weakLLM = this.convertValues(source["weakLLM"], LLMConfig);
+	        this.dailyLLMTokenBudget = source["dailyLLMTokenBudget"];
 	        this.search = this.convertValues(source["search"], SearchAPIConfig);
 	        this.baiduCloud = this.convertValues(source["baiduCloud"], BaiduCloudConfig);
 	        this.sync = this.convertValues(source["sync"], SyncSettings);
@@ -1069,6 +1071,24 @@ export namespace main {
 		}
 	}
 
+	export class LLMUsageSnapshot {
+	    date: string;
+	    usedTokens: number;
+	    limit: number;
+	    remaining: number;
+
+	    static createFrom(source: any = {}) {
+	        return new LLMUsageSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.date = source["date"];
+	        this.usedTokens = source["usedTokens"];
+	        this.limit = source["limit"];
+	        this.remaining = source["remaining"];
+	    }
+	}
 	export class LocalStorageFolderOverview {
 	    folderId: string;
 	    folderName: string;

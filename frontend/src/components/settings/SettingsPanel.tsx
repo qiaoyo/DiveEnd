@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import * as Switch from '@radix-ui/react-switch';
 import {
   Bot,
-  ChevronLeft,
-  ChevronRight,
   Cloud,
   Eye,
   EyeOff,
+  Gauge,
   Key,
   Save,
   Search,
@@ -14,10 +13,10 @@ import {
   Settings,
   Trash2,
 } from 'lucide-react';
-import { getSecretPrefill, saveConfig } from '../../lib/backend';
+import { getLLMUsage, getSecretPrefill, saveConfig } from '../../lib/backend';
 import { errorToUserMessage } from '../../lib/errors';
 import { useAppStore } from '../../stores/appStore';
-import type { AppConfig, ConfigSecretPrefill, LLMConfig } from '../../types';
+import type { AppConfig, ConfigSecretPrefill, LLMConfig, LLMUsageSnapshot } from '../../types';
 
 const providerPresets: Record<'openai_compatible' | 'anthropic', Partial<LLMConfig>> = {
   openai_compatible: {
@@ -322,11 +321,9 @@ export function SettingsPanel() {
   const {
     config,
     isSavingConfig,
-    leftPanelCollapsed,
     setConfig,
     setError,
     setSavingConfig,
-    toggleLeftPanel,
   } = useAppStore();
   const [activeTab, setActiveTab] = useState<'workspace' | 'credentials' | 'cloud'>('workspace');
   const [secretPrefill, setSecretPrefill] = useState<ConfigSecretPrefill>(emptySecretPrefill);
@@ -334,6 +331,7 @@ export function SettingsPanel() {
   const [saveMessage, setSaveMessage] = useState('');
   const [showStrongKey, setShowStrongKey] = useState(false);
   const [showWeakKey, setShowWeakKey] = useState(false);
+  const [llmUsage, setLLMUsage] = useState<LLMUsageSnapshot | null>(null);
 
   useEffect(() => {
     setDraftConfig(mergeConfigWithSecretPrefill(config, secretPrefill));
@@ -360,6 +358,20 @@ export function SettingsPanel() {
     };
 
     void loadPrefill();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getLLMUsage()
+      .then((usage) => {
+        if (!cancelled) setLLMUsage(usage);
+      })
+      .catch(() => {
+        if (!cancelled) setLLMUsage(null);
+      });
     return () => {
       cancelled = true;
     };
@@ -396,52 +408,23 @@ export function SettingsPanel() {
     }
   };
 
-  if (leftPanelCollapsed) {
-    return (
-      <div className="flex h-full flex-col items-center justify-between border-r border-stone-200 bg-[#efe9de] py-4 dark:border-stone-800 dark:bg-[#1c1c1a]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="rounded-2xl bg-white/80 p-3 shadow-sm dark:bg-stone-900/80">
-            <Settings className="h-5 w-5 text-emerald-600" />
-          </div>
-          <span className="text-xs uppercase tracking-[0.3em] text-stone-500 [writing-mode:vertical-rl] dark:text-stone-400">
-            Setup
-          </span>
-        </div>
-        <button
-          onClick={toggleLeftPanel}
-          className="rounded-xl border border-stone-200 p-2 text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
-          title="展开设置栏"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex h-full min-h-0 flex-col border-r border-stone-200 bg-[#efe9de] dark:border-stone-800 dark:bg-[#1c1c1a]">
-      <div className="border-b border-stone-200 p-4 dark:border-stone-800">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--de-surface)] text-[var(--de-ink)]">
+      <div className="border-b border-[var(--de-rule)] px-6 py-5">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <Settings className="h-5 w-5 text-emerald-600" />
-              <span className="font-semibold">工作区设置</span>
+              <Settings className="h-5 w-5 text-[var(--de-accent)]" />
+              <h1 className="de-display text-xl font-semibold">工作区设置</h1>
             </div>
-            <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-              默认先展示非敏感的软件配置；强弱模型密钥会自动预填充，但初始保持隐藏状态。
+            <p className="mt-1 text-sm text-[var(--de-ink-muted)]">
+              管理模型、研究数据和同步凭据。
             </p>
           </div>
-          <button
-            onClick={toggleLeftPanel}
-            className="rounded-xl border border-stone-200 p-2 text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
-            title="收起设置栏"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
         </div>
       </div>
 
-      <div className="flex border-b border-stone-200 dark:border-stone-800">
+      <div className="flex border-b border-[var(--de-rule)] px-6" role="tablist" aria-label="设置分类">
         {[
           { key: 'workspace', icon: <Settings className="mr-1 inline-block h-4 w-4" />, label: '软件' },
           { key: 'credentials', icon: <Key className="mr-1 inline-block h-4 w-4" />, label: '凭据' },
@@ -449,11 +432,14 @@ export function SettingsPanel() {
         ].map((item) => (
           <button
             key={item.key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === item.key}
             onClick={() => setActiveTab(item.key as 'workspace' | 'credentials' | 'cloud')}
-            className={`flex-1 py-3 text-sm font-medium transition ${
+            className={`px-4 py-3 text-sm font-medium transition-colors ${
               activeTab === item.key
-                ? 'border-b-2 border-emerald-600 text-emerald-700 dark:text-emerald-400'
-                : 'text-stone-500 dark:text-stone-400'
+                ? 'border-b-2 border-[var(--de-accent)] text-[var(--de-ink)]'
+                : 'border-b-2 border-transparent text-[var(--de-ink-muted)] hover:text-[var(--de-ink)]'
             }`}
           >
             {item.icon}
@@ -462,7 +448,7 @@ export function SettingsPanel() {
         ))}
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto px-6 py-5">
         {activeTab === 'workspace' && (
           <div className="space-y-4">
             <LLMProfileSection
@@ -474,6 +460,37 @@ export function SettingsPanel() {
                 setDraftConfig((current) => applyProviderPreset(current, 'llm', providerType))
               }
             />
+
+            <div className="border-y border-stone-200 py-4 dark:border-stone-800">
+              <div className="flex items-start gap-3">
+                <Gauge className="mt-0.5 h-5 w-5 text-emerald-600" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <label className="block text-sm font-medium" htmlFor="daily-llm-budget">
+                    每日 LLM token 上限
+                  </label>
+                  <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">
+                    强模型与弱模型共享额度；达到上限后，新请求会在发送前停止。
+                  </p>
+                  <input
+                    id="daily-llm-budget"
+                    type="number"
+                    min={1}
+                    step={1_000_000}
+                    value={draftConfig.dailyLLMTokenBudget}
+                    onChange={(event) =>
+                      updateDraft({
+                        dailyLLMTokenBudget: Math.max(1, Number(event.target.value) || 1),
+                      })
+                    }
+                    className="mt-3 w-full border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+                  />
+                  <div className="mt-2 flex justify-between gap-3 text-xs text-stone-500 dark:text-stone-400">
+                    <span>今日已用 {llmUsage?.usedTokens.toLocaleString() ?? '读取中'}</span>
+                    <span>剩余 {llmUsage?.remaining.toLocaleString() ?? '读取中'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <LLMProfileSection
               title="弱模型配置"
@@ -621,13 +638,13 @@ export function SettingsPanel() {
         )}
       </div>
 
-      <div className="border-t border-stone-200 p-4 dark:border-stone-800">
+      <div className="border-t border-[var(--de-rule)] px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-stone-500 dark:text-stone-400">{saveMessage || '修改后会持久化到本机配置文件。'}</div>
+          <div className="text-xs text-[var(--de-ink-muted)]">{saveMessage || '修改会保存到本机。'}</div>
           <button
             onClick={() => void handleSave()}
             disabled={isSavingConfig}
-            className="inline-flex items-center gap-2 rounded-2xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+            className="inline-flex items-center gap-2 rounded-[5px] bg-[var(--de-accent)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Save className="h-4 w-4" />
             {isSavingConfig ? '保存中...' : '保存配置'}
