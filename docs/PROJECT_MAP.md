@@ -125,6 +125,7 @@ Purpose:
 - Route low-latency questions to the weak model and full-paper summaries to the strong model, with fallback when only one assistant is configured.
 - Build bounded long-paper context from the selected section, question-relevant sections, and core sections without allowing one large abstract to consume the entire context.
 - Return an answer, concise takeaway, verbatim-validated section evidence, and explicit limitations; reject invented section IDs and paraphrased evidence.
+- Let evidence citations switch the active parsed section; exact PDF-page navigation remains unavailable until extraction stores page anchors.
 - Cancel an in-flight AI reading request from the reader or during application shutdown.
 - Show a range-friendly Wails asset URL for PDFs, with bounded base64 fallback.
 - Save translations and notes.

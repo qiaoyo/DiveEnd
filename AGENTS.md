@@ -33,7 +33,7 @@ Implemented:
 - Baidu sync preview, background manual sync, startup sync, periodic sync, exit sync prompt, conflict detection, conflict resolution, database restore staging/apply/cancel.
 - Security hardening around local secret files, symlink/path traversal, PDF validation, SSRF, atomic file writes, bounded HTTP reads, and user-visible error redaction.
 - Frontend route/page tests, Go regression tests, Python PDF route tests, browser smoke script.
-- Frontend primary navigation is organized around discovery, reading, and analysis; workspace routes are lazy-loaded, DeepStart/Screening/Sync use the shared restrained research-tool tokens, and the browser fallback and desktop bridge share the same backend wrapper contract.
+- Frontend primary navigation is organized around discovery, reading, and analysis; workspace routes are lazy-loaded, DeepStart/DeepRead/Screening/Sync use the shared restrained research-tool tokens, and the browser fallback and desktop bridge share the same backend wrapper contract.
 
 Remaining risks:
 

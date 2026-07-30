@@ -811,10 +811,10 @@ export function DeepReadPanel() {
           type="button"
           onClick={() => void loadFolderPapers(node.folder.id, true)}
           style={{ paddingLeft: 10 + depth * 12 }}
-          className={`flex w-full items-center gap-2 rounded-lg py-1.5 pr-2 text-left text-xs transition ${
+          className={`flex w-full items-center gap-2 rounded-[var(--de-radius)] py-1.5 pr-2 text-left text-xs transition-colors ${
             isActive
-              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-100'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white'
+              ? 'bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
+              : 'text-[var(--de-ink-muted)] hover:bg-[var(--de-surface-muted)] hover:text-[var(--de-ink)]'
           }`}
         >
           <Folder className="h-3.5 w-3.5 shrink-0" />
@@ -840,9 +840,9 @@ export function DeepReadPanel() {
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs font-medium text-[var(--de-accent)]">论文阅读工作台</p>
-            <h2 className="truncate text-sm font-semibold">{selectedPaper?.title || '从论文库选择一篇论文'}</h2>
+            <h2 className="truncate text-base font-semibold">{selectedPaper?.title || '从论文库选择一篇论文'}</h2>
             {pdfServiceStatus && (
-              <p className={`mt-1 text-xs ${pdfServiceStatus.ready ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
+              <p className={`mt-1 text-xs ${pdfServiceStatus.ready ? 'text-[var(--de-accent)]' : 'text-[var(--de-warning)]'}`}>
                 PDF 服务：{pdfServiceStatus.ready ? 'ready' : '需要检查'}{pdfServiceStatus.message ? ` · ${pdfServiceStatus.message}` : ''}
               </p>
             )}
@@ -882,8 +882,8 @@ export function DeepReadPanel() {
       </div>
 
       <div className="relative grid min-h-0 flex-1 gap-2 p-2 lg:grid-cols-[210px_minmax(0,1fr)]">
-        <aside className="min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
-          <div className="rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/70 dark:bg-slate-900/75">
+        <aside className="de-panel min-h-0 overflow-y-auto p-3">
+          <div className="border-b border-[var(--de-rule)] pb-3">
             <h3 className="text-xs font-semibold text-[var(--de-ink-muted)]">论文章节</h3>
             <div className="mt-3 max-h-44 space-y-2 overflow-y-auto">
               {sections.length > 0 ? (
@@ -892,10 +892,10 @@ export function DeepReadPanel() {
                     key={item.id}
                     type="button"
                     onClick={() => setSelectedSectionId(item.id)}
-                    className={`w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
+                    className={`w-full rounded-[var(--de-radius)] border px-2.5 py-1.5 text-left text-xs transition-colors ${
                       selectedSection?.id === item.id
-                        ? 'border-indigo-300 bg-indigo-100 text-indigo-700 dark:border-indigo-400/60 dark:bg-indigo-500/20 dark:text-indigo-100'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:border-indigo-500/40 dark:hover:text-slate-100'
+                        ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
+                        : 'border-[var(--de-rule)] bg-[var(--de-surface)] text-[var(--de-ink-muted)] hover:border-[var(--de-rule-strong)] hover:text-[var(--de-ink)]'
                     }`}
                   >
                     {item.title}
@@ -907,15 +907,15 @@ export function DeepReadPanel() {
             </div>
           </div>
 
-          <div className="mt-3 min-h-0 rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/70 dark:bg-slate-900/75">
+          <div className="mt-3 min-h-0 border-b border-[var(--de-rule)] pb-3">
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setLeftTab('directory')}
-                className={`rounded-lg px-2.5 py-1 text-[11px] ${
+                className={`rounded-[var(--de-radius)] px-2.5 py-1 text-[11px] ${
                   leftTab === 'directory'
-                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-100'
-                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                    ? 'bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
+                    : 'text-[var(--de-ink-muted)] hover:bg-[var(--de-surface-muted)]'
                 }`}
               >
                 目录结构
@@ -923,10 +923,10 @@ export function DeepReadPanel() {
               <button
                 type="button"
                 onClick={() => setLeftTab('thumbnails')}
-                className={`rounded-lg px-2.5 py-1 text-[11px] ${
+                className={`rounded-[var(--de-radius)] px-2.5 py-1 text-[11px] ${
                   leftTab === 'thumbnails'
-                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-100'
-                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                    ? 'bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
+                    : 'text-[var(--de-ink-muted)] hover:bg-[var(--de-surface-muted)]'
                 }`}
               >
                 页面缩略图
@@ -973,8 +973,8 @@ export function DeepReadPanel() {
                             onClick={() => jumpToPage(page)}
                             className={`rounded border p-1 text-[10px] ${
                               isCurrent
-                                ? 'border-indigo-300 bg-indigo-100 dark:border-indigo-400 dark:bg-indigo-500/20'
-                                : 'border-slate-200 dark:border-slate-700'
+                                ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)]'
+                                : 'border-[var(--de-rule)]'
                             }`}
                           >
                             <Page pageNumber={page} width={68} renderAnnotationLayer={false} renderTextLayer={false} />
@@ -991,7 +991,7 @@ export function DeepReadPanel() {
             )}
           </div>
 
-          <div className="mt-3 rounded-xl border border-slate-200 bg-white/85 p-3 text-xs text-slate-600 dark:border-slate-700/70 dark:bg-slate-900/75 dark:text-slate-300">
+          <div className="mt-3 p-3 text-xs text-[var(--de-ink-muted)]">
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -1056,9 +1056,9 @@ export function DeepReadPanel() {
         </aside>
 
         <section className="grid min-h-0 gap-2 lg:grid-cols-[minmax(360px,1.5fr)_minmax(280px,0.9fr)]">
-          <div className="min-h-0 rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
+          <div className="de-panel min-h-0 p-3">
             <h3 className="text-xs font-semibold text-[var(--de-ink-muted)]">论文原文</h3>
-            <div className="mt-3 min-h-0 rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+            <div className="mt-3 min-h-0 border-t border-[var(--de-rule)] pt-3">
               {!selectedPaper && (
                 <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
                   <BookOpen className="mb-3 h-10 w-10 text-slate-400 dark:text-slate-500" />
@@ -1135,9 +1135,9 @@ export function DeepReadPanel() {
                             <div
                               key={`pdf-page-${page}`}
                               ref={(element) => setPDFPageRef(page, element)}
-                              className={`rounded-md border p-1 ${
+                              className={`rounded-[var(--de-radius)] border p-1 ${
                                 isCurrent
-                                  ? 'border-indigo-300 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-500/10'
+                                  ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)]'
                                   : 'border-transparent'
                               }`}
                             >
@@ -1161,7 +1161,7 @@ export function DeepReadPanel() {
             </div>
           </div>
 
-          <aside className="min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/80">
+          <aside className="de-panel min-h-0 overflow-y-auto p-3">
             <div className="space-y-3">
               <div className="border border-[var(--de-rule)] bg-[var(--de-surface)] p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -1310,12 +1310,12 @@ export function DeepReadPanel() {
                 </button>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+              <div className="border-t border-[var(--de-rule)] pt-3">
                 <h3 className="text-xs font-semibold text-[var(--de-ink-muted)]">翻译记录</h3>
                 <div className="mt-2 max-h-36 space-y-2 overflow-y-auto">
                   {translationHistory.length > 0 ? (
                     translationHistory.map((record) => (
-                      <div key={record.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-950/70">
+                      <div key={record.id} className="border-b border-[var(--de-rule)] p-2 text-xs last:border-b-0">
                         <p className="font-medium text-slate-700 dark:text-slate-200">{record.section}</p>
                         <p className="mt-1 line-clamp-3 text-slate-600 dark:text-slate-300">{record.summary || record.translatedText}</p>
                       </div>
@@ -1329,7 +1329,7 @@ export function DeepReadPanel() {
                   <div className="mt-2 max-h-28 space-y-2 overflow-y-auto">
                     {noteHistory.length > 0 ? (
                       noteHistory.map((note) => (
-                        <div key={note.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-950/70">
+                        <div key={note.id} className="border-b border-[var(--de-rule)] p-2 text-xs last:border-b-0">
                           <p className="font-medium text-slate-700 dark:text-slate-200">{note.section}</p>
                           <p className="mt-1 whitespace-pre-wrap leading-5 text-slate-600 dark:text-slate-300">{note.content}</p>
                         </div>
@@ -1345,9 +1345,9 @@ export function DeepReadPanel() {
         </section>
 
         {showLibrary ? (
-        <aside className="absolute bottom-2 right-2 top-2 z-20 w-[320px] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700/80 dark:bg-slate-900">
-          <div className="rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/70 dark:bg-slate-900/75">
-            <h3 className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">文件夹目录</h3>
+        <aside className="absolute bottom-2 right-2 top-2 z-20 w-[320px] overflow-y-auto rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] p-3 shadow-lg">
+          <div className="border-b border-[var(--de-rule)] pb-3">
+            <h3 className="text-xs font-semibold text-[var(--de-ink-muted)]">文件夹目录</h3>
             <p className="mt-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{currentFolder?.path || '未选择目录'}</p>
             <div className="mt-3 max-h-44 overflow-y-auto">
               {folderTree.length > 0 ? (
@@ -1358,7 +1358,7 @@ export function DeepReadPanel() {
             </div>
           </div>
 
-          <div className="mt-3 min-h-0 rounded-xl border border-slate-200 bg-white/85 p-3 dark:border-slate-700/70 dark:bg-slate-900/75">
+          <div className="mt-3 min-h-0 p-3">
             <div className="flex items-center justify-between gap-2">
               <h3 className="flex items-center gap-2 text-xs font-semibold text-[var(--de-ink-muted)]">
                 <FileText className="h-3.5 w-3.5" />
@@ -1370,7 +1370,7 @@ export function DeepReadPanel() {
               type="button"
               onClick={() => void handleRetryFolderDownloads()}
               disabled={!activeFolderId || retryingFolder}
-              className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
+              className="de-button-secondary mt-2 inline-flex w-full items-center justify-center gap-1.5 px-2.5 py-1.5 text-[11px] text-[var(--de-warning)] disabled:opacity-60"
             >
               {retryingFolder ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               重新下载当前文件夹未完成 PDF
@@ -1380,7 +1380,7 @@ export function DeepReadPanel() {
               value={libraryQuery}
               onChange={(event) => setLibraryQuery(event.target.value)}
               placeholder="搜索当前目录论文"
-              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs outline-none focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-950/60"
+              className="de-field mt-2 w-full px-2.5 py-2 text-xs"
             />
             <div className="mt-3 max-h-[56vh] space-y-2 overflow-y-auto">
               {filteredPapers.length > 0 ? (
@@ -1393,10 +1393,10 @@ export function DeepReadPanel() {
                   return (
                     <article
                       key={paper.id}
-                      className={`rounded-xl border p-3 text-xs transition ${
+                      className={`rounded-[var(--de-radius)] border p-3 text-xs transition-colors ${
                         active
-                          ? 'border-indigo-300 bg-indigo-100/80 dark:border-indigo-400/70 dark:bg-indigo-500/15'
-                          : 'border-slate-200 bg-white hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-950/70 dark:hover:border-indigo-500/40'
+                          ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)]'
+                          : 'border-[var(--de-rule)] bg-[var(--de-surface)] hover:border-[var(--de-rule-strong)]'
                       }`}
                     >
                       <button
@@ -1413,7 +1413,7 @@ export function DeepReadPanel() {
                         </p>
                       </button>
                       <div className="mt-2 flex items-center justify-between gap-2">
-                        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${statusStyle(paper.downloadStatus)}`}>
+                        <span className={`rounded-[var(--de-radius)] border px-2 py-0.5 text-[10px] ${statusStyle(paper.downloadStatus)}`}>
                           {statusLabel(paper.downloadStatus)}
                         </span>
                         {canRepairDownload ? (
@@ -1422,7 +1422,7 @@ export function DeepReadPanel() {
                               type="button"
                               onClick={() => void handleRetryDownload(paper)}
                               disabled={retrying}
-                              className="inline-flex items-center gap-1 rounded-lg border border-rose-300 px-2 py-0.5 text-[10px] text-rose-700 hover:bg-rose-50 disabled:opacity-60 dark:border-rose-500/40 dark:text-rose-200 dark:hover:bg-rose-500/10"
+                              className="inline-flex items-center gap-1 rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] px-2 py-0.5 text-[10px] text-[var(--de-danger)] hover:bg-[var(--de-surface-muted)] disabled:opacity-60"
                             >
                               {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                               重试
@@ -1437,7 +1437,7 @@ export function DeepReadPanel() {
                                     [paper.id]: (prev[paper.id] || paper.url || '').trim(),
                                   }));
                                 }}
-                                className="rounded-lg border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600 hover:border-indigo-300 hover:text-indigo-700 dark:border-slate-600 dark:text-slate-200 dark:hover:border-indigo-500/60 dark:hover:text-indigo-300"
+                                className="rounded-[var(--de-radius)] border border-[var(--de-rule)] px-2 py-0.5 text-[10px] text-[var(--de-ink-muted)] hover:border-[var(--de-accent)] hover:text-[var(--de-accent)]"
                               >
                                 手动链接
                               </button>
@@ -1446,7 +1446,7 @@ export function DeepReadPanel() {
                               type="button"
                               onClick={() => void handleAttachLocalPDF(paper)}
                               disabled={attaching}
-                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 px-2 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-500/40 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
+                              className="inline-flex items-center gap-1 rounded-[var(--de-radius)] border border-[var(--de-rule)] px-2 py-0.5 text-[10px] text-[var(--de-accent)] hover:bg-[var(--de-accent-soft)] disabled:opacity-60"
                             >
                               {attaching ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
                               本地PDF
@@ -1458,7 +1458,7 @@ export function DeepReadPanel() {
                         <p className="mt-1 line-clamp-2 text-[10px] text-rose-700 dark:text-rose-300">{paper.downloadError}</p>
                       )}
                       {manualURLPanelPaperId === paper.id && status === 'failed' && (
-                        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/70">
+                        <div className="mt-2 border-t border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-2">
                           <p className="text-[10px] text-slate-600 dark:text-slate-300">填写可访问的 http/https PDF 链接</p>
                           <input
                             ref={manualURLPanelPaperId === paper.id ? manualURLInputRef : undefined}
@@ -1472,7 +1472,7 @@ export function DeepReadPanel() {
                             type="button"
                             onClick={() => void handleRetryWithManualURL(paper)}
                             disabled={submittingManualURLPaperId === paper.id}
-                            className="mt-2 inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-[10px] text-white disabled:opacity-60"
+                            className="de-button-primary mt-2 inline-flex items-center gap-1 px-2 py-1 text-[10px] disabled:opacity-60"
                           >
                             {submittingManualURLPaperId === paper.id ? (
                               <Loader2 className="h-3 w-3 animate-spin" />
