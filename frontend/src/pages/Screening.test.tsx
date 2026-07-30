@@ -10,6 +10,8 @@ const backendMocks = vi.hoisted(() => ({
   createScreeningSession: vi.fn(),
   uploadScreeningFiles: vi.fn(),
   extractPaperContent: vi.fn(),
+  getExtractProgress: vi.fn(),
+  listScreeningSessions: vi.fn(),
   getScreeningSession: vi.fn(),
   analyzePapers: vi.fn(),
   applyScreeningChoice: vi.fn(),
@@ -32,6 +34,15 @@ describe('Screening page', () => {
     backendMocks.selectScreeningPDFs.mockResolvedValue(['/tmp/paper-1.pdf', '/tmp/paper-2.pdf']);
     backendMocks.onExtractProgress.mockReturnValue(() => undefined);
     backendMocks.cancelScreeningTask.mockResolvedValue(undefined);
+    backendMocks.listScreeningSessions.mockResolvedValue([]);
+    backendMocks.getExtractProgress.mockResolvedValue({
+      sessionId: 'session-1',
+      total: 2,
+      completed: 1,
+      currentFile: '',
+      status: 'processing',
+      errorMessage: '',
+    });
     backendMocks.createScreeningSession.mockResolvedValue({
       id: 'session-1',
       title: 'Screening',
@@ -337,6 +348,64 @@ describe('Screening page', () => {
     });
     expect(document.body.textContent).not.toContain('sk-screening-secret');
     expect(document.body.textContent).not.toContain('screening-token-secret');
+    expect(backendMocks.createScreeningSession).not.toHaveBeenCalled();
+  });
+
+  it('resumes a persisted screening decision without starting a new model request', async () => {
+    backendMocks.listScreeningSessions.mockResolvedValueOnce([
+      {
+        id: 'session-resume',
+        title: 'Agent evaluation papers',
+        status: 'screen',
+        totalPapers: 12,
+        createdAt: '2026-07-30T10:00:00Z',
+        updatedAt: '2026-07-30T11:00:00Z',
+      },
+    ]);
+    backendMocks.getScreeningSession.mockReset();
+    backendMocks.getScreeningSession.mockResolvedValueOnce({
+      session: {
+        id: 'session-resume',
+        title: 'Agent evaluation papers',
+        status: 'screen',
+        totalPapers: 12,
+        createdAt: '2026-07-30T10:00:00Z',
+        updatedAt: '2026-07-30T11:00:00Z',
+      },
+      papers: [
+        {
+          id: 'paper-resume',
+          sessionId: 'session-resume',
+          fileName: 'evaluation.pdf',
+          filePath: '/tmp/evaluation.pdf',
+          fileSize: 100,
+          status: 'screening',
+          title: 'Agent Evaluation',
+          createdAt: '2026-07-30T10:00:00Z',
+          updatedAt: '2026-07-30T11:00:00Z',
+        },
+      ],
+      currentNode: {
+        id: 'node-resume',
+        nodeType: 'branch',
+        message: '保留包含真实环境评估的论文',
+        dimension: '评估环境',
+        options: [
+          { key: 'real', label: '真实环境', paperIds: ['paper-resume'], count: 1 },
+        ],
+        allowMultiSelect: true,
+        allowSkip: false,
+        remainingPaperIds: ['paper-resume'],
+      },
+      pathHistory: [],
+    });
+
+    render(<Screening />);
+    fireEvent.click(await screen.findByRole('button', { name: /Agent evaluation papers/ }));
+
+    expect(await screen.findByText('保留包含真实环境评估的论文')).toBeInTheDocument();
+    expect(backendMocks.getScreeningSession).toHaveBeenCalledWith('session-resume');
+    expect(backendMocks.analyzePapers).not.toHaveBeenCalled();
     expect(backendMocks.createScreeningSession).not.toHaveBeenCalled();
   });
 });

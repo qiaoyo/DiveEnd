@@ -170,6 +170,7 @@ Purpose:
 - Extract content through the PDF service.
 - Stop extraction, initial AI analysis, or later decision generation without deleting the session; completed papers and the last committed decision remain available.
 - Build and traverse an LLM decision tree; initial and subsequent decisions atomically persist the node, path, session state, and affected paper states.
+- Resume recent local sessions at their persisted extraction, decision, or imported state without silently issuing another LLM request.
 - Import selected papers into the library.
 
 Backend files:

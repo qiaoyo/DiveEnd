@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, FileUp, Filter, Loader2, Sparkles } from 'lucide-react';
-import type { ExtractProgress, Paper, ScreeningDecisionNode, ScreeningSessionDetail } from '../types';
+import { CheckCircle2, Clock3, FileUp, Filter, Loader2, Sparkles } from 'lucide-react';
+import type {
+  ExtractProgress,
+  Paper,
+  ScreeningDecisionNode,
+  ScreeningSession,
+  ScreeningSessionDetail,
+} from '../types';
 import * as backend from '../lib/backend';
 import { errorToUserMessage, isCancellationError } from '../lib/errors';
 import { useAppStore } from '../stores/appStore';
@@ -15,6 +21,13 @@ const stageLabel: Record<ScreeningStage, string> = {
   results: '结果入库',
 };
 
+const sessionStatusLabel: Record<ScreeningSession['status'], string> = {
+  upload: '等待导入',
+  extract: '内容提取',
+  screen: '筛选中',
+  complete: '已入库',
+};
+
 export const Screening: React.FC = () => {
   const [currentStage, setCurrentStage] = useState<ScreeningStage>('upload');
   const [sessionId, setSessionId] = useState('');
@@ -27,7 +40,29 @@ export const Screening: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const [importedPapers, setImportedPapers] = useState<Paper[]>([]);
+  const [recentSessions, setRecentSessions] = useState<ScreeningSession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [isAlreadyImported, setIsAlreadyImported] = useState(false);
   const { setPapers, setActiveFolderId } = useAppStore();
+
+  useEffect(() => {
+    let active = true;
+    void backend.listScreeningSessions()
+      .then((sessions) => {
+        if (active) {
+          setRecentSessions(sessions.filter((session) => session.totalPapers > 0).slice(0, 5));
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) {
+          setLoadingSessions(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     return backend.onExtractProgress((progress) => {
@@ -64,8 +99,38 @@ export const Screening: React.FC = () => {
     setExtractionProgress(null);
     setError(null);
     setImportedPapers([]);
+    setIsAlreadyImported(false);
     setIsBusy(false);
     setIsCancelling(false);
+  };
+
+  const resumeSession = async (session: ScreeningSession) => {
+    setIsBusy(true);
+    setError(null);
+    setImportedPapers([]);
+    try {
+      const nextDetail = await backend.getScreeningSession(session.id);
+      setSessionId(session.id);
+      setDetail(nextDetail);
+      setCurrentNode(nextDetail.currentNode);
+      setSelectedOptions([]);
+      setIsAlreadyImported(nextDetail.session.status === 'complete');
+
+      if (nextDetail.session.status === 'complete') {
+        setCurrentStage('results');
+      } else if (nextDetail.session.status === 'screen' && nextDetail.currentNode) {
+        setCurrentStage(nextDetail.currentNode.nodeType === 'complete' ? 'results' : 'screen');
+      } else if (nextDetail.session.status === 'extract') {
+        setExtractionProgress(await backend.getExtractProgress(session.id).catch(() => null));
+        setCurrentStage('extract');
+      } else {
+        setCurrentStage('upload');
+      }
+    } catch (cause) {
+      setError(errorToUserMessage(cause, '恢复筛选会话失败'));
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   const resolveInputPaths = async (files: File[]): Promise<string[]> => {
@@ -149,6 +214,7 @@ export const Screening: React.FC = () => {
     setIsBusy(true);
     setError(null);
     setImportedPapers([]);
+    setIsAlreadyImported(false);
 
     try {
       const session = await backend.createScreeningSession(`Screening ${new Date().toLocaleString()}`);
@@ -253,6 +319,7 @@ export const Screening: React.FC = () => {
     try {
       const imported = await backend.completeScreening(sessionId, '');
       setImportedPapers(imported);
+      setIsAlreadyImported(true);
 
       if (imported[0]?.folderId) {
         setActiveFolderId(imported[0].folderId);
@@ -373,6 +440,40 @@ export const Screening: React.FC = () => {
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {(loadingSessions || recentSessions.length > 0) && !sessionId && (
+        <div className="mt-6 border-t border-[var(--de-rule)] pt-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--de-ink)]">
+            <Clock3 className="h-4 w-4 text-[var(--de-accent)]" />
+            继续最近的筛选
+          </div>
+          {loadingSessions ? (
+            <p className="mt-3 text-xs text-[var(--de-ink-muted)]">正在读取本地会话...</p>
+          ) : (
+            <div className="mt-2 divide-y divide-[var(--de-rule)] border-y border-[var(--de-rule)]">
+              {recentSessions.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => void resumeSession(session)}
+                  disabled={isBusy}
+                  className="flex w-full items-center justify-between gap-4 px-1 py-3 text-left transition-colors hover:bg-[var(--de-surface-muted)] disabled:opacity-60"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-[var(--de-ink)]">{session.title}</span>
+                    <span className="mt-0.5 block text-xs text-[var(--de-ink-muted)]">
+                      {session.totalPapers} 篇 · {new Date(session.updatedAt).toLocaleString()}
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded-[var(--de-radius)] border border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-2 py-1 text-xs text-[var(--de-ink-muted)]">
+                    {sessionStatusLabel[session.status]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -534,6 +635,11 @@ export const Screening: React.FC = () => {
               已成功导入 {importedPapers.length} 篇论文到文库。
             </p>
           )}
+          {isAlreadyImported && importedPapers.length === 0 && (
+            <p className="mt-4 border border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-3 py-2 text-sm text-[var(--de-ink-muted)]">
+              该会话此前已完成入库。
+            </p>
+          )}
         </div>
       );
     }
@@ -600,7 +706,7 @@ export const Screening: React.FC = () => {
               保留 <span className="font-semibold text-[var(--de-accent)]">{resultPapers.length}</span> 篇论文
             </div>
             <div className="flex gap-2">
-              {currentStage === 'results' && importedPapers.length === 0 && (
+              {currentStage === 'results' && importedPapers.length === 0 && !isAlreadyImported && (
                 <button
                   onClick={() => void handleImport()}
                   disabled={isBusy || resultPapers.length === 0}
