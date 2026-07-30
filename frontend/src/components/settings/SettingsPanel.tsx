@@ -105,7 +105,7 @@ function SecretVisibilityButton({ visible, onToggle }: { visible: boolean; onTog
     <button
       type="button"
       onClick={onToggle}
-      className="rounded-xl border border-stone-200 px-3 py-2 text-sm text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+      className="de-button-secondary p-2 text-[var(--de-ink-muted)]"
       title={visible ? '隐藏内容' : '显示内容'}
     >
       {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -127,13 +127,13 @@ function LLMProfileSection({
   onProviderTypeChange: (providerType: 'openai_compatible' | 'anthropic') => void;
 }) {
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-800 dark:bg-stone-900/70">
+    <div className="de-panel p-4">
       <div className="flex items-start gap-3">
-        <Bot className="mt-0.5 h-5 w-5 text-emerald-600" />
+        <Bot className="mt-0.5 h-5 w-5 text-[var(--de-accent)]" />
         <div className="min-w-0 flex-1 space-y-4">
           <div>
             <p className="text-sm font-medium">{title}</p>
-            <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">{description}</p>
+            <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">{description}</p>
           </div>
 
           <div>
@@ -141,7 +141,7 @@ function LLMProfileSection({
             <select
               value={value.providerType}
               onChange={(event) => onProviderTypeChange(event.target.value as 'openai_compatible' | 'anthropic')}
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+              className="de-field w-full px-3 py-2 text-sm"
             >
               <option value="openai_compatible">OpenAI-compatible</option>
               <option value="anthropic">Anthropic Messages</option>
@@ -154,7 +154,7 @@ function LLMProfileSection({
               type="text"
               value={value.providerId}
               onChange={(event) => onChange({ providerId: event.target.value })}
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+              className="de-field w-full px-3 py-2 text-sm"
             />
           </div>
 
@@ -164,7 +164,7 @@ function LLMProfileSection({
               type="text"
               value={value.providerName}
               onChange={(event) => onChange({ providerName: event.target.value })}
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+              className="de-field w-full px-3 py-2 text-sm"
             />
           </div>
 
@@ -176,7 +176,7 @@ function LLMProfileSection({
                 type="text"
                 value={value.baseUrl}
                 onChange={(event) => onChange({ baseUrl: event.target.value })}
-                className="w-full rounded-xl border border-stone-200 bg-white py-2 pl-10 pr-3 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+                className="de-field w-full py-2 pl-10 pr-3 text-sm"
               />
             </div>
           </div>
@@ -186,7 +186,7 @@ function LLMProfileSection({
             <select
               value={value.wireApi}
               onChange={(event) => onChange({ wireApi: event.target.value as LLMConfig['wireApi'] })}
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+              className="de-field w-full px-3 py-2 text-sm"
             >
               {value.providerType === 'openai_compatible' ? (
                 <>
@@ -205,7 +205,7 @@ function LLMProfileSection({
               type="text"
               value={value.model}
               onChange={(event) => onChange({ model: event.target.value })}
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+              className="de-field w-full px-3 py-2 text-sm"
             />
           </div>
 
@@ -217,22 +217,22 @@ function LLMProfileSection({
                 value={value.reasoningEffort}
                 onChange={(event) => onChange({ reasoningEffort: event.target.value })}
                 placeholder="例如 low / medium / high / xhigh"
-                className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+                className="de-field w-full px-3 py-2 text-sm"
               />
             </div>
           )}
 
-          <div className="space-y-3 rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3 dark:border-stone-800 dark:bg-stone-950/60">
+          <div className="space-y-3 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-4 py-3">
             {value.providerType === 'openai_compatible' && (
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">OpenAI Bearer Auth</p>
-                  <p className="text-xs leading-5 text-stone-500 dark:text-stone-400">代理接口通常需要打开。</p>
+                  <p className="text-xs leading-5 text-[var(--de-ink-muted)]">代理接口通常需要打开。</p>
                 </div>
                 <Switch.Root
                   checked={value.requiresOpenAIAuth}
                   onCheckedChange={(checked) => onChange({ requiresOpenAIAuth: checked })}
-                  className="relative h-6 w-11 rounded-full bg-stone-300 transition data-[state=checked]:bg-emerald-600 dark:bg-stone-700"
+                  className="relative h-6 w-11 rounded-full bg-[var(--de-rule-strong)] transition data-[state=checked]:bg-[var(--de-accent)]"
                 >
                   <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-5" />
                 </Switch.Root>
@@ -242,12 +242,12 @@ function LLMProfileSection({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">禁用响应存储</p>
-                <p className="text-xs leading-5 text-stone-500 dark:text-stone-400">优先关闭三方平台的服务端持久化。</p>
+                <p className="text-xs leading-5 text-[var(--de-ink-muted)]">优先关闭三方平台的服务端持久化。</p>
               </div>
               <Switch.Root
                 checked={value.disableResponseStorage}
                 onCheckedChange={(checked) => onChange({ disableResponseStorage: checked })}
-                className="relative h-6 w-11 rounded-full bg-stone-300 transition data-[state=checked]:bg-emerald-600 dark:bg-stone-700"
+                className="relative h-6 w-11 rounded-full bg-[var(--de-rule-strong)] transition data-[state=checked]:bg-[var(--de-accent)]"
               >
                 <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-5" />
               </Switch.Root>
@@ -281,14 +281,14 @@ function SecretField({
   onClear: () => void;
 }) {
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-800 dark:bg-stone-900/70">
+    <div className="de-panel p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium">{title}</p>
-          <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">{description}</p>
+          <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">{description}</p>
         </div>
         {configured && (
-          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+          <span className="rounded-[var(--de-radius)] border border-[var(--de-accent)] bg-[var(--de-accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--de-accent)]">
             已配置
           </span>
         )}
@@ -302,13 +302,13 @@ function SecretField({
           autoComplete="off"
           spellCheck={false}
           placeholder={placeholder}
-          className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+          className="de-field min-w-0 flex-1 px-3 py-2 text-sm"
         />
         <SecretVisibilityButton visible={visible} onToggle={onToggleVisible} />
         <button
           type="button"
           onClick={onClear}
-          className="rounded-xl border border-stone-200 px-3 py-2 text-sm text-stone-600 transition hover:bg-white dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-900"
+          className="de-button-secondary p-2 text-[var(--de-danger)]"
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -461,14 +461,14 @@ export function SettingsPanel() {
               }
             />
 
-            <div className="border-y border-stone-200 py-4 dark:border-stone-800">
+            <div className="border-y border-[var(--de-rule)] py-4">
               <div className="flex items-start gap-3">
-                <Gauge className="mt-0.5 h-5 w-5 text-emerald-600" aria-hidden="true" />
+                <Gauge className="mt-0.5 h-5 w-5 text-[var(--de-accent)]" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                   <label className="block text-sm font-medium" htmlFor="daily-llm-budget">
                     每日 LLM token 上限
                   </label>
-                  <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">
+                  <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">
                     强模型与弱模型共享额度；达到上限后，新请求会在发送前停止。
                   </p>
                   <input
@@ -482,9 +482,9 @@ export function SettingsPanel() {
                         dailyLLMTokenBudget: Math.max(1, Number(event.target.value) || 1),
                       })
                     }
-                    className="mt-3 w-full border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+                    className="de-field mt-3 w-full px-3 py-2 text-sm"
                   />
-                  <div className="mt-2 flex justify-between gap-3 text-xs text-stone-500 dark:text-stone-400">
+                  <div className="mt-2 flex justify-between gap-3 text-xs text-[var(--de-ink-muted)]">
                     <span>今日已用 {llmUsage?.usedTokens.toLocaleString() ?? '读取中'}</span>
                     <span>剩余 {llmUsage?.remaining.toLocaleString() ?? '读取中'}</span>
                   </div>
@@ -502,31 +502,31 @@ export function SettingsPanel() {
               }
             />
 
-            <div className="rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-800 dark:bg-stone-900/70">
+            <div className="de-panel p-4">
               <div className="flex items-start gap-3">
-                <Search className="mt-0.5 h-5 w-5 text-emerald-600" />
+                <Search className="mt-0.5 h-5 w-5 text-[var(--de-accent)]" />
                 <div className="space-y-3">
                   <div>
                     <p className="text-sm font-medium">论文搜索方案</p>
-                    <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">
+                    <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">
                       搜索源与重试策略由 `config/app.yaml` 的 `search` 段控制；Semantic Scholar key 通过 `config/semantic_scholar.json` 管理，不会写入界面配置。
                     </p>
                   </div>
-                  <div className="rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-950/60 dark:text-stone-300">
+                  <div className="border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-4 py-3 text-sm leading-6 text-[var(--de-ink-muted)]">
                     现在的方案偏向“能直接搜索就先用”，而不是先堆配置；等搜索策略真正拆成可配置能力后，再单独加搜索源设置。
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-800 dark:bg-stone-900/70">
+            <div className="de-panel p-4">
               <div className="space-y-4">
-                <div className="flex items-center justify-between rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3 dark:border-stone-800 dark:bg-stone-950/60">
+                <div className="flex items-center justify-between border-b border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-4 py-3">
                   <span className="font-medium">深色模式</span>
                   <Switch.Root
                     checked={draftConfig.theme === 'dark'}
                     onCheckedChange={(checked) => updateDraft({ theme: checked ? 'dark' : 'light' })}
-                    className="relative h-6 w-11 rounded-full bg-stone-300 transition data-[state=checked]:bg-emerald-600 dark:bg-stone-700"
+                    className="relative h-6 w-11 rounded-full bg-[var(--de-rule-strong)] transition data-[state=checked]:bg-[var(--de-accent)]"
                   >
                     <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-5" />
                   </Switch.Root>
@@ -538,9 +538,9 @@ export function SettingsPanel() {
                     type="text"
                     value={draftConfig.dataPath}
                     onChange={(event) => updateDraft({ dataPath: event.target.value })}
-                    className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-emerald-500 dark:border-stone-700 dark:bg-stone-900"
+                    className="de-field w-full px-3 py-2 text-sm"
                   />
-                  <p className="mt-2 text-xs leading-6 text-stone-500 dark:text-stone-400">
+                  <p className="mt-2 text-xs leading-6 text-[var(--de-ink-muted)]">
                     修改后会写入配置文件；如果更换了数据目录，新的数据库路径将在下次启动时生效。
                   </p>
                 </div>
@@ -587,7 +587,7 @@ export function SettingsPanel() {
 
         {activeTab === 'cloud' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between rounded-2xl border border-stone-200 bg-white/70 px-4 py-3 dark:border-stone-800 dark:bg-stone-900/60">
+            <div className="de-panel flex items-center justify-between px-4 py-3">
               <span className="font-medium">启用百度网盘同步</span>
               <Switch.Root
                 checked={draftConfig.baiduCloud.enabled}
@@ -599,14 +599,14 @@ export function SettingsPanel() {
                     },
                   })
                 }
-                className="relative h-6 w-11 rounded-full bg-stone-300 transition data-[state=checked]:bg-emerald-600 dark:bg-stone-700"
+                className="relative h-6 w-11 rounded-full bg-[var(--de-rule-strong)] transition data-[state=checked]:bg-[var(--de-accent)]"
               >
                 <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-5" />
               </Switch.Root>
             </div>
 
             {draftConfig.baiduCloud.enabled && (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-100">
+              <div className="de-panel p-4 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="font-semibold">百度网盘凭据由 token 文件统一管理</p>
@@ -614,24 +614,24 @@ export function SettingsPanel() {
                       当前版本固定读取项目根目录的 <code>baiduyun_token.json</code>。该文件应同时包含 access_token、refresh_token、client_id 和 client_secret；设置页不再允许只保存单独的 access token，避免后续无法刷新。
                     </p>
                   </div>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                  <span className={`rounded-[var(--de-radius)] border px-2.5 py-1 text-xs font-medium ${
                     draftConfig.baiduCloud.hasToken
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/20 dark:text-emerald-100'
-                      : 'bg-amber-100 text-amber-700 dark:bg-amber-400/20 dark:text-amber-100'
+                      ? 'border-[var(--de-accent)] bg-[var(--de-accent-soft)] text-[var(--de-accent)]'
+                      : 'border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] text-[var(--de-warning)]'
                   }`}
                   >
                     {draftConfig.baiduCloud.hasToken ? 'Token file configured' : 'Token file missing'}
                   </span>
                 </div>
-                <div className="mt-3 rounded-xl border border-emerald-200/70 bg-white/70 px-3 py-2 text-xs leading-6 dark:border-emerald-400/30 dark:bg-slate-950/30">
+                <div className="mt-3 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-3 py-2 text-xs leading-6 text-[var(--de-ink-muted)]">
                   <div>Token 文件：baiduyun_token.json</div>
-                  <div>刷新 access token：请前往 Sync 页面点击 “Refresh Token”。</div>
+                  <div>刷新 access token：请前往同步页面点击“更新凭证”。</div>
                   <div>如果你更新了 token 文件，请重启 DiveEnd 或重新保存配置以刷新运行时同步管理器。</div>
                 </div>
               </div>
             )}
 
-            <div className="rounded-2xl border border-stone-200 bg-white/80 p-4 text-xs leading-6 text-stone-500 dark:border-stone-800 dark:bg-stone-900/70 dark:text-stone-400">
+            <div className="border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-4 text-xs leading-6 text-[var(--de-ink-muted)]">
               启用百度网盘同步后，可以在 Sync 页面查看真实同步状态、先执行同步预检、手动触发同步、刷新 access token，并分别配置启动同步、周期同步、退出前同步和冲突策略。
             </div>
           </div>
