@@ -328,6 +328,22 @@ func (a *App) preprocessDeepStartResults(
 			processed = append(processed, paper)
 			continue
 		}
+		if err := a.ensureManagedPDFServiceReady(ctx); err != nil {
+			if isDeepStartCancelledError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return processed, batch, err
+			}
+			batch.Failed++
+			batch.Completed++
+			paper.PreprocessStatus = "failed"
+			paper.ParseStatus = "failed"
+			paper.ExtractStatus = "skipped"
+			paper.ParseError = err.Error()
+			paper.ExtractError = "skip extract because PDF service did not become ready"
+			paper.ProcessingStage = "failed"
+			paper.ProcessingError = err.Error()
+			processed = append(processed, paper)
+			continue
+		}
 
 		a.emitDeepStartBatchProgress(
 			sessionID,

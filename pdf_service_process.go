@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -249,13 +250,51 @@ func (a *App) startManagedPDFService() {
 		log.Printf("PDF service auto-start unavailable: %v", err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), pdfServiceStartupTimeout+5*time.Second)
-	defer cancel()
-	if err := manager.EnsureRunning(ctx); err != nil {
-		log.Printf("PDF service auto-start failed: %v", err)
-		manager.Stop()
-		return
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.pdfServiceProcessMu.Lock()
 	a.pdfServiceProcess = manager
-	log.Printf("PDF service is ready")
+	a.pdfServiceStartCancel = cancel
+	a.pdfServiceStartWG.Add(1)
+	a.pdfServiceProcessMu.Unlock()
+
+	go func() {
+		defer a.pdfServiceStartWG.Done()
+		startupCtx, startupCancel := context.WithTimeout(ctx, pdfServiceStartupTimeout+5*time.Second)
+		defer startupCancel()
+		if err := manager.EnsureRunning(startupCtx); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Printf("PDF service auto-start failed: %v", err)
+			}
+			manager.Stop()
+			return
+		}
+		log.Printf("PDF service is ready")
+	}()
+}
+
+func (a *App) ensureManagedPDFServiceReady(ctx context.Context) error {
+	a.pdfServiceProcessMu.Lock()
+	manager := a.pdfServiceProcess
+	a.pdfServiceProcessMu.Unlock()
+	if manager == nil {
+		return nil
+	}
+	return manager.EnsureRunning(ctx)
+}
+
+func (a *App) stopManagedPDFService() {
+	a.pdfServiceProcessMu.Lock()
+	cancel := a.pdfServiceStartCancel
+	manager := a.pdfServiceProcess
+	a.pdfServiceStartCancel = nil
+	a.pdfServiceProcess = nil
+	a.pdfServiceProcessMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	a.pdfServiceStartWG.Wait()
+	if manager != nil {
+		manager.Stop()
+	}
 }

@@ -57,3 +57,29 @@ func TestDailyTokenBudgetSettlesRequestThatCrossesDateBoundary(t *testing.T) {
 		t.Fatalf("expected new-day usage without subtracting old reservation, got %+v", snapshot)
 	}
 }
+
+func TestEstimateTextTokensTreatsNonASCIIConservatively(t *testing.T) {
+	if got := estimateTextTokens("论文检索"); got < 4 {
+		t.Fatalf("expected at least one token per non-ASCII rune, got %d", got)
+	}
+}
+
+func TestPDFExtractionSharesDailyTokenBudget(t *testing.T) {
+	app := NewApp()
+	app.llmTokenBudget = newDailyTokenBudget(t.TempDir(), 100_000)
+
+	reservation, err := app.reservePDFExtractionBudget(
+		strings.Repeat("paper ", 100),
+		PDFExtractionLLMConfig{Provider: "openai", Model: "test", APIKey: "key", MaxTokens: 100},
+	)
+	if err != nil {
+		t.Fatalf("reserve PDF extraction budget: %v", err)
+	}
+	if snapshot := app.llmTokenBudget.Snapshot(); snapshot.UsedTokens <= 200 {
+		t.Fatalf("expected input and two output reservations, got %+v", snapshot)
+	}
+	reservation.Finish(50)
+	if snapshot := app.llmTokenBudget.Snapshot(); snapshot.UsedTokens != 50 {
+		t.Fatalf("expected provider usage settlement, got %+v", snapshot)
+	}
+}

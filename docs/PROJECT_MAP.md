@@ -133,6 +133,8 @@ Backend files:
 - `deepread_pdf_paths.go`
 - `deepread_asset_server.go`
 - `pdf_service_client.go`
+- `pdf_service_process.go`
+- `pdf_extraction_real_e2e_test.go` (opt-in managed service + provider usage)
 - `local_file_actions.go`
 - `paper_import_assets.go`
 - `secure_file.go`
@@ -316,6 +318,7 @@ Use this table to pick tests for a change:
 | DeepStart | `go test ./... -run 'Test(AppDeepStart|SearchClient|PreprocessDeepStart|DeepStartEnricher)'` |
 | Real retrieval | `DIVEEND_REAL_SEARCH_E2E=1 go test ./... -run TestRealDeepStartRetrievalE2E -v` |
 | Real LLM budget | `DIVEEND_REAL_LLM_E2E=1 go test ./... -run TestRealStrongAndWeakLLMBudgetE2E -v` |
+| Real PDF extraction budget | `DIVEEND_REAL_PDF_EXTRACTION_E2E=1 DIVEEND_REAL_PDF_PATH=/absolute/paper.pdf go test ./... -run TestRealPDFExtractionBudgetE2E -v` |
 | DeepRead/PDF | `go test ./... -run 'Test(DeepRead|PDFServiceClient|AttachLocalPDF|DownloadPDF)'` |
 | Screening | `go test ./... -run 'Test(AppScreening|UploadScreening|CancelScreening)'` |
 | Library moves/deletes | `go test ./... -run 'Test(MovePaper|MovePapers|DeletePaper|Folder)'` |

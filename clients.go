@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 	"unicode"
-	"unicode/utf8"
 )
 
 type llmService interface {
@@ -918,11 +917,20 @@ func (c *LLMClient) reserveTokenBudget(messages []llmMessage, maxOutputTokens in
 }
 
 func estimateTextTokens(text string) int64 {
-	runes := utf8.RuneCountInString(strings.TrimSpace(text))
-	if runes == 0 {
+	text = strings.TrimSpace(text)
+	if text == "" {
 		return 0
 	}
-	return int64((runes + 3) / 4)
+	var asciiRunes int64
+	var nonASCIIRunes int64
+	for _, value := range text {
+		if value <= unicode.MaxASCII {
+			asciiRunes++
+		} else {
+			nonASCIIRunes++
+		}
+	}
+	return (asciiRunes+3)/4 + nonASCIIRunes
 }
 
 func messagesToPrompt(messages []llmMessage) string {

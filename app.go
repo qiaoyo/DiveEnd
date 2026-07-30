@@ -19,38 +19,41 @@ type runtimeEventEmitter func(context.Context, string, ...interface{})
 
 // App struct - Main Wails application
 type App struct {
-	ctx                  context.Context
-	config               AppConfig
-	db                   *DB
-	llm                  llmService // legacy alias for strong llm
-	strongLLM            llmService
-	weakLLM              weakLLMService
-	llmTokenBudget       *dailyTokenBudget
-	search               paperSearchService
-	deepStartEnricher    deepStartEnricher
-	pdfService           *PDFServiceClient
-	pdfServiceProcess    *managedPDFService
-	syncManager          *SyncManager
-	stateMu              sync.RWMutex
-	extractProgress      map[string]*ExtractProgress
-	downloadQueue        chan paperDownloadJob
-	downloadCancel       context.CancelFunc
-	downloadWG           sync.WaitGroup
-	downloadMu           sync.Mutex
-	deepStartTaskMu      sync.Mutex
-	deepStartTasks       map[string]deepStartTaskHandle
-	pdfResourceMu        sync.Mutex
-	pdfResources         map[string]deepReadPDFResource
-	closeMu              sync.Mutex
-	closeBypass          bool
-	closeSyncing         bool
-	periodicSyncLifeMu   sync.Mutex
-	periodicSyncMu       sync.Mutex
-	periodicSyncCancel   context.CancelFunc
-	periodicSyncWG       sync.WaitGroup
-	periodicSyncInterval time.Duration
-	emitRuntimeEvent     runtimeEventEmitter
-	pendingRestartConfig *AppConfig
+	ctx                   context.Context
+	config                AppConfig
+	db                    *DB
+	llm                   llmService // legacy alias for strong llm
+	strongLLM             llmService
+	weakLLM               weakLLMService
+	llmTokenBudget        *dailyTokenBudget
+	search                paperSearchService
+	deepStartEnricher     deepStartEnricher
+	pdfService            *PDFServiceClient
+	pdfServiceProcess     *managedPDFService
+	pdfServiceProcessMu   sync.Mutex
+	pdfServiceStartCancel context.CancelFunc
+	pdfServiceStartWG     sync.WaitGroup
+	syncManager           *SyncManager
+	stateMu               sync.RWMutex
+	extractProgress       map[string]*ExtractProgress
+	downloadQueue         chan paperDownloadJob
+	downloadCancel        context.CancelFunc
+	downloadWG            sync.WaitGroup
+	downloadMu            sync.Mutex
+	deepStartTaskMu       sync.Mutex
+	deepStartTasks        map[string]deepStartTaskHandle
+	pdfResourceMu         sync.Mutex
+	pdfResources          map[string]deepReadPDFResource
+	closeMu               sync.Mutex
+	closeBypass           bool
+	closeSyncing          bool
+	periodicSyncLifeMu    sync.Mutex
+	periodicSyncMu        sync.Mutex
+	periodicSyncCancel    context.CancelFunc
+	periodicSyncWG        sync.WaitGroup
+	periodicSyncInterval  time.Duration
+	emitRuntimeEvent      runtimeEventEmitter
+	pendingRestartConfig  *AppConfig
 }
 
 // NewApp creates a new App application struct
@@ -97,10 +100,7 @@ func (a *App) shutdown(ctx context.Context) {
 	a.stopPeriodicSyncLoop()
 	a.cancelAllDeepStartTasks()
 	a.stopDownloadWorkers()
-	if a.pdfServiceProcess != nil {
-		a.pdfServiceProcess.Stop()
-		a.pdfServiceProcess = nil
-	}
+	a.stopManagedPDFService()
 	a.closeMu.Lock()
 	skipShutdownSync := a.closeBypass
 	a.closeMu.Unlock()

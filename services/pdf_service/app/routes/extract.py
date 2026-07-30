@@ -85,6 +85,7 @@ class ExtractionResponse(BaseModel):
     error: Optional[str] = Field(None, description="Error message if failed")
     provider: str = Field(description="LLM provider used")
     model: str = Field(description="LLM model used")
+    usage: dict[str, int] = Field(default_factory=dict, description="Aggregated provider token usage")
 
 
 # Extraction prompts
@@ -236,6 +237,7 @@ async def extract_data(request: ExtractionRequest):
             baselines=baselines,
             relevance_tags=relevance_tags,
         )
+        usage = getattr(llm_client, "usage", None)
 
         return ExtractionResponse(
             success=True,
@@ -243,6 +245,11 @@ async def extract_data(request: ExtractionRequest):
             error=None,
             provider=request.provider,
             model=llm_config.model,
+            usage={
+                "input_tokens": getattr(usage, "input_tokens", 0),
+                "output_tokens": getattr(usage, "output_tokens", 0),
+                "total_tokens": getattr(usage, "total_tokens", 0),
+            },
         )
 
     except Exception as e:
@@ -253,4 +260,5 @@ async def extract_data(request: ExtractionRequest):
             error=public_extraction_error(e),
             provider=redact_sensitive_text(request.provider),
             model="unknown",
+            usage={},
         )

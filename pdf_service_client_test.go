@@ -74,6 +74,11 @@ func TestPDFServiceClientParseAndExtractContracts(t *testing.T) {
 				},
 				Provider: "openai",
 				Model:    "gpt-4o-mini",
+				Usage: PDFTokenUsage{
+					InputTokens:  120,
+					OutputTokens: 30,
+					TotalTokens:  150,
+				},
 			})
 
 		default:
@@ -108,6 +113,9 @@ func TestPDFServiceClientParseAndExtractContracts(t *testing.T) {
 	}
 	if extractResult.Data == nil || extractResult.Data.Metadata.Title != "Example" {
 		t.Fatalf("unexpected extract result: %+v", extractResult)
+	}
+	if extractResult.Usage.TotalTokens != 150 {
+		t.Fatalf("expected extraction token usage, got %+v", extractResult.Usage)
 	}
 }
 

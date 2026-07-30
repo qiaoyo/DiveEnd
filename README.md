@@ -17,7 +17,7 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 - **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；强模型可基于已解析章节回答问题、总结全文，并返回可跳转的论文依据和局限。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
 - **Sync**：百度云同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB。
 - **Library**：右侧论文库支持文件夹树、创建、删除、重命名、移动、单篇移动、批量移动，并同步维护 managed PDF 路径和 DeepRead cache。
-- **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、每日共享 LLM token 硬预算与本地计量、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
+- **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、覆盖 Go 与 Python 抽取链路的每日共享 LLM token 硬预算、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
 - **当前信息架构**：一级任务收敛为“发现 / 阅读 / 分析”，研究记录、同步和设置作为工具入口；检索页不再展示伪造预览数据，阅读页默认提供可收起论文库的专注三栏工作区。
 
 ## 架构
@@ -211,6 +211,7 @@ Passed:
 - Real strong and weak LLM chat-completion probes.
 - Opt-in strong/weak LLM budget E2E (`DIVEEND_REAL_LLM_E2E=1`) verifies provider usage accounting and restart persistence.
 - Opt-in retrieval E2E (`DIVEEND_REAL_SEARCH_E2E=1`) verifies all rewritten queries, permanent Semantic Scholar failure degradation, arXiv results, and top-five topic relevance.
+- Opt-in PDF extraction E2E (`DIVEEND_REAL_PDF_EXTRACTION_E2E=1`) verifies managed service startup, real parsing/extraction, provider usage reporting, and exact shared-budget settlement.
 - Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
 - Packaged Wails desktop flow through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, and managed PDF-service shutdown.
 

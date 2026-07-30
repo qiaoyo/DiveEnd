@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -121,6 +122,9 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 	if a.pdfService == nil {
 		return nil, fmt.Errorf("pdf service client is not initialized")
 	}
+	if err := a.ensureManagedPDFServiceReady(a.ctx); err != nil {
+		return nil, fmt.Errorf("pdf service is not ready: %w", err)
+	}
 
 	detail, err := a.db.GetScreeningSessionDetail(sessionID)
 	if err != nil {
@@ -178,8 +182,13 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 			continue
 		}
 
+		reservation, err := a.reservePDFExtractionBudget(parseResult.Markdown, extractionLLMConfig)
+		if err != nil {
+			return nil, err
+		}
 		extractResult, err := a.pdfService.ExtractContentWithContext(a.ctx, parseResult.Markdown, extractionLLMConfig)
 		if err != nil {
+			reservation.Finish(0)
 			failedCount++
 			if firstErr == nil {
 				firstErr = err
@@ -192,6 +201,11 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 			}
 			continue
 		}
+		actualTokens := extractResult.Usage.TotalTokens
+		if actualTokens <= 0 {
+			actualTokens = extractResult.Usage.InputTokens + extractResult.Usage.OutputTokens
+		}
+		reservation.Finish(actualTokens)
 
 		contentJSON, err := buildStoredScreeningContent(parseResult, extractResult)
 		if err != nil {
@@ -240,6 +254,34 @@ func (a *App) ExtractPaperContent(sessionID string) (*ExtractProgress, error) {
 	progress.CurrentFile = ""
 	a.storeExtractProgress(progress)
 	return cloneExtractProgress(progress), nil
+}
+
+func (a *App) reservePDFExtractionBudget(markdown string, config PDFExtractionLLMConfig) (*tokenReservation, error) {
+	config = normalizePDFExtractionLLMConfig(config)
+	if err := validatePDFExtractionLLMConfig(config); err != nil {
+		return &tokenReservation{}, nil
+	}
+	if a.llmTokenBudget == nil {
+		return &tokenReservation{}, nil
+	}
+	firstInput := truncateRunes(markdown, 15000)
+	secondInput := truncateRunes(markdown, 20000)
+	maxOutput := int64(config.MaxTokens) * 2
+	return a.llmTokenBudget.Reserve([]llmMessage{
+		{Role: "user", Content: firstInput},
+		{Role: "user", Content: secondInput},
+	}, maxOutput)
+}
+
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:limit])
 }
 
 func (a *App) GetExtractProgress(sessionID string) (*ExtractProgress, error) {

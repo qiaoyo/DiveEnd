@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 )
 
 const defaultDailyLLMTokenBudget int64 = 100_000_000
@@ -180,12 +178,9 @@ func localUsageDate(now time.Time) string {
 }
 
 func estimateMessageTokens(messages []llmMessage) int64 {
-	var runes int
+	var tokens int64
 	for _, message := range messages {
-		runes += utf8.RuneCountInString(strings.TrimSpace(message.Content)) + 8
+		tokens += estimateTextTokens(message.Content) + 2
 	}
-	if runes == 0 {
-		return 0
-	}
-	return int64((runes + 3) / 4)
+	return tokens
 }

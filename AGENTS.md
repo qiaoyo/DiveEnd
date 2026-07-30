@@ -24,11 +24,11 @@ Phase 1-6 feature skeletons are implemented and wired to real backend paths. The
 
 Implemented:
 
-- Config persistence, secret merging, local seed loading, redacted display values, and a shared persistent daily LLM token budget (default 100,000,000).
+- Config persistence, secret merging, local seed loading, redacted display values, and a shared persistent daily LLM token budget (default 100,000,000) covering both Go calls and Python Screening extraction.
 - SQLite migrations for folders, papers, translations, DeepStart, DeepRead, Screening, Sync records, and conflicts.
 - DeepStart search over Semantic Scholar and arXiv, all-query retrieval across up to three rewrites, relevance/recency ranking, focused default retrieval of about 20 candidates, eager PDF/weak-model preprocessing for the top 4, on-demand handling for the rest, user-triggered supplemental expansion, enrichment, AI analysis, progress events, cancellation.
 - DeepRead paper state, PDF parsing cache, notes, translation history, grounded AI question/summary responses with section evidence, Wails asset-server PDF URL, bounded base64 fallback.
-- Screening sessions, managed PDF upload storage, extraction progress, LLM decision tree, final import.
+- Screening sessions, managed PDF upload storage, extraction progress, provider token usage reporting, shared-budget settlement, LLM decision tree, final import.
 - Library folder tree, folder create/delete/rename/move, paper delete, single-paper move, batch move, managed PDF/cache path maintenance.
 - Baidu sync preview, background manual sync, startup sync, periodic sync, exit sync prompt, conflict detection, conflict resolution, database restore staging/apply/cancel.
 - Security hardening around local secret files, symlink/path traversal, PDF validation, SSRF, atomic file writes, bounded HTTP reads, and user-visible error redaction.

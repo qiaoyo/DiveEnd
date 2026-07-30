@@ -331,6 +331,11 @@ def test_extract_route_returns_expected_schema():
     assert payload["data"]["metrics"][0]["metric_name"] == "Accuracy"
     assert payload["data"]["baselines"][0]["method_name"] == "Baseline"
     assert payload["data"]["relevance_tags"] == ["screening", "pdf-service"]
+    assert payload["usage"] == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
 
 
 def test_extract_route_tolerates_llm_json_wrappers_and_trailing_text():

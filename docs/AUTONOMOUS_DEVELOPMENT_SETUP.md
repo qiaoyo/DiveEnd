@@ -16,7 +16,7 @@
 - 功能设计 `F1-F8` 全部接受。
 - 界面设计 `U1-U8` 全部接受。
 - 允许 agent 自动创建分支、commit、push、创建 PR、启动本地服务并使用本地凭证执行受控真实 E2E。
-- API 授权上限为每天 1 亿 token。强弱模型共享持久化的每日计数器，请求前预留额度、请求后按 provider usage 结算；provider 不返回 usage 时采用保守估算。达到上限后后端会在发送请求前停止。
+- API 授权上限为每天 1 亿 token。强弱模型及 Python Screening 抽取共享持久化的每日计数器，请求前预留额度、请求后按 provider usage 结算；provider 不返回 usage 或请求失败时采用保守估算。达到上限后后端会在发送请求前停止。
 - 不考虑向其他 Mac 用户分发，暂不申请 Apple Developer Program，也不开展签名和 notarization。
 - 合并正式分支、公开发布、Git 历史重写、超预算付费和真实云数据破坏性操作仍保留人工闸门。
 
@@ -39,6 +39,7 @@
 - F6 已落地为默认约 20 篇候选；只对排名最前的 4 篇执行 PDF 预取、解析和弱模型结构抽取，其余候选在选择、导入或阅读时按需处理。
 - 重写后的最多 3 个检索 query 会全部执行，再按原始问题和扩展词的标题/摘要匹配度统一排序，不再由第一个填满上限的 query 独占结果。
 - 强弱模型共享每日 1 亿 token 硬预算；当日使用量保存到数据目录 `.diveend/llm_usage.json`，设置页可查看使用量并调整上限。
+- Python PDF 服务会汇总两次结构抽取的 provider usage 并返回 Go 后端，Screening 不再绕过共享预算。
 - Semantic Scholar 的 `403` 被视为永久性来源错误，首轮即停止该来源；arXiv 部分结果继续完成研究地图，不再等待几十次无效重试。
 
 ## 一、LLM Agent 可以自动化完成

@@ -132,6 +132,13 @@ type PDFExtractResponse struct {
 	Error    string          `json:"error"`
 	Provider string          `json:"provider"`
 	Model    string          `json:"model"`
+	Usage    PDFTokenUsage   `json:"usage"`
+}
+
+type PDFTokenUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	TotalTokens  int64 `json:"total_tokens"`
 }
 
 type PDFExtractionLLMConfig struct {

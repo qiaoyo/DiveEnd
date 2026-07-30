@@ -47,6 +47,23 @@ class LLMConfig:
             raise ValueError(f"API key not found for provider: {self.provider}")
 
 
+@dataclass
+class LLMUsage:
+    """Aggregated provider-reported token usage."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+    def add(self, input_tokens: int, output_tokens: int, total_tokens: int = 0) -> None:
+        input_tokens = max(0, int(input_tokens or 0))
+        output_tokens = max(0, int(output_tokens or 0))
+        total_tokens = max(0, int(total_tokens or 0)) or input_tokens + output_tokens
+        self.input_tokens += input_tokens
+        self.output_tokens += output_tokens
+        self.total_tokens += total_tokens
+
+
 class LLMClient:
     """Client for LLM API calls."""
 
@@ -58,6 +75,7 @@ class LLMClient:
         """
         self.config = config
         self._client = None
+        self.usage = LLMUsage()
 
         if config.provider == "openai":
             self._client = openai.AsyncOpenAI(
@@ -95,6 +113,13 @@ class LLMClient:
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
                 )
+                usage = getattr(response, "usage", None)
+                if usage is not None:
+                    self.usage.add(
+                        getattr(usage, "prompt_tokens", 0),
+                        getattr(usage, "completion_tokens", 0),
+                        getattr(usage, "total_tokens", 0),
+                    )
                 return response.choices[0].message.content
 
             elif self.config.provider == "anthropic":
@@ -107,6 +132,12 @@ class LLMClient:
                         {"role": "user", "content": user_prompt},
                     ],
                 )
+                usage = getattr(response, "usage", None)
+                if usage is not None:
+                    self.usage.add(
+                        getattr(usage, "input_tokens", 0),
+                        getattr(usage, "output_tokens", 0),
+                    )
                 return response.content[0].text
 
             else:
