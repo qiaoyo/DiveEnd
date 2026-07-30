@@ -408,4 +408,59 @@ describe('Screening page', () => {
     expect(backendMocks.analyzePapers).not.toHaveBeenCalled();
     expect(backendMocks.createScreeningSession).not.toHaveBeenCalled();
   });
+
+  it('does not offer a second import for a completed screening session', async () => {
+    backendMocks.listScreeningSessions.mockResolvedValueOnce([
+      {
+        id: 'session-complete',
+        title: 'Imported papers',
+        status: 'complete',
+        totalPapers: 1,
+        createdAt: '2026-07-30T10:00:00Z',
+        updatedAt: '2026-07-30T11:00:00Z',
+      },
+    ]);
+    backendMocks.getScreeningSession.mockReset();
+    backendMocks.getScreeningSession.mockResolvedValueOnce({
+      session: {
+        id: 'session-complete',
+        title: 'Imported papers',
+        status: 'complete',
+        totalPapers: 1,
+        createdAt: '2026-07-30T10:00:00Z',
+        updatedAt: '2026-07-30T11:00:00Z',
+      },
+      papers: [
+        {
+          id: 'paper-imported',
+          sessionId: 'session-complete',
+          fileName: 'imported.pdf',
+          filePath: '/tmp/imported.pdf',
+          fileSize: 100,
+          status: 'selected',
+          title: 'Imported Paper',
+          createdAt: '2026-07-30T10:00:00Z',
+          updatedAt: '2026-07-30T11:00:00Z',
+        },
+      ],
+      currentNode: {
+        id: 'node-complete',
+        nodeType: 'complete',
+        message: '筛选已完成',
+        dimension: '结果确认',
+        options: [],
+        allowMultiSelect: false,
+        allowSkip: false,
+        remainingPaperIds: ['paper-imported'],
+      },
+      pathHistory: [],
+    });
+
+    render(<Screening />);
+    fireEvent.click(await screen.findByRole('button', { name: /Imported papers/ }));
+
+    expect(await screen.findByText('该会话此前已完成入库。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '导入到文库' })).not.toBeInTheDocument();
+    expect(backendMocks.completeScreening).not.toHaveBeenCalled();
+  });
 });
