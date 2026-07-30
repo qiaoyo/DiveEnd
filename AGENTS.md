@@ -30,7 +30,7 @@ Implemented:
 - DeepRead paper state, PDF parsing cache, notes, translation history, weak-model low-latency questions, strong-model summaries, relevance-aware long-paper context, verbatim-grounded section evidence, cancellable AI requests, Wails asset-server PDF URL, bounded base64 fallback.
 - Screening sessions, recent-session resume without automatic model reruns, managed PDF upload storage, extraction progress, session-scoped cancellation across extraction and AI decisions, provider token usage reporting, shared-budget settlement, atomic node/path/paper decision persistence, LLM decision tree, final import.
 - Library folder tree, folder create/delete/rename/move, paper delete, single-paper move, batch move, managed PDF/cache path maintenance.
-- Baidu sync preview, background manual sync, startup sync, periodic sync, exit sync prompt, conflict detection, conflict resolution, database restore staging/apply/cancel.
+- Baidu sync preview, background manual sync, startup sync, periodic sync, exit sync prompt, conflict detection, conflict resolution, database restore staging/apply/cancel, and explicit partial-probe failure reporting without discarding available state.
 - Security hardening around local secret files, symlink/path traversal, PDF validation, SSRF, atomic file writes, bounded HTTP reads, and user-visible error redaction.
 - Frontend route/page tests, Go regression tests, Python PDF route tests, browser smoke script.
 - Frontend primary navigation is organized around discovery, reading, and analysis; workspace routes are lazy-loaded, DeepStart/DeepRead/Screening/Sync use the shared restrained research-tool tokens, and the browser fallback and desktop bridge share the same backend wrapper contract.

@@ -395,4 +395,15 @@ describe('Sync page', () => {
 
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps partial sync data visible while naming failed status probes', async () => {
+    backendMocks.getSyncStatus.mockRejectedValueOnce(new Error('cloud status unavailable'));
+    backendMocks.getSyncConflicts.mockRejectedValueOnce(new Error('conflicts unavailable'));
+
+    render(<Sync />);
+
+    expect(await screen.findByText('本地数据')).toBeInTheDocument();
+    expect(screen.getByText('自动同步设置')).toBeInTheDocument();
+    expect(screen.getByText('部分同步状态读取失败：连接状态、冲突列表。请检查连接后刷新。')).toBeInTheDocument();
+  });
 });

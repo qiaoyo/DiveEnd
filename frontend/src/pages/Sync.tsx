@@ -128,7 +128,7 @@ export const Sync: React.FC = () => {
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  const loadSyncState = async () => {
+  const loadSyncState = async (): Promise<string[]> => {
     const [status, progress, conflicts, records, settings, restore] = await Promise.allSettled([
       backend.getSyncStatus(),
       backend.getSyncProgress(),
@@ -145,7 +145,14 @@ export const Sync: React.FC = () => {
     if (settings.status === 'fulfilled') setSyncSettings(settings.value);
     if (restore.status === 'fulfilled') setDatabaseRestore(restore.value);
 
-    // Keep the dashboard usable even when one cloud-side probe fails.
+    return [
+      status.status === 'rejected' ? '连接状态' : '',
+      progress.status === 'rejected' ? '同步进度' : '',
+      conflicts.status === 'rejected' ? '冲突列表' : '',
+      records.status === 'rejected' ? '同步记录' : '',
+      settings.status === 'rejected' ? '自动同步设置' : '',
+      restore.status === 'rejected' ? '数据库恢复状态' : '',
+    ].filter(Boolean);
   };
 
   useEffect(() => {
@@ -155,7 +162,10 @@ export const Sync: React.FC = () => {
       setIsLoading(true);
       setError(null);
       try {
-        await loadSyncState();
+        const failedProbes = await loadSyncState();
+        if (!cancelled && failedProbes.length > 0) {
+          setError(`部分同步状态读取失败：${failedProbes.join('、')}。请检查连接后刷新。`);
+        }
       } catch (cause) {
         if (!cancelled) {
           setError(errorToUserMessage(cause, '加载同步状态失败'));
@@ -212,7 +222,10 @@ export const Sync: React.FC = () => {
     setIsRefreshing(true);
     setError(null);
     try {
-      await loadSyncState();
+      const failedProbes = await loadSyncState();
+      if (failedProbes.length > 0) {
+        setError(`部分同步状态读取失败：${failedProbes.join('、')}。请检查连接后刷新。`);
+      }
     } catch (cause) {
       setError(errorToUserMessage(cause, '刷新同步状态失败'));
     } finally {
