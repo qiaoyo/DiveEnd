@@ -213,10 +213,12 @@ Passed:
 - Opt-in retrieval E2E (`DIVEEND_REAL_SEARCH_E2E=1`) verifies all rewritten queries, permanent Semantic Scholar failure degradation, arXiv results, and top-five topic relevance.
 - Opt-in PDF extraction E2E (`DIVEEND_REAL_PDF_EXTRACTION_E2E=1`) verifies managed service startup, real parsing/extraction, provider usage reporting, and exact shared-budget settlement.
 - Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
-- Packaged Wails desktop flow through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, and managed PDF-service shutdown.
+- Browser and real-backend E2E through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, Screening decisions, and sync workflows.
+- Packaged Wails build and managed PDF-service startup/shutdown lifecycle. Direct packaged-window click and Wails event-delivery verification remains pending because the macOS session was locked during the 2026-07-30 run.
 
 Notes:
 
 - `npm audit --omit=dev` reports the React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses a client-only `HashRouter` and does not use RSC; the currently published `react-router-dom` line has no version that clears this advisory without a React 19/Router 8 migration. Keep this scoped exception under review.
 - The configured Semantic Scholar key returned `403 Forbidden`; arXiv fallback and permanent-error fast failure were verified.
+- Computer Use could not inspect the packaged window while macOS was locked; do not infer packaged UI event verification from browser smoke coverage.
 - Workspace pages now load by route: the common entry bundle is about 236 KiB before gzip, while the roughly 407 KiB PDF reader chunk loads only when DeepRead is opened.

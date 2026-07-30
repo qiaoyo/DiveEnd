@@ -150,7 +150,7 @@ python -m pytest services/pdf_service/tests
 bash scripts/secret_scan.sh
 ```
 
-Last full run on 2026-07-30: passed. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
+Last full run on 2026-07-30: Go test/vet/race, 68 frontend tests at that checkpoint, 18 PDF service tests, frontend build, Wails build, and secret scan passed. Two later focused frontend regressions bring the current suite to 70 tests. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
 
 Known audit exception: `npm audit --omit=dev` reports a React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses client-only `HashRouter`, not RSC. The published `react-router-dom` line currently has no clean upgrade path without a React 19/Router 8 migration; do not describe the production audit as zero-vulnerability until this is resolved upstream or migrated.
 
