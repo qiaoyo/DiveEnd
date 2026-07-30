@@ -5,8 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,6 +152,17 @@ func (a *App) PrepareDeepReadPaper(paperID string) (*DeepReadState, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := a.ensureManagedPDFServiceReady(ctx); err != nil {
+		_ = a.db.UpsertDeepReadParseCache(&DeepReadParseCache{
+			PaperID:        paperID,
+			PDFPath:        pdfPath,
+			Status:         "failed",
+			ErrorMessage:   err.Error(),
+			Sections:       []DeepReadSection{},
+			LastPreparedAt: time.Now(),
+		})
+		return a.GetDeepReadState(paperID)
+	}
 	parseResult, err := a.pdfService.ParsePDFWithContext(ctx, pdfPath)
 	if err != nil {
 		_ = a.db.UpsertDeepReadParseCache(&DeepReadParseCache{
@@ -258,23 +271,56 @@ func (a *App) AskDeepReadPaper(paperID, sectionID, question, mode string) (*Deep
 		return nil, fmt.Errorf("paper content is not ready; prepare the PDF before using the AI reading assistant")
 	}
 
-	assistant, ok := a.currentStrongLLM().(deepReadAssistant)
-	if !ok || assistant == nil {
-		return nil, fmt.Errorf("strong LLM does not support the DeepRead assistant")
+	assistant := a.deepReadAssistantForMode(mode)
+	if assistant == nil {
+		return nil, fmt.Errorf("configured LLMs do not support the DeepRead assistant")
 	}
-	contextText := buildDeepReadAIContext(state.Sections, sectionID, deepReadAIContextMaxRunes)
+	contextText := buildDeepReadAIContextForTask(
+		state.Sections,
+		sectionID,
+		question,
+		mode,
+		deepReadAIContextMaxRunes,
+	)
 	if strings.TrimSpace(contextText) == "" {
 		return nil, fmt.Errorf("paper context is empty")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
+	ctx, token := a.beginDeepReadAI()
+	defer a.finishDeepReadAI(token)
+	response, err := assistant.AnswerDeepReadWithContext(ctx, paper.Title, mode, question, contextText)
+	if errors.Is(err, context.Canceled) {
+		return nil, errDeepReadAICancelled
 	}
-	return assistant.AnswerDeepReadWithContext(ctx, paper.Title, mode, question, contextText)
+	return response, err
+}
+
+func (a *App) deepReadAssistantForMode(mode string) deepReadAssistant {
+	if strings.EqualFold(strings.TrimSpace(mode), "question") {
+		if weak, ok := a.currentWeakLLM().(deepReadAssistant); ok && weak != nil {
+			return weak
+		}
+	}
+	if strong, ok := a.currentStrongLLM().(deepReadAssistant); ok && strong != nil {
+		return strong
+	}
+	if weak, ok := a.currentWeakLLM().(deepReadAssistant); ok && weak != nil {
+		return weak
+	}
+	return nil
 }
 
 func buildDeepReadAIContext(sections []DeepReadSection, selectedSectionID string, maxRunes int) string {
+	return buildDeepReadAIContextForTask(sections, selectedSectionID, "", "", maxRunes)
+}
+
+func buildDeepReadAIContextForTask(
+	sections []DeepReadSection,
+	selectedSectionID string,
+	question string,
+	mode string,
+	maxRunes int,
+) string {
 	if maxRunes <= 0 {
 		return ""
 	}
@@ -307,6 +353,31 @@ func buildDeepReadAIContext(sections []DeepReadSection, selectedSectionID string
 			}
 		}
 	}
+	if strings.EqualFold(strings.TrimSpace(mode), "question") && strings.TrimSpace(question) != "" {
+		type scoredSection struct {
+			section DeepReadSection
+			score   int
+		}
+		terms := deepReadQuestionTerms(question)
+		scored := make([]scoredSection, 0, len(sections))
+		for _, section := range sections {
+			if score := deepReadSectionRelevance(section, terms); score > 0 {
+				scored = append(scored, scoredSection{section: section, score: score})
+			}
+		}
+		sort.SliceStable(scored, func(i, j int) bool {
+			if scored[i].score != scored[j].score {
+				return scored[i].score > scored[j].score
+			}
+			return scored[i].section.Index < scored[j].section.Index
+		})
+		for index, item := range scored {
+			if index >= 6 {
+				break
+			}
+			appendSection(item.section)
+		}
+	}
 	for _, term := range priorityTerms {
 		for _, section := range sections {
 			if strings.Contains(strings.ToLower(section.Title), term) {
@@ -317,16 +388,29 @@ func buildDeepReadAIContext(sections []DeepReadSection, selectedSectionID string
 	for _, section := range sections {
 		appendSection(section)
 	}
+	if len(ordered) > 16 {
+		ordered = ordered[:16]
+	}
 
 	var builder strings.Builder
 	remaining := maxRunes
-	for _, section := range ordered {
+	for index, section := range ordered {
 		header := fmt.Sprintf("[%s] %s\n", section.ID, strings.TrimSpace(section.Title))
-		content := strings.TrimSpace(section.Content)
+		headerRunes := len([]rune(header))
+		sectionsLeft := len(ordered) - index
+		targetRunes := remaining / sectionsLeft
+		contentBudget := targetRunes - headerRunes - 2
+		if contentBudget < 64 {
+			contentBudget = remaining - headerRunes - 2
+		}
+		if contentBudget <= 0 {
+			break
+		}
+		content := truncateDeepReadSection(strings.TrimSpace(section.Content), contentBudget)
 		block := header + content + "\n\n"
 		runes := []rune(block)
 		if len(runes) > remaining {
-			if remaining <= len([]rune(header))+64 {
+			if remaining <= headerRunes+64 {
 				break
 			}
 			runes = runes[:remaining]
@@ -338,6 +422,64 @@ func buildDeepReadAIContext(sections []DeepReadSection, selectedSectionID string
 		}
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func deepReadQuestionTerms(question string) []string {
+	terms := extractDeepStartMessageTokens(question)
+	lowered := strings.ToLower(question)
+	synonyms := map[string][]string{
+		"消融": {"ablation"},
+		"局限": {"limitation", "limitations"},
+		"方法": {"method", "approach"},
+		"实验": {"experiment", "experiments", "result", "results"},
+		"数据": {"data", "dataset"},
+		"结论": {"conclusion"},
+		"基线": {"baseline"},
+		"训练": {"training"},
+		"架构": {"architecture"},
+		"贡献": {"contribution"},
+	}
+	for source, expanded := range synonyms {
+		if strings.Contains(lowered, source) {
+			terms = append(terms, expanded...)
+		}
+	}
+	return uniqueStrings(terms)
+}
+
+func deepReadSectionRelevance(section DeepReadSection, terms []string) int {
+	title := strings.ToLower(section.Title)
+	content := strings.ToLower(section.Content)
+	score := 0
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		if strings.Contains(title, term) {
+			score += 20
+		}
+		matches := strings.Count(content, term)
+		if matches > 3 {
+			matches = 3
+		}
+		score += matches * 2
+	}
+	return score
+}
+
+func truncateDeepReadSection(content string, limit int) string {
+	runes := []rune(strings.TrimSpace(content))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	if limit < 96 {
+		return string(runes[:limit])
+	}
+	marker := []rune("\n[content omitted]\n")
+	headLength := (limit - len(marker)) * 2 / 3
+	tailLength := limit - len(marker) - headLength
+	return string(runes[:headLength]) + string(marker) + string(runes[len(runes)-tailLength:])
 }
 
 func (a *App) GetDeepReadPDFBytes(paperID string) (string, error) {

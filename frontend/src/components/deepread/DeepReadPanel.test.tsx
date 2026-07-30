@@ -6,6 +6,7 @@ import { defaultConfig } from '../../types';
 
 const backendMocks = vi.hoisted(() => ({
   askDeepReadPaper: vi.fn(),
+  cancelDeepReadAI: vi.fn(),
   getDeepReadState: vi.fn(),
   getPDFServiceStatus: vi.fn(),
   getFolderTree: vi.fn(),
@@ -216,6 +217,7 @@ describe('DeepReadPanel', () => {
       ],
       limitations: ['缺少真实环境实验'],
     });
+    backendMocks.cancelDeepReadAI.mockResolvedValue(true);
 
     useAppStore.setState({
       activePanel: 'deepread',
@@ -417,5 +419,41 @@ describe('DeepReadPanel', () => {
     });
     expect(await screen.findByText('核心结论')).toBeInTheDocument();
     expect(screen.getByText('We study embodied agents.')).toBeInTheDocument();
+  });
+
+  it('lets the user cancel an in-flight AI reading request', async () => {
+    backendMocks.getDeepReadState.mockResolvedValueOnce({
+      paperId: 'paper-1',
+      hasPdf: true,
+      pdfPath: '/tmp/paper-1.pdf',
+      parseStatus: 'ready',
+      parseError: '',
+      sections: [
+        { id: 'section-1', title: 'Abstract', content: 'We study embodied agents.', index: 0 },
+      ],
+      markdown: 'We study embodied agents.',
+      translations: [],
+      notes: [],
+      lastPreparedAt: new Date().toISOString(),
+    });
+    backendMocks.askDeepReadPaper.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => {
+        backendMocks.cancelDeepReadAI.mockImplementationOnce(async () => {
+          reject(new Error('deepread AI request cancelled'));
+          return true;
+        });
+      }),
+    );
+
+    render(<DeepReadPanel />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '总结全文' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '总结全文' }));
+
+    const cancelButton = await screen.findByRole('button', { name: '停止' });
+    fireEvent.click(cancelButton);
+
+    await waitFor(() => expect(backendMocks.cancelDeepReadAI).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument());
+    expect(screen.queryByText('deepread AI request cancelled')).not.toBeInTheDocument();
   });
 });

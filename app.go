@@ -42,6 +42,8 @@ type App struct {
 	downloadMu            sync.Mutex
 	deepStartTaskMu       sync.Mutex
 	deepStartTasks        map[string]deepStartTaskHandle
+	deepReadAITaskMu      sync.Mutex
+	deepReadAITask        deepReadAITaskHandle
 	pdfResourceMu         sync.Mutex
 	pdfResources          map[string]deepReadPDFResource
 	closeMu               sync.Mutex
@@ -99,6 +101,7 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	a.stopPeriodicSyncLoop()
 	a.cancelAllDeepStartTasks()
+	a.cancelDeepReadAI()
 	a.stopDownloadWorkers()
 	a.stopManagedPDFService()
 	a.closeMu.Lock()

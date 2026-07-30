@@ -22,6 +22,10 @@ export function AttachLocalPDFToPaper(arg1, arg2) {
   return window['go']['main']['App']['AttachLocalPDFToPaper'](arg1, arg2);
 }
 
+export function CancelDeepReadAI() {
+  return window['go']['main']['App']['CancelDeepReadAI']();
+}
+
 export function CancelDeepStartTask(arg1) {
   return window['go']['main']['App']['CancelDeepStartTask'](arg1);
 }

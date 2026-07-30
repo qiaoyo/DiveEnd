@@ -2,7 +2,7 @@
 
 This file is the canonical entry point for LLM agents working in this repository.
 
-更新时间：2026-07-19
+更新时间：2026-07-30
 
 ## Project Summary
 
@@ -27,7 +27,7 @@ Implemented:
 - Config persistence, secret merging, local seed loading, redacted display values, and a shared persistent daily LLM token budget (default 100,000,000) covering both Go calls and Python Screening extraction.
 - SQLite migrations for folders, papers, translations, DeepStart, DeepRead, Screening, Sync records, and conflicts.
 - DeepStart search over Semantic Scholar and arXiv, all-query retrieval across up to three rewrites, relevance/recency ranking, focused default retrieval of about 20 candidates, eager PDF/weak-model preprocessing for the top 4, on-demand handling for the rest, user-triggered supplemental expansion, enrichment, AI analysis, progress events, cancellation.
-- DeepRead paper state, PDF parsing cache, notes, translation history, grounded AI question/summary responses with section evidence, Wails asset-server PDF URL, bounded base64 fallback.
+- DeepRead paper state, PDF parsing cache, notes, translation history, weak-model low-latency questions, strong-model summaries, relevance-aware long-paper context, verbatim-grounded section evidence, cancellable AI requests, Wails asset-server PDF URL, bounded base64 fallback.
 - Screening sessions, managed PDF upload storage, extraction progress, provider token usage reporting, shared-budget settlement, LLM decision tree, final import.
 - Library folder tree, folder create/delete/rename/move, paper delete, single-paper move, batch move, managed PDF/cache path maintenance.
 - Baidu sync preview, background manual sync, startup sync, periodic sync, exit sync prompt, conflict detection, conflict resolution, database restore staging/apply/cancel.
@@ -42,7 +42,7 @@ Remaining risks:
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic token refresh and secure persistence.
 - The configured Semantic Scholar key returned `403 Forbidden` on 2026-07-30 and the shared unauthenticated endpoint returned `429`; use arXiv/cache degradation until the key is replaced.
 - GitHub SSH read/write works, but `gh` CLI authentication is still required for automatic PR creation through `gh`.
-- DeepRead long-PDF ergonomics and legacy library/sync UI polish remain future work; the settings route no longer retains the obsolete collapsible-sidebar interaction.
+- DeepRead page-level evidence navigation, cross-paper analysis, and legacy library/sync UI polish remain future work; the settings route no longer retains the obsolete collapsible-sidebar interaction.
 
 ## Reading Order
 

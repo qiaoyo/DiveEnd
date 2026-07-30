@@ -12,6 +12,8 @@ export function AskDeepReadPaper(arg1:string,arg2:string,arg3:string,arg4:string
 
 export function AttachLocalPDFToPaper(arg1:string,arg2:string):Promise<main.Paper>;
 
+export function CancelDeepReadAI():Promise<boolean>;
+
 export function CancelDeepStartTask(arg1:string):Promise<void>;
 
 export function CancelPendingDatabaseRestore():Promise<void>;

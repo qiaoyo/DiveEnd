@@ -12,12 +12,14 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Square,
   SunMoon,
 } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   askDeepReadPaper,
+  cancelDeepReadAI,
   getDeepReadPDFBytes,
   getDeepReadPDFURL,
   getDeepReadState,
@@ -33,7 +35,7 @@ import {
   selectAndAttachPaperPDF,
   translatePaperSection,
 } from '../../lib/backend';
-import { errorToUserMessage } from '../../lib/errors';
+import { errorToUserMessage, isCancellationError } from '../../lib/errors';
 import type {
   DeepReadAIResponse,
   DeepReadState,
@@ -199,6 +201,7 @@ export function DeepReadPanel() {
   const [aiQuestion, setAIQuestion] = useState('');
   const [aiResponse, setAIResponse] = useState<DeepReadAIResponse | null>(null);
   const [askingAI, setAskingAI] = useState(false);
+  const [cancellingAI, setCancellingAI] = useState(false);
   const [aiError, setAIError] = useState('');
   const [manualURLDrafts, setManualURLDrafts] = useState<Record<string, string>>({});
   const [manualURLPanelPaperId, setManualURLPanelPaperId] = useState<string | null>(null);
@@ -206,6 +209,7 @@ export function DeepReadPanel() {
   const [pdfServiceStatus, setPDFServiceStatus] = useState<PDFServiceStatus | null>(null);
   const manualURLInputRef = useRef<HTMLInputElement | null>(null);
   const pdfViewportRef = useRef<HTMLDivElement | null>(null);
+  const aiRequestGenerationRef = useRef(0);
   const pdfPageRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const sections = deepReadState?.sections ?? [];
@@ -428,6 +432,8 @@ export function DeepReadPanel() {
   }, [activeFolderId, loadingDownloads, selectedPaper, setPapers, setSelectedPaper]);
 
   useEffect(() => {
+    setAskingAI(false);
+    setCancellingAI(false);
     setAIResponse(null);
     setAIError('');
     setAIQuestion('');
@@ -487,6 +493,8 @@ export function DeepReadPanel() {
 
     return () => {
       cancelled = true;
+      aiRequestGenerationRef.current += 1;
+      void cancelDeepReadAI().catch(() => {});
     };
   }, [selectedPaperId, setError]);
 
@@ -595,6 +603,8 @@ export function DeepReadPanel() {
 
     setAskingAI(true);
     setAIError('');
+    const requestGeneration = aiRequestGenerationRef.current + 1;
+    aiRequestGenerationRef.current = requestGeneration;
     try {
       const response = await askDeepReadPaper(
         selectedPaper.id,
@@ -602,13 +612,41 @@ export function DeepReadPanel() {
         mode === 'question' ? aiQuestion.trim() : '',
         mode,
       );
+      if (aiRequestGenerationRef.current !== requestGeneration) {
+        return;
+      }
       setAIResponse(response);
     } catch (error) {
+      if (aiRequestGenerationRef.current !== requestGeneration) {
+        return;
+      }
+      if (isCancellationError(error)) {
+        setAIError('');
+        return;
+      }
       const message = errorToUserMessage(error, mode === 'summary' ? '生成论文总结失败' : '论文问答失败');
       setAIError(message);
       setError(message);
     } finally {
+      if (aiRequestGenerationRef.current === requestGeneration) {
+        setAskingAI(false);
+        setCancellingAI(false);
+      }
+    }
+  };
+
+  const handleCancelAI = async () => {
+    setCancellingAI(true);
+    try {
+      await cancelDeepReadAI();
+      aiRequestGenerationRef.current += 1;
       setAskingAI(false);
+      setCancellingAI(false);
+    } catch (error) {
+      const message = errorToUserMessage(error, '停止 AI 阅读失败');
+      setAIError(message);
+      setError(message);
+      setCancellingAI(false);
     }
   };
 
@@ -1155,15 +1193,28 @@ export function DeepReadPanel() {
                   placeholder="这篇论文的核心假设是什么？实验是否真正支持结论？"
                   className="de-field mt-2 min-h-[72px] w-full resize-none px-2.5 py-2 text-xs leading-5"
                 />
-                <button
-                  type="button"
-                  onClick={() => void handleAskAI('question')}
-                  disabled={askingAI || !selectedPaper || !aiQuestion.trim() || parseStatus !== 'ready'}
-                  className="de-button-primary mt-2 inline-flex h-8 items-center gap-1.5 px-3 text-xs font-medium"
-                >
-                  {askingAI ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
-                  {askingAI ? '正在阅读论文' : '基于论文回答'}
-                </button>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleAskAI('question')}
+                    disabled={askingAI || !selectedPaper || !aiQuestion.trim() || parseStatus !== 'ready'}
+                    className="de-button-primary inline-flex h-8 items-center gap-1.5 px-3 text-xs font-medium"
+                  >
+                    {askingAI ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                    {askingAI ? '正在阅读论文' : '基于论文回答'}
+                  </button>
+                  {askingAI ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelAI()}
+                      disabled={cancellingAI}
+                      className="de-button-secondary inline-flex h-8 items-center gap-1.5 px-3 text-xs font-medium"
+                    >
+                      <Square className="h-3 w-3 fill-current" />
+                      {cancellingAI ? '正在停止' : '停止'}
+                    </button>
+                  ) : null}
+                </div>
 
                 {aiError ? (
                   <p className="mt-2 text-xs leading-5 text-[var(--de-danger)]">{aiError}</p>

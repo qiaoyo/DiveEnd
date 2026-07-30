@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -81,5 +83,28 @@ func TestPDFExtractionSharesDailyTokenBudget(t *testing.T) {
 	reservation.Finish(50)
 	if snapshot := app.llmTokenBudget.Snapshot(); snapshot.UsedTokens != 50 {
 		t.Fatalf("expected provider usage settlement, got %+v", snapshot)
+	}
+}
+
+func TestLLMFailureKeepsConservativeReservation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upstream failed", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	budget := newDailyTokenBudget(t.TempDir(), 20_000)
+	client := &LLMClient{
+		model:        "test-model",
+		providerName: "test-provider",
+		baseURL:      server.URL,
+		wireAPI:      "chat_completions",
+		httpClient:   server.Client(),
+		tokenBudget:  budget,
+	}
+	if _, err := client.chat([]llmMessage{{Role: "user", Content: "test"}}); err == nil {
+		t.Fatal("expected upstream failure")
+	}
+	if snapshot := budget.Snapshot(); snapshot.UsedTokens < 8192 {
+		t.Fatalf("expected failed sent request to retain conservative reservation, got %+v", snapshot)
 	}
 }

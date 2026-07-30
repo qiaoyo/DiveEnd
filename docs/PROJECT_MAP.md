@@ -1,6 +1,6 @@
 # DiveEnd Project Map
 
-更新时间：2026-07-19
+更新时间：2026-07-30
 
 This document maps product workflows to the current code structure. Use it after reading `README.md` and `AGENTS.md`.
 
@@ -37,7 +37,7 @@ Purpose:
 - Apply pending cloud DB restore if needed.
 - Open or migrate SQLite DB.
 - Configure LLM, search, PDF service, sync manager, and download workers.
-- Start the managed local PDF service, wait for readiness, and stop the owned process on app shutdown.
+- Start the managed local PDF service asynchronously, wait for readiness only when a PDF workflow first needs it, and stop the owned process on app shutdown.
 - Hydrate frontend initial state.
 
 Backend files:
@@ -121,14 +121,17 @@ Purpose:
 - Attach or download managed PDF files.
 - Prepare parsed markdown and sections through the PDF service.
 - Default DeepStart discovery keeps about 20 focused candidates while eagerly parsing/extracting only the top 4; remaining candidates stay available for on-demand processing.
-- Ask the strong model grounded questions or request a full-paper summary from parsed sections.
-- Return an answer, concise takeaway, section evidence, and explicit limitations.
+- Route low-latency questions to the weak model and full-paper summaries to the strong model, with fallback when only one assistant is configured.
+- Build bounded long-paper context from the selected section, question-relevant sections, and core sections without allowing one large abstract to consume the entire context.
+- Return an answer, concise takeaway, verbatim-validated section evidence, and explicit limitations; reject invented section IDs and paraphrased evidence.
+- Cancel an in-flight AI reading request from the reader or during application shutdown.
 - Show a range-friendly Wails asset URL for PDFs, with bounded base64 fallback.
 - Save translations and notes.
 
 Backend files:
 
 - `deepread.go`
+- `deepread_task.go`
 - `clients.go`
 - `deepread_pdf_paths.go`
 - `deepread_asset_server.go`
@@ -149,6 +152,8 @@ Tests:
 
 - `deepread_pdf_paths_test.go`
 - `deepread_ai_test.go`
+- `deepread_task_test.go`
+- `deepread_real_e2e_test.go` (opt-in strong/weak provider grounding)
 - `pdf_service_client_test.go`
 - `local_file_actions_test.go`
 - `paper_import_assets_test.go`

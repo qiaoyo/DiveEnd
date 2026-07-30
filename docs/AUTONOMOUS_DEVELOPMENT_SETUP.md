@@ -41,6 +41,9 @@
 - 强弱模型共享每日 1 亿 token 硬预算；当日使用量保存到数据目录 `.diveend/llm_usage.json`，设置页可查看使用量并调整上限。
 - Python PDF 服务会汇总两次结构抽取的 provider usage 并返回 Go 后端，Screening 不再绕过共享预算。
 - Semantic Scholar 的 `403` 被视为永久性来源错误，首轮即停止该来源；arXiv 部分结果继续完成研究地图，不再等待几十次无效重试。
+- 桌面启动不再同步等待 PDF service 冷启动；服务在后台预热，DeepStart、DeepRead 和 Screening 首次需要 PDF 时统一等待 readiness。
+- DeepRead 问答优先使用弱模型，真实验证约 4.33 秒返回有依据回答；全文总结保留强模型质量。长论文上下文按问题相关性和核心章节分配，模型返回的 section ID 和摘录必须能在输入上下文中验证。
+- DeepRead 长请求支持前端主动取消和应用退出取消；已发送但失败或超时的模型请求保留保守 token 预留，避免潜在计费绕过每日上限。
 
 ## 一、LLM Agent 可以自动化完成
 

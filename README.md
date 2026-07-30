@@ -14,7 +14,7 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 
 - **DeepStart**：自然语言输入研究方向，聚合 Semantic Scholar 和 arXiv，执行最多 3 个重写 query 后统一按标题/摘要相关性和年份排序，默认收敛到约 20 篇高相关候选；只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
 - **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文。
-- **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；强模型可基于已解析章节回答问题、总结全文，并返回可跳转的论文依据和局限。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
+- **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；低延迟问答优先走弱模型，全文总结走强模型，二者都只保留能在已解析章节中逐字验证的依据。长论文上下文按问题相关性和核心章节公平分配，AI 请求可主动取消。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
 - **Sync**：百度云同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB。
 - **Library**：右侧论文库支持文件夹树、创建、删除、重命名、移动、单篇移动、批量移动，并同步维护 managed PDF 路径和 DeepRead cache。
 - **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、覆盖 Go 与 Python 抽取链路的每日共享 LLM token 硬预算、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
@@ -71,7 +71,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic refresh and secure persistence of an expired access token.
 - The configured Semantic Scholar API key returned `403 Forbidden` on 2026-07-30, while the unauthenticated shared endpoint returned `429`; discovery must retain arXiv/cache degradation until the key is replaced.
 - GitHub SSH read/write access is available, but the local `gh` CLI is not authenticated, so automatic PR creation through `gh` remains blocked.
-- DeepRead can still be improved with finer page-level cache/prefetch, cross-section citation highlights, and better long-PDF ergonomics.
+- DeepRead can still be improved with finer page-level cache/prefetch, PDF 页码级证据定位、跨论文对比和更好的长文档导航。
 - UI polish remains useful for the legacy library/sync/settings surfaces, narrow windows, and high-DPI layouts.
 
 ## Ignored Local Files

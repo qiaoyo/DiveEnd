@@ -405,25 +405,86 @@ Paper context:
 		return nil, fmt.Errorf("empty DeepRead assistant response")
 	}
 
-	cleanEvidence := make([]DeepReadEvidence, 0, len(parsed.Evidence))
-	for _, item := range parsed.Evidence {
+	parsed.Evidence = groundDeepReadEvidence(parsed.Evidence, sectionContext)
+	if len(parsed.Evidence) == 0 {
+		parsed.Limitations = compactStrings(
+			append(parsed.Limitations, "模型未返回可由当前论文上下文逐字验证的证据摘录。"),
+			8,
+		)
+	}
+	return &parsed, nil
+}
+
+type deepReadContextSection struct {
+	title   string
+	content string
+}
+
+func groundDeepReadEvidence(evidence []DeepReadEvidence, sectionContext string) []DeepReadEvidence {
+	sections := parseDeepReadContextSections(sectionContext)
+	clean := make([]DeepReadEvidence, 0, len(evidence))
+	for _, item := range evidence {
 		item.SectionID = strings.TrimSpace(item.SectionID)
-		item.SectionTitle = strings.TrimSpace(item.SectionTitle)
 		item.Excerpt = strings.TrimSpace(item.Excerpt)
-		if item.SectionID == "" || item.Excerpt == "" {
+		section, ok := sections[item.SectionID]
+		if !ok || item.Excerpt == "" {
 			continue
 		}
 		excerptRunes := []rune(item.Excerpt)
 		if len(excerptRunes) > 240 {
 			item.Excerpt = string(excerptRunes[:240])
 		}
-		cleanEvidence = append(cleanEvidence, item)
-		if len(cleanEvidence) >= 6 {
+		if !strings.Contains(normalizeEvidenceText(section.content), normalizeEvidenceText(item.Excerpt)) {
+			continue
+		}
+		item.SectionTitle = section.title
+		clean = append(clean, item)
+		if len(clean) >= 6 {
 			break
 		}
 	}
-	parsed.Evidence = cleanEvidence
-	return &parsed, nil
+	return clean
+}
+
+func parseDeepReadContextSections(sectionContext string) map[string]deepReadContextSection {
+	sections := map[string]deepReadContextSection{}
+	var currentID string
+	var currentTitle string
+	var content strings.Builder
+	flush := func() {
+		if currentID == "" {
+			return
+		}
+		sections[currentID] = deepReadContextSection{
+			title:   currentTitle,
+			content: strings.TrimSpace(content.String()),
+		}
+		content.Reset()
+	}
+	for _, line := range strings.Split(sectionContext, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			if closeIndex := strings.Index(trimmed, "] "); closeIndex > 1 {
+				candidateID := strings.TrimSpace(trimmed[1:closeIndex])
+				if strings.HasPrefix(candidateID, "section-") {
+					flush()
+					currentID = candidateID
+					currentTitle = strings.TrimSpace(trimmed[closeIndex+2:])
+					continue
+				}
+			}
+		}
+		if currentID != "" {
+			content.WriteString(line)
+			content.WriteByte('\n')
+		}
+	}
+	flush()
+	return sections
+}
+
+func normalizeEvidenceText(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
 }
 
 func (c *LLMClient) AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error) {
@@ -684,7 +745,7 @@ func (c *LLMClient) chatResponsesWithContext(ctx context.Context, messages []llm
 	if err != nil {
 		return "", err
 	}
-	defer reservation.Cancel()
+	defer reservation.Finish(0)
 
 	reqBody := map[string]any{
 		"model": c.model,
@@ -755,7 +816,7 @@ func (c *LLMClient) chatOpenAIWithContext(ctx context.Context, messages []llmMes
 	if err != nil {
 		return "", err
 	}
-	defer reservation.Cancel()
+	defer reservation.Finish(0)
 
 	reqBody := struct {
 		Model    string       `json:"model"`
@@ -833,7 +894,7 @@ func (c *LLMClient) chatAnthropicWithContext(ctx context.Context, messages []llm
 	if err != nil {
 		return "", err
 	}
-	defer reservation.Cancel()
+	defer reservation.Finish(0)
 
 	reqBody := struct {
 		Model     string       `json:"model"`

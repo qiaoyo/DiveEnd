@@ -113,6 +113,7 @@ declare global {
             question: string,
             mode: 'question' | 'summary'
           ): Promise<DeepReadAIResponse>;
+          CancelDeepReadAI(): Promise<boolean>;
           GetDeepReadPDFURL(paperId: string): Promise<string>;
           GetDeepReadPDFBytes(paperId: string): Promise<string>;
 
@@ -1882,6 +1883,15 @@ export async function askDeepReadPaper(
       : [],
     limitations: ['浏览器预览没有连接真实 LLM。'],
   });
+}
+
+export async function cancelDeepReadAI(): Promise<boolean> {
+  const app = runtimeApp();
+  if (app?.CancelDeepReadAI) {
+    return app.CancelDeepReadAI();
+  }
+  assertMockFallbackAllowed(app, 'CancelDeepReadAI');
+  return false;
 }
 
 export async function getDeepReadPDFBytes(paperId: string): Promise<string> {
