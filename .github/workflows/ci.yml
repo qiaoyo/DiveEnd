@@ -55,18 +55,18 @@ jobs:
       - name: Scan tracked files for secrets
         run: bash scripts/secret_scan.sh
 
+      - name: Test and build frontend
+        working-directory: frontend
+        run: |
+          npm test -- --run
+          npm run build
+
       - name: Test and vet Go backend
         run: |
           go test ./...
           go vet ./...
           go build ./...
           go test -race ./...
-
-      - name: Test and build frontend
-        working-directory: frontend
-        run: |
-          npm test -- --run
-          npm run build
 
       - name: Block critical production dependency advisories
         working-directory: frontend
