@@ -47,7 +47,10 @@ Backend files:
 - `config_store.go`
 - `database.go`
 - `database_restore.go`
-- `models.go`
+- `wails_models.go`
+- `internal/domain/`
+- `internal/contracts/`
+- `internal/platform/`
 - `pdf_service_process.go`
 
 Frontend files:
@@ -185,7 +188,7 @@ Backend files:
 - `screening_task.go`
 - `pdf_service_client.go`
 - `local_file_actions.go`
-- `models.go`
+- `wails_models.go` and `internal/domain/`
 
 Frontend files:
 

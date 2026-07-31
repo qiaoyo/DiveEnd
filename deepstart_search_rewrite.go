@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/qiaoyo/DiveEnd/internal/contracts"
 )
 
-type deepStartQueryRewriter interface {
-	RewriteSearchQueries(query string) ([]string, error)
-}
+type deepStartQueryRewriter = contracts.QueryRewriter
 
 func (a *App) rewriteDeepStartQueries(ctx context.Context, query string) ([]string, string) {
 	query = strings.TrimSpace(query)
