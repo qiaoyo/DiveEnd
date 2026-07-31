@@ -307,6 +307,7 @@ function normalizeSearchPaper(paper: Partial<SearchPaper> | null | undefined): S
     category: paper?.category ?? '',
     tags: normalizeArray(paper?.tags),
     source: paper?.source ?? '',
+    sources: normalizeArray(paper?.sources),
     externalIds: normalizeStringMap(paper?.externalIds as Record<string, string> | undefined),
     pdfCandidates: normalizeArray(paper?.pdfCandidates),
     institutions: normalizeArray(paper?.institutions),
@@ -716,6 +717,10 @@ function redactConfig(config: AppConfig): AppConfig {
       hasSemanticScholarApiKey:
         config.search.semanticScholarApiKey.trim().length > 0 || config.search.hasSemanticScholarApiKey,
       clearSemanticScholarApiKey: false,
+      openAlexApiKey: '',
+      hasOpenAlexApiKey:
+        config.search.openAlexApiKey.trim().length > 0 || config.search.hasOpenAlexApiKey,
+      clearOpenAlexApiKey: false,
     },
     baiduCloud: {
       ...config.baiduCloud,

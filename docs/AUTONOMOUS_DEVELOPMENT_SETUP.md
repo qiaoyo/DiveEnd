@@ -182,7 +182,6 @@
 
 | 平台或事项 | 你今天需要做什么 | 完成后如何交接 |
 | --- | --- | --- |
-| Semantic Scholar Academic Graph API | 当前 key 已被服务端拒绝。官方没有公开的自助轮换控制台；先在[官方 API 页面](https://www.semanticscholar.org/product/api)通过 “Request an API Key” 重新提交个人研究用途申请。若希望恢复原 key，请联系 `feedback@semanticscholar.org`，提供申请邮箱、2026-04-10 申请日期、请求端点和 `403` 状态，切勿附上完整 key。 | 收到新 key 后更新忽略文件 `config/semantic_scholar.json`。只告诉 agent“文件已更新”，不要在聊天中发送 key。 |
 | 历史凭证轮换 | Git 历史仍包含至少一个历史 OpenAI-style key pattern。当前强弱模型可用不代表旧凭证可以继续信任。 | 公开仓库或发布前轮换受影响凭证，并单独批准历史重写。 |
 
 ### 当前不需要申请
@@ -197,6 +196,7 @@ Apple Developer 不是本地开发和 `wails build` 的前提。只有分发目�
 ### 暂时不要申请
 
 - 不需要为 arXiv 检索申请账号。
+- OpenAlex key 已配置并验证；OpenReview 和 DBLP 无需账号。Semantic Scholar 当前关闭，不需要更新 key。
 - 不要为常规 CI 配置真实 LLM key 或百度个人 token；CI 应使用 mock 和 fixture。
 - 暂时不申请 Sentry 等遥测服务，先对齐隐私策略和是否真的需要收集崩溃信息。
 - 暂时不新增云数据库、对象存储或账号系统；DiveEnd 当前是本地优先桌面工具。
@@ -217,12 +217,13 @@ Apple Developer 不是本地开发和 `wails build` 的前提。只有分发目�
 
 ```bash
 cp config/semantic_scholar.json.example config/semantic_scholar.json
+cp config/openalex.json.example config/openalex.json
 cp config/strong_llm.json.example config/strong_llm.json
 cp config/weak_llm.json.example config/weak_llm.json
 cp baiduyun_token.json.example baiduyun_token.json
 ```
 
-2. 你在本机编辑真实值。这四个目标文件已经被 `.gitignore` 排除。
+2. 你在本机编辑真实值。这些目标文件已经被 `.gitignore` 排除。
 3. 只回复“哪个文件已配置”，我会通过脱敏检查和最小请求验证，不显示秘密。
 4. 每次 commit 或 push 前运行：
 

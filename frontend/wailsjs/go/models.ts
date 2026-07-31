@@ -49,7 +49,11 @@ export namespace main {
 	export class SearchAPIConfig {
 	    enableSemanticScholar: boolean;
 	    enableArxiv: boolean;
+	    enableOpenAlex: boolean;
+	    enableOpenReview: boolean;
+	    enableDBLP: boolean;
 	    semanticScholarKeyPath: string;
+	    openAlexKeyPath: string;
 	    perSourceResultLimit: number;
 	    deepStartResultLimit: number;
 	    retryDurationSeconds: number;
@@ -58,6 +62,9 @@ export namespace main {
 	    semanticScholarApiKey?: string;
 	    hasSemanticScholarApiKey: boolean;
 	    clearSemanticScholarApiKey?: boolean;
+	    openAlexApiKey?: string;
+	    hasOpenAlexApiKey: boolean;
+	    clearOpenAlexApiKey?: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new SearchAPIConfig(source);
@@ -67,7 +74,11 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enableSemanticScholar = source["enableSemanticScholar"];
 	        this.enableArxiv = source["enableArxiv"];
+	        this.enableOpenAlex = source["enableOpenAlex"];
+	        this.enableOpenReview = source["enableOpenReview"];
+	        this.enableDBLP = source["enableDBLP"];
 	        this.semanticScholarKeyPath = source["semanticScholarKeyPath"];
+	        this.openAlexKeyPath = source["openAlexKeyPath"];
 	        this.perSourceResultLimit = source["perSourceResultLimit"];
 	        this.deepStartResultLimit = source["deepStartResultLimit"];
 	        this.retryDurationSeconds = source["retryDurationSeconds"];
@@ -76,6 +87,9 @@ export namespace main {
 	        this.semanticScholarApiKey = source["semanticScholarApiKey"];
 	        this.hasSemanticScholarApiKey = source["hasSemanticScholarApiKey"];
 	        this.clearSemanticScholarApiKey = source["clearSemanticScholarApiKey"];
+	        this.openAlexApiKey = source["openAlexApiKey"];
+	        this.hasOpenAlexApiKey = source["hasOpenAlexApiKey"];
+	        this.clearOpenAlexApiKey = source["clearOpenAlexApiKey"];
 	    }
 	}
 	export class LLMConfig {
@@ -576,6 +590,7 @@ export namespace main {
 	    category: string;
 	    tags: string[];
 	    source: string;
+	    sources?: string[];
 	    externalIds?: Record<string, string>;
 	    pdfCandidates?: string[];
 	    institutions: string[];
@@ -620,6 +635,7 @@ export namespace main {
 	        this.category = source["category"];
 	        this.tags = source["tags"];
 	        this.source = source["source"];
+	        this.sources = source["sources"];
 	        this.externalIds = source["externalIds"];
 	        this.pdfCandidates = source["pdfCandidates"];
 	        this.institutions = source["institutions"];

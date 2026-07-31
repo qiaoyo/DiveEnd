@@ -13,7 +13,7 @@ DiveEnd 不应再寻找一个替代 Semantic Scholar 的单一来源。更稳定
 5. `Hugging Face Daily Papers`：LLM、agent、robotics、world model 的近期趋势信号。
 6. `Crossref`、`CORE`、`Europe PMC`：分别用于 DOI 元数据补全、开放全文补充和生医交叉领域补充。
 
-推荐优先接入 `OpenAlex + OpenReview + DBLP`，并把 Hugging Face Daily Papers 做成独立的“趋势”入口。Semantic Scholar 恢复后仍可作为额外来源，而不是重新成为单点依赖。
+`OpenAlex + OpenReview + DBLP` 已在 2026-07-31 接入，与 arXiv 共同使用同一套查询、合并、过滤、排序和降级流程。Hugging Face Daily Papers 仍适合未来做成独立的“趋势”入口。Semantic Scholar 当前关闭，未来恢复时也只能作为额外来源。
 
 ## 真实请求结果
 
@@ -35,40 +35,29 @@ DiveEnd 不应再寻找一个替代 Semantic Scholar 的单一来源。更稳定
 | CORE | 可匿名，注册后额度更好 | 当前出口返回 `429` | 开放获取全文和仓储版本补充 | 限流较严格，搜索质量和 CS 新论文时效需继续评估 |
 | Papers with Code legacy API | 已失效 | 请求重定向至 Hugging Face Papers HTML | 不再接入 | 旧 JSON API 不可作为生产依赖 |
 
-## 推荐的数据源分工
+## 统一来源职责
 
-### LLM 与 Agent
+论文主题不能决定调用哪个搜索源。LLM、agent、robotics、VLA、world model 以及其他学术主题都使用同一组 OpenAlex、arXiv、OpenReview 和 DBLP；差异只来自 query 和检索结果本身。
 
-- 首召回：arXiv、OpenAlex。
-- 最新会议与评审：OpenReview。
-- 热点和社区信号：Hugging Face Daily Papers。
-- 会议、期刊和 DOI 校验：DBLP、Crossref。
-
-### Robotics 与 VLA
-
-- 首召回：arXiv、OpenAlex、DBLP。
-- CoRL/ICLR 等投稿和评审：OpenReview。
-- IEEE、期刊元数据：DBLP、Crossref。
-- 开放全文：arXiv、OpenAlex locations、CORE。
-
-### World Model
-
-- 最新发现：arXiv、OpenReview、Hugging Face Daily Papers。
-- 引用关系和作者/机构追踪：OpenAlex。
-- 正式出版版本：DBLP、Crossref。
+- OpenAlex：跨学科召回、摘要、引用、作者机构和开放获取位置。
+- arXiv：开放预印本、版本标识和 PDF。
+- OpenReview：会议投稿、venue 状态、摘要和 PDF。
+- DBLP：计算机领域作者、venue、年份和 DOI 校验。
+- Crossref、CORE、Europe PMC：未来可作为统一流程的补全层，不按主题切换首要来源。
+- Hugging Face Daily Papers：未来独立提供趋势流，不参与常规检索结果的权威排序。
 
 ## 接入设计
 
 ### 统一召回
 
-每个改写 query 并行请求来源，每个来源保留独立超时、限流和熔断状态：
+每个改写 query 并行请求同一组来源，每个来源保留独立超时、限流和重试状态。当前默认每源召回 20 条，再统一收敛：
 
 ```text
-OpenAlex  8
-arXiv     8
-OpenReview 6
-DBLP      5
-HF Trends 仅用于趋势入口
+OpenAlex   20
+arXiv      20
+OpenReview 20
+DBLP       20
+HF Trends  仅用于未来趋势入口
 ```
 
 合并后按以下顺序去重：
@@ -138,7 +127,7 @@ npx skills add google-deepmind/science-skills@literature-search-openalex -g -y
 
 ## 外部账号
 
-### 首要：OpenAlex
+### 已完成：OpenAlex
 
 在 <https://openalex.org/settings/api> 创建免费 key。官方当前免费额度为：
 
@@ -147,20 +136,18 @@ npx skills add google-deepmind/science-skills@literature-search-openalex -g -y
 - 100 次内容下载/天。
 - 单实体 DOI/ID 查询不限量。
 
-收到 key 后将其放入本地忽略配置，不要粘贴到聊天或提交到 Git。
+OpenAlex key 已保存到本地忽略的 `config/openalex.json`，并通过 Google DeepMind skill 和 DiveEnd 实时检索验证。不得将实际 key 写入文档、日志或 Git。
 
 ### 可选：CORE
 
 如果后续实测证明开放全文覆盖有增益，再到 <https://core.ac.uk/services/api> 注册 key。CORE 不应阻塞第一轮 OpenAlex/OpenReview/DBLP 接入。
 
-## 建议的下一项开发
+## 后续开发
 
-1. 实现 OpenReview 与 DBLP 客户端，不需要等待账号。
-2. 项目所有者创建 OpenAlex 免费 key。
-3. 实现 OpenAlex 客户端、引用图和开放获取位置。
-4. 增加 Hugging Face Daily Papers 趋势入口，并为非正式 API 保留开关和快速禁用能力。
-5. 用固定的 LLM、agent、robotics、VLA、world model 查询集建立来源质量回归测试。
-6. 再评估 CORE 是否对 PDF 获取率有显著提升。
+1. 在 DeepRead/跨论文分析中加入 OpenAlex 引用图浏览；检索已经使用 citation count 和 OA location。
+2. 增加 Hugging Face Daily Papers 趋势入口，并为非正式 API 保留开关和快速禁用能力。
+3. 扩充与主题无关的检索质量回归集；兴趣主题只能作为测试样本，不能决定使用哪个来源。
+4. 再评估 CORE 是否对 PDF 获取率有显著提升。
 
 ## 参考资料
 

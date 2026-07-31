@@ -22,7 +22,11 @@ type LLMConfig struct {
 type SearchAPIConfig struct {
 	EnableSemanticScholar      bool   `json:"enableSemanticScholar"`
 	EnableArxiv                bool   `json:"enableArxiv"`
+	EnableOpenAlex             bool   `json:"enableOpenAlex"`
+	EnableOpenReview           bool   `json:"enableOpenReview"`
+	EnableDBLP                 bool   `json:"enableDBLP"`
 	SemanticScholarKeyPath     string `json:"semanticScholarKeyPath"`
+	OpenAlexKeyPath            string `json:"openAlexKeyPath"`
 	PerSourceResultLimit       int    `json:"perSourceResultLimit"`
 	DeepStartResultLimit       int    `json:"deepStartResultLimit"`
 	RetryDurationSeconds       int    `json:"retryDurationSeconds"`
@@ -31,6 +35,9 @@ type SearchAPIConfig struct {
 	SemanticScholarAPIKey      string `json:"semanticScholarApiKey,omitempty"`
 	HasSemanticScholarAPIKey   bool   `json:"hasSemanticScholarApiKey"`
 	ClearSemanticScholarAPIKey bool   `json:"clearSemanticScholarApiKey,omitempty"`
+	OpenAlexAPIKey             string `json:"openAlexApiKey,omitempty"`
+	HasOpenAlexAPIKey          bool   `json:"hasOpenAlexApiKey"`
+	ClearOpenAlexAPIKey        bool   `json:"clearOpenAlexApiKey,omitempty"`
 }
 
 type BaiduCloudConfig struct {
@@ -218,7 +225,8 @@ type SearchPaper struct {
 	URL                      string            `json:"url"`
 	Category                 string            `json:"category"`
 	Tags                     []string          `json:"tags"`
-	Source                   string            `json:"source"` // "semantic_scholar", "arxiv", "arxiv_sanity"
+	Source                   string            `json:"source"`
+	Sources                  []string          `json:"sources,omitempty"`
 	ExternalIDs              map[string]string `json:"externalIds,omitempty"`
 	PDFCandidates            []string          `json:"pdfCandidates,omitempty"`
 	Institutions             []string          `json:"institutions"`

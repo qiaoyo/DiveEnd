@@ -19,6 +19,16 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+func twoSourceSearchTestConfig() AppConfig {
+	config := defaultAppConfig()
+	config.Search.EnableSemanticScholar = true
+	config.Search.EnableArxiv = true
+	config.Search.EnableOpenAlex = false
+	config.Search.EnableOpenReview = false
+	config.Search.EnableDBLP = false
+	return config
+}
+
 func TestRankSearchPapersExplainsQueryMatches(t *testing.T) {
 	papers := []SearchPaper{
 		{ID: "abstract", Title: "A Recent Systems Paper", Abstract: "We evaluate code agent reliability.", Year: 2026},
@@ -392,7 +402,7 @@ func TestLLMClientAnalyzeDeepStartParsesStructuredJSON(t *testing.T) {
 }
 
 func TestSearchClientSearchUsesFocusedDefaultPerSourceLimit(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	config.Search.SemanticScholarAPIKey = "semantic-key"
 	client := NewSearchClient(config)
 
@@ -473,8 +483,8 @@ func TestSearchClientSearchUsesFocusedDefaultPerSourceLimit(t *testing.T) {
 	if arxivSanityCalled {
 		t.Fatal("did not expect arxiv-sanity-lite to be called in two-source workflow")
 	}
-	if len(papers) != 2 {
-		t.Fatalf("expected 2 papers, got %d", len(papers))
+	if len(papers) != 1 {
+		t.Fatalf("expected Semantic Scholar and arXiv versions to merge by arXiv ID, got %d", len(papers))
 	}
 	var semanticPaper *SearchPaper
 	for idx := range papers {
@@ -517,7 +527,7 @@ func TestSearchClientSearchUsesFocusedDefaultPerSourceLimit(t *testing.T) {
 }
 
 func TestSearchClientSearchWithContextCancellation(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 
 	client.httpClient = &http.Client{
@@ -548,7 +558,7 @@ func TestSearchClientSearchWithContextCancellation(t *testing.T) {
 }
 
 func TestSearchClientUsesPerSourceLimitWhenOverallLimitIs200(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	config.Search.PerSourceResultLimit = 100
 	client := NewSearchClient(config)
 
@@ -618,7 +628,7 @@ func TestSearchClientUsesPerSourceLimitWhenOverallLimitIs200(t *testing.T) {
 }
 
 func TestSearchClientRedactsProviderErrorBodies(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 	client.retryMax = 1
 	client.retryInterval = 0
@@ -694,7 +704,7 @@ func TestDeepStartEnricherRedactsMetadataRequestNetworkErrors(t *testing.T) {
 }
 
 func TestEnhancedSearchReportsOnlyActiveSources(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 	client.retryMax = 1
 
@@ -760,7 +770,7 @@ func TestEnhancedSearchReportsOnlyActiveSources(t *testing.T) {
 }
 
 func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 
 	semanticAttempts := 0
@@ -862,7 +872,7 @@ func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.
 }
 
 func TestSearchClientStopsPermanentSourceFailureAndKeepsPartialResults(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 	client.retryMax = 60
 	client.retryInterval = 0
@@ -946,7 +956,7 @@ func TestSearchClientRedactsProgressLogsAndAggregatedErrors(t *testing.T) {
 		bearerToken = "search-bearer-secret"
 		query       = "private robotics query"
 	)
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 	client.retryMax = 1
 	client.retryInterval = 0
@@ -996,7 +1006,7 @@ func TestSearchClientRedactsProgressLogsAndAggregatedErrors(t *testing.T) {
 }
 
 func TestSearchClientDedupeUsesTitleAndYearAndTracksStats(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 
 	client.httpClient = &http.Client{
@@ -1073,7 +1083,7 @@ func TestSearchClientDedupeUsesTitleAndYearAndTracksStats(t *testing.T) {
 }
 
 func TestSearchClientHonorsSourceEnableFlagsFromConfig(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	config.Search.EnableSemanticScholar = false
 	config.Search.EnableArxiv = true
 	client := NewSearchClient(config)
@@ -1150,7 +1160,7 @@ func TestBuildSearchQueryCandidatesExtractsASCIIFromMixedLanguagePrompt(t *testi
 }
 
 func TestSearchClientSemanticRetriesOnEmptyResultsWithQueryVariants(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	config.Search.EnableArxiv = false
 	config.Search.EnableSemanticScholar = true
 	config.Search.RetryDurationSeconds = 3
@@ -1213,7 +1223,7 @@ func TestSearchClientSemanticRetriesOnEmptyResultsWithQueryVariants(t *testing.T
 }
 
 func TestSearchClientSemanticStopsAfterTryingAllEmptyQueryVariants(t *testing.T) {
-	config := defaultAppConfig()
+	config := twoSourceSearchTestConfig()
 	config.Search.EnableArxiv = false
 	config.Search.EnableSemanticScholar = true
 	config.Search.RetryDurationSeconds = 60

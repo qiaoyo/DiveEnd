@@ -16,7 +16,11 @@ export interface LLMConfig {
 export interface SearchAPIConfig {
   enableSemanticScholar: boolean;
   enableArxiv: boolean;
+  enableOpenAlex: boolean;
+  enableOpenReview: boolean;
+  enableDBLP: boolean;
   semanticScholarKeyPath: string;
+  openAlexKeyPath: string;
   perSourceResultLimit: number;
   deepStartResultLimit: number;
   retryDurationSeconds: number;
@@ -25,6 +29,9 @@ export interface SearchAPIConfig {
   semanticScholarApiKey: string;
   hasSemanticScholarApiKey: boolean;
   clearSemanticScholarApiKey: boolean;
+  openAlexApiKey: string;
+  hasOpenAlexApiKey: boolean;
+  clearOpenAlexApiKey: boolean;
 }
 
 export interface BaiduCloudConfig {
@@ -120,7 +127,8 @@ export interface SearchPaper {
   url: string;
   category: string;
   tags: string[];
-  source: string; // 'semantic_scholar' | 'arxiv' | 'arxiv_sanity'
+  source: string;
+  sources?: string[];
   externalIds?: Record<string, string>;
   pdfCandidates?: string[];
   institutions: string[];
@@ -693,9 +701,13 @@ export const defaultConfig: AppConfig = {
   },
   dailyLLMTokenBudget: 100_000_000,
   search: {
-    enableSemanticScholar: true,
+    enableSemanticScholar: false,
     enableArxiv: true,
+    enableOpenAlex: true,
+    enableOpenReview: true,
+    enableDBLP: true,
     semanticScholarKeyPath: 'config/semantic_scholar.json',
+    openAlexKeyPath: 'config/openalex.json',
     perSourceResultLimit: 20,
     deepStartResultLimit: 20,
     retryDurationSeconds: 60,
@@ -704,6 +716,9 @@ export const defaultConfig: AppConfig = {
     semanticScholarApiKey: '',
     hasSemanticScholarApiKey: false,
     clearSemanticScholarApiKey: false,
+    openAlexApiKey: '',
+    hasOpenAlexApiKey: false,
+    clearOpenAlexApiKey: false,
   },
   baiduCloud: {
     enabled: false,
