@@ -17,25 +17,13 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/qiaoyo/DiveEnd/internal/contracts"
 )
 
-type llmService interface {
-	TranslateSection(section, originalText string) (translated string, summary string, err error)
-	AnalyzeDeepStart(request DeepStartAIRequest) (*DeepStartAIResponse, error)
-	AnalyzeScreening(request ScreeningAIRequest) (*ScreeningDecisionNode, error)
-}
-
-type weakLLMService interface {
-	TranslateSection(section, originalText string) (translated string, summary string, err error)
-	ExtractPaperProfile(markdown string) (*PaperProfileExtraction, error)
-}
-
-type paperSearchService interface {
-	Search(query string, limit int) ([]SearchPaper, error)
-	SearchWithContext(ctx context.Context, query string, limit int) ([]SearchPaper, error)
-	EnhancedSearch(query string, limit int, offset int, yearStart int, yearEnd int, sortBy string) (*EnhancedSearchResult, error)
-	LastSearchStats() SearchRetrievalStats
-}
+type llmService = contracts.LLMService
+type weakLLMService = contracts.WeakLLMService
+type paperSearchService = contracts.PaperSearchService
 
 type LLMClient struct {
 	apiKey                 string
@@ -52,30 +40,20 @@ type LLMClient struct {
 	tokenBudget            *dailyTokenBudget
 }
 
-type contextLLMService interface {
-	TranslateSectionWithContext(ctx context.Context, section, originalText string) (translated string, summary string, err error)
-	AnalyzeDeepStartWithContext(ctx context.Context, request DeepStartAIRequest) (*DeepStartAIResponse, error)
-	AnalyzeScreeningWithContext(ctx context.Context, request ScreeningAIRequest) (*ScreeningDecisionNode, error)
-}
+var (
+	_ contracts.LLMService            = (*LLMClient)(nil)
+	_ contracts.WeakLLMService        = (*LLMClient)(nil)
+	_ contracts.ContextLLMService     = (*LLMClient)(nil)
+	_ contracts.ContextWeakLLMService = (*LLMClient)(nil)
+	_ contracts.QueryRewriter         = (*LLMClient)(nil)
+	_ contracts.ContextQueryRewriter  = (*LLMClient)(nil)
+	_ contracts.DeepReadAssistant     = (*LLMClient)(nil)
+)
 
-type contextWeakLLMService interface {
-	TranslateSectionWithContext(ctx context.Context, section, originalText string) (translated string, summary string, err error)
-	ExtractPaperProfileWithContext(ctx context.Context, markdown string) (*PaperProfileExtraction, error)
-}
-
-type contextQueryRewriter interface {
-	RewriteSearchQueriesWithContext(ctx context.Context, query string) ([]string, error)
-}
-
-type deepReadAssistant interface {
-	AnswerDeepReadWithContext(
-		ctx context.Context,
-		paperTitle string,
-		mode string,
-		question string,
-		sectionContext string,
-	) (*DeepReadAIResponse, error)
-}
+type contextLLMService = contracts.ContextLLMService
+type contextWeakLLMService = contracts.ContextWeakLLMService
+type contextQueryRewriter = contracts.ContextQueryRewriter
+type deepReadAssistant = contracts.DeepReadAssistant
 
 func NewLLMClient(config AppConfig) *LLMClient {
 	return NewStrongLLMClient(config)
@@ -112,25 +90,6 @@ func newLLMClientFromConfig(llmConfig LLMConfig) *LLMClient {
 type llmMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-}
-
-type DeepStartAIRequest struct {
-	RootPrompt       string
-	CurrentQuery     string
-	TargetFolderName string
-	Messages         []DeepStartMessage
-	Results          []SearchPaper
-}
-
-type DeepStartAIResponse struct {
-	Title    string
-	Analysis DeepStartAnalysis
-}
-
-type ScreeningAIRequest struct {
-	SessionTitle string
-	Papers       []ScreeningPaper
-	PathHistory  []PathHistoryItem
 }
 
 func (c *LLMClient) ExtractPaperProfile(markdown string) (*PaperProfileExtraction, error) {

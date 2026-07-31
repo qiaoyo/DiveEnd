@@ -50,11 +50,12 @@ Remaining risks:
 1. `README.md` for product status and development commands.
 2. `AGENTS.md` for this current agent-facing summary.
 3. `docs/PROJECT_MAP.md` for the exact mapping from workflow to files and tests.
-4. `docs/PAPER_SEARCH_SOURCE_EVALUATION.md` for tested search sources, agent tools, integration roles, and account prerequisites.
-5. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
-6. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
-7. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
-8. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
+4. `docs/GO_STRUCTURE.md` for Go package boundaries and feature PR ownership.
+5. `docs/PAPER_SEARCH_SOURCE_EVALUATION.md` for tested search sources, agent tools, integration roles, and account prerequisites.
+6. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
+7. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
+8. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
+9. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
 
 If a historical document conflicts with current code or this file, prefer current code, `README.md`, `AGENTS.md`, and `docs/PROJECT_MAP.md`.
 
@@ -64,7 +65,10 @@ Root Go files are the backend package. The legacy `src/config`, `src/database`, 
 
 - `main.go`: Wails app setup and asset server registration.
 - `app.go`: app lifecycle, config application, Wails methods, translation, paper import/move/delete entry points.
-- `models.go`: shared Go models exported to frontend bindings.
+- `wails_models.go`: Wails-compatible aliases for the shared contracts in `internal/domain`.
+- `internal/domain/`: shared Go models and workflow request/response contracts exported to frontend bindings.
+- `internal/contracts/`: service ports for strong/weak LLM, paper search, query rewrite, and DeepRead assistance.
+- `internal/platform/`: provider-neutral bounded HTTP, JSON decoding, and secret/error redaction helpers.
 - `database.go`: SQLite connection, migrations, core folder/paper/translation/DeepStart/DeepRead persistence.
 - `config_store.go`: runtime config loading, saving, sanitization, secret prefill, local seed loading.
 - `clients.go`: LLM clients and the provider-neutral search orchestrator.

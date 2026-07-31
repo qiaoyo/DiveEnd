@@ -1,8 +1,8 @@
-package main
+package domain
 
 import "time"
 
-const defaultFolderName = "Cache"
+const DefaultFolderName = "Cache"
 
 type LLMConfig struct {
 	ProviderID             string `json:"providerId"`
