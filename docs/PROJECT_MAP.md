@@ -73,7 +73,7 @@ Tests:
 Purpose:
 
 - Start an AI-assisted research exploration from a natural language prompt.
-- Send every original/rewritten query to the same OpenAlex, arXiv, OpenReview, and DBLP source set.
+- Send every original/rewritten query to the same Semantic Scholar, OpenAlex, arXiv, OpenReview, and DBLP source set.
 - Merge source versions by stable identifiers and normalized titles, then apply one conservative relevance filter and ranking policy.
 - Preserve per-paper provenance and continue with partial results when a source is limited or unavailable.
 - Rewrite and enrich queries.

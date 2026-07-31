@@ -627,11 +627,74 @@ func TestSearchClientUsesPerSourceLimitWhenOverallLimitIs200(t *testing.T) {
 	}
 }
 
+func TestSearchClientSemanticScholarUsesCredentialAwareRateMode(t *testing.T) {
+	anonymousConfig := twoSourceSearchTestConfig()
+	anonymousConfig.Search.SemanticScholarAPIKey = ""
+	anonymousClient := NewSearchClient(anonymousConfig)
+	if anonymousClient.semanticRequestGap != semanticScholarUnauthenticatedGap {
+		t.Fatalf("expected anonymous gap %v, got %v", semanticScholarUnauthenticatedGap, anonymousClient.semanticRequestGap)
+	}
+
+	authenticatedConfig := twoSourceSearchTestConfig()
+	authenticatedConfig.Search.SemanticScholarAPIKey = "semantic-key"
+	authenticatedClient := NewSearchClient(authenticatedConfig)
+	if authenticatedClient.semanticRequestGap != semanticScholarAuthenticatedGap {
+		t.Fatalf("expected authenticated gap %v, got %v", semanticScholarAuthenticatedGap, authenticatedClient.semanticRequestGap)
+	}
+}
+
+func TestSearchClientSemanticScholarRateLimitIsSharedAcrossRequests(t *testing.T) {
+	client := NewSearchClient(twoSourceSearchTestConfig())
+	client.semanticRequestGap = 25 * time.Millisecond
+
+	if err := client.waitForSemanticScholarRequest(context.Background()); err != nil {
+		t.Fatalf("first wait error = %v", err)
+	}
+	startedAt := time.Now()
+	if err := client.waitForSemanticScholarRequest(context.Background()); err != nil {
+		t.Fatalf("second wait error = %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed < 20*time.Millisecond {
+		t.Fatalf("expected shared request pacing, only waited %v", elapsed)
+	}
+}
+
+func TestSearchClientSemanticScholarAnonymousRateLimitDegradesImmediately(t *testing.T) {
+	config := twoSourceSearchTestConfig()
+	config.Search.EnableArxiv = false
+	client := NewSearchClient(config)
+	client.semanticRequestGap = 0
+	requests := 0
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests++
+			if got := r.Header.Get("x-api-key"); got != "" {
+				t.Fatalf("expected anonymous request without api key, got %q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"message":"Too Many Requests"}`)),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	_, err := client.Search("language model agents", 20)
+	if err == nil {
+		t.Fatal("expected anonymous rate limit error")
+	}
+	if requests != 1 {
+		t.Fatalf("expected immediate anonymous degradation after one request, got %d", requests)
+	}
+}
+
 func TestSearchClientRedactsProviderErrorBodies(t *testing.T) {
 	config := twoSourceSearchTestConfig()
 	client := NewSearchClient(config)
 	client.retryMax = 1
 	client.retryInterval = 0
+	client.semanticRequestGap = 0
 	client.httpClient = &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			return &http.Response{
@@ -771,6 +834,7 @@ func TestEnhancedSearchReportsOnlyActiveSources(t *testing.T) {
 
 func TestSearchClientRetryStopsAfterPerSourceSuccessAndEmitsProgress(t *testing.T) {
 	config := twoSourceSearchTestConfig()
+	config.Search.SemanticScholarAPIKey = "semantic-key"
 	client := NewSearchClient(config)
 
 	semanticAttempts := 0
@@ -1166,6 +1230,7 @@ func TestSearchClientSemanticRetriesOnEmptyResultsWithQueryVariants(t *testing.T
 	config.Search.RetryDurationSeconds = 3
 	config.Search.RetryIntervalSeconds = 1
 	client := NewSearchClient(config)
+	client.semanticRequestGap = 0
 
 	seenQueries := make([]string, 0, 3)
 	client.httpClient = &http.Client{
@@ -1230,6 +1295,7 @@ func TestSearchClientSemanticStopsAfterTryingAllEmptyQueryVariants(t *testing.T)
 	config.Search.RetryIntervalSeconds = 1
 	client := NewSearchClient(config)
 	client.retryInterval = 0
+	client.semanticRequestGap = 0
 
 	query := "我想梳理这两年关于 world model的论文."
 	candidates := buildSearchQueryCandidates(query)

@@ -196,7 +196,7 @@ Apple Developer 不是本地开发和 `wails build` 的前提。只有分发目�
 ### 暂时不要申请
 
 - 不需要为 arXiv 检索申请账号。
-- OpenAlex key 已配置并验证；OpenReview 和 DBLP 无需账号。Semantic Scholar 当前关闭，不需要更新 key。
+- OpenAlex key 已配置并验证；OpenReview 和 DBLP 无需账号。Semantic Scholar 已启用匿名低速检索，当前不需要 key；你之后提供新 key 时只需更新本地忽略配置。
 - 不要为常规 CI 配置真实 LLM key 或百度个人 token；CI 应使用 mock 和 fixture。
 - 暂时不申请 Sentry 等遥测服务，先对齐隐私策略和是否真的需要收集崩溃信息。
 - 暂时不新增云数据库、对象存储或账号系统；DiveEnd 当前是本地优先桌面工具。

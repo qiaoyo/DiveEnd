@@ -509,7 +509,7 @@ export function SettingsPanel() {
                   <div>
                     <p className="text-sm font-medium">论文搜索方案</p>
                     <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">
-                      OpenAlex、arXiv、OpenReview 与 DBLP 使用同一套查询、去重和排序流程。OpenAlex key 保存在本地忽略文件 `config/openalex.json`。
+                      Semantic Scholar、OpenAlex、arXiv、OpenReview 与 DBLP 使用同一套查询、去重和排序流程。Semantic Scholar 无 key 时自动使用低速匿名请求；配置 key 后使用独立额度。
                     </p>
                   </div>
                   <div className="border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-4 py-3 text-sm leading-6 text-[var(--de-ink-muted)]">

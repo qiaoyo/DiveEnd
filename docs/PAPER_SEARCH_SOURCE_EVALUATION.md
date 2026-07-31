@@ -6,14 +6,15 @@
 
 DiveEnd 不应再寻找一个替代 Semantic Scholar 的单一来源。更稳定的方案是按职责组合多个官方数据源：
 
-1. `arXiv`：开放预印本和 PDF 主来源。
-2. `OpenAlex`：跨学科召回、引用图、机构、开放获取位置和影响力数据。
-3. `OpenReview`：ICLR、NeurIPS workshop、CoRL 等最新投稿、评审、回复、决定和 PDF。
-4. `DBLP`：计算机领域的精确题名、作者、会议/期刊、年份和 DOI 校验。
-5. `Hugging Face Daily Papers`：LLM、agent、robotics、world model 的近期趋势信号。
-6. `Crossref`、`CORE`、`Europe PMC`：分别用于 DOI 元数据补全、开放全文补充和生医交叉领域补充。
+1. `Semantic Scholar`：跨学科语义召回、引用量、开放 PDF 和稳定论文标识；key 可选。
+2. `arXiv`：开放预印本和 PDF 主来源。
+3. `OpenAlex`：跨学科召回、引用图、机构、开放获取位置和影响力数据。
+4. `OpenReview`：ICLR、NeurIPS workshop、CoRL 等最新投稿、评审、回复、决定和 PDF。
+5. `DBLP`：计算机领域的精确题名、作者、会议/期刊、年份和 DOI 校验。
+6. `Hugging Face Daily Papers`：LLM、agent、robotics、world model 的近期趋势信号。
+7. `Crossref`、`CORE`、`Europe PMC`：分别用于 DOI 元数据补全、开放全文补充和生医交叉领域补充。
 
-`OpenAlex + OpenReview + DBLP` 已在 2026-07-31 接入，与 arXiv 共同使用同一套查询、合并、过滤、排序和降级流程。Hugging Face Daily Papers 仍适合未来做成独立的“趋势”入口。Semantic Scholar 当前关闭，未来恢复时也只能作为额外来源。
+`Semantic Scholar + OpenAlex + arXiv + OpenReview + DBLP` 已接入同一套查询、合并、过滤、排序和独立降级流程。Semantic Scholar 无 key 时由应用共享节流器限制为 0.5 RPS，匿名共享池返回 `429` 时立即降级；配置 key 后限制为 1 RPS 并保留有界重试。Hugging Face Daily Papers 仍适合未来做成独立的“趋势”入口。
 
 ## 真实请求结果
 
@@ -26,6 +27,7 @@ DiveEnd 不应再寻找一个替代 Semantic Scholar 的单一来源。更稳定
 
 | 来源 | 认证 | 2026-07-31 实测 | 适合的角色 | 主要限制 |
 | --- | --- | --- | --- | --- |
+| Semantic Scholar Graph API | key 可选 | 无 key 的论文详情请求曾返回 `200`；2026-07-31 搜索端点返回 `429`，五源 E2E 仍在 29.7 秒内完成；旧 key 返回 `403`，因此本地 key 暂时为空 | 语义召回、引用量、外部标识和开放 PDF 补充 | 匿名请求受共享流量影响；必须应用级限速并允许单源立即降级 |
 | OpenReview API v2 | 公共数据无需登录 | `200`；返回 VLA、world model、LLM agent benchmark 和 embodied agent 论文，以及摘要、评审、venue 状态和 PDF | 最新 ML/robotics 投稿与评审 | 会混入 rejected submission 和重复版本，必须按 forum/paperhash 去重并明确状态 |
 | DBLP Search API | 无需 key | `200`；VLA 查询前五条均为高度相关的 IEEE RA-L 或机器人论文 | CS 元数据精确检索与 venue/DOI 校验 | 没有摘要、引用图和稳定 PDF 字段 |
 | Hugging Face Daily Papers | 无需 key | `200`；最近 100 篇中命中 TurboVLA、PhiZero、agent benchmark、world model 等大量强相关新论文 | AI 趋势、热度和每日发现 | 公开端点缺少稳定契约，不应作为唯一检索源 |
@@ -37,8 +39,9 @@ DiveEnd 不应再寻找一个替代 Semantic Scholar 的单一来源。更稳定
 
 ## 统一来源职责
 
-论文主题不能决定调用哪个搜索源。LLM、agent、robotics、VLA、world model 以及其他学术主题都使用同一组 OpenAlex、arXiv、OpenReview 和 DBLP；差异只来自 query 和检索结果本身。
+论文主题不能决定调用哪个搜索源。LLM、agent、robotics、VLA、world model 以及其他学术主题都使用同一组 Semantic Scholar、OpenAlex、arXiv、OpenReview 和 DBLP；差异只来自 query 和检索结果本身。
 
+- Semantic Scholar：语义召回、引用量、外部标识和开放 PDF 补充。
 - OpenAlex：跨学科召回、摘要、引用、作者机构和开放获取位置。
 - arXiv：开放预印本、版本标识和 PDF。
 - OpenReview：会议投稿、venue 状态、摘要和 PDF。
@@ -57,6 +60,7 @@ OpenAlex   20
 arXiv      20
 OpenReview 20
 DBLP       20
+S2         20
 HF Trends  仅用于未来趋势入口
 ```
 

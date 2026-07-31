@@ -105,7 +105,7 @@ func defaultWeakLLMConfig() LLMConfig {
 
 func defaultSearchAPIConfig() SearchAPIConfig {
 	return SearchAPIConfig{
-		EnableSemanticScholar:  false,
+		EnableSemanticScholar:  true,
 		EnableArxiv:            true,
 		EnableOpenAlex:         true,
 		EnableOpenReview:       true,

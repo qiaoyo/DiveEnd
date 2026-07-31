@@ -701,7 +701,7 @@ export const defaultConfig: AppConfig = {
   },
   dailyLLMTokenBudget: 100_000_000,
   search: {
-    enableSemanticScholar: false,
+    enableSemanticScholar: true,
     enableArxiv: true,
     enableOpenAlex: true,
     enableOpenReview: true,

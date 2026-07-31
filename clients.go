@@ -1487,6 +1487,9 @@ type SearchClient struct {
 	retryMax              int
 	overallTimeout        time.Duration
 	httpClient            *http.Client
+	semanticRateMu        sync.Mutex
+	semanticLastRequest   time.Time
+	semanticRequestGap    time.Duration
 	progressMu            sync.RWMutex
 	progressCallbackMu    sync.Mutex
 	progressReporter      func(SearchProgressEvent)
@@ -1500,8 +1503,10 @@ type searchContextKey string
 const searchContextPerSourceLimitKey searchContextKey = "per_source_limit_override"
 
 const (
-	searchHTTPTimeout       = 12 * time.Second
-	searchOverallTimeoutPad = 10 * time.Second
+	searchHTTPTimeout                 = 12 * time.Second
+	searchOverallTimeoutPad           = 10 * time.Second
+	semanticScholarAuthenticatedGap   = time.Second
+	semanticScholarUnauthenticatedGap = 2 * time.Second
 )
 
 var searchEnglishStopWords = map[string]struct{}{
@@ -1560,6 +1565,7 @@ type searchProviderHTTPError struct {
 	statusCode int
 	detail     string
 	retryAfter time.Duration
+	terminal   bool
 }
 
 func (e *searchProviderHTTPError) Error() string {
@@ -1573,6 +1579,9 @@ func isRetryableSearchError(err error) bool {
 	var httpErr *searchProviderHTTPError
 	if !errors.As(err, &httpErr) {
 		return true
+	}
+	if httpErr.terminal {
+		return false
 	}
 	return httpErr.statusCode == http.StatusRequestTimeout ||
 		httpErr.statusCode == http.StatusTooEarly ||
@@ -1604,6 +1613,10 @@ func NewSearchClient(config AppConfig) *SearchClient {
 	if retryMax > 8 {
 		retryMax = 8
 	}
+	semanticRequestGap := semanticScholarUnauthenticatedGap
+	if strings.TrimSpace(searchConfig.SemanticScholarAPIKey) != "" {
+		semanticRequestGap = semanticScholarAuthenticatedGap
+	}
 
 	return &SearchClient{
 		semanticScholarAPIKey: searchConfig.SemanticScholarAPIKey,
@@ -1620,6 +1633,7 @@ func NewSearchClient(config AppConfig) *SearchClient {
 		retryMax:              retryMax,
 		overallTimeout:        retryDuration + searchOverallTimeoutPad,
 		httpClient:            &http.Client{Timeout: searchHTTPTimeout},
+		semanticRequestGap:    semanticRequestGap,
 	}
 }
 
@@ -1978,6 +1992,19 @@ func redactSearchErrorText(err error) string {
 	return redactURLQueryValuesInText(err.Error())
 }
 
+func (s *SearchClient) waitForSemanticScholarRequest(ctx context.Context) error {
+	s.semanticRateMu.Lock()
+	defer s.semanticRateMu.Unlock()
+
+	if wait := s.semanticRequestGap - time.Since(s.semanticLastRequest); wait > 0 {
+		if err := sleepWithContext(ctx, wait); err != nil {
+			return err
+		}
+	}
+	s.semanticLastRequest = time.Now()
+	return nil
+}
+
 func (s *SearchClient) searchSemanticScholar(
 	ctx context.Context,
 	query string,
@@ -1993,6 +2020,9 @@ func (s *SearchClient) searchSemanticScholar(
 
 		for remaining > 0 {
 			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if err := s.waitForSemanticScholarRequest(ctx); err != nil {
 				return nil, err
 			}
 			pageSize := minInt(100, remaining)
@@ -2031,6 +2061,8 @@ func (s *SearchClient) searchSemanticScholar(
 					statusCode: resp.StatusCode,
 					detail:     redactSensitiveText(string(body)),
 					retryAfter: searchRetryAfter(resp.Header),
+					terminal: resp.StatusCode == http.StatusTooManyRequests &&
+						strings.TrimSpace(s.semanticScholarAPIKey) == "",
 				}
 			}
 

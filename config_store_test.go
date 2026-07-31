@@ -50,7 +50,7 @@ func TestLoadAppConfigReturnsDefaultWhenMissing(t *testing.T) {
 	if config.DataPath != filepath.Join(tempDir, "DiveEndData") {
 		t.Fatalf("expected default data path in temp home, got %q", config.DataPath)
 	}
-	if config.Search.EnableSemanticScholar || !config.Search.EnableArxiv ||
+	if !config.Search.EnableSemanticScholar || !config.Search.EnableArxiv ||
 		!config.Search.EnableOpenAlex || !config.Search.EnableOpenReview || !config.Search.EnableDBLP {
 		t.Fatalf("unexpected default academic source set: %+v", config.Search)
 	}

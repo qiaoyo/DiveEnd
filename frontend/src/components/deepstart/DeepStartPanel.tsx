@@ -246,7 +246,7 @@ export function DeepStartPanel() {
                   {phaseLabels[currentPhase] || '处理中'}
                 </div>
                 <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">
-                  {deepStartProgress?.message || '正在从 Semantic Scholar 与 arXiv 获取候选论文'}
+                  {deepStartProgress?.message || '正在从五个学术来源获取候选论文'}
                 </p>
               </div>
               {isStarting ? (
