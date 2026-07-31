@@ -90,6 +90,7 @@
 
 ### 版本控制与交付
 
+- 以 `main` 作为唯一主开发基线；`archive/legacy-master-2026-07-31` 仅保留治理前无共同祖先的旧 `master` 历史，不从该归档分支继续开发。
 - 在允许的分支范围内创建 `codex/*` 分支、提交、推送并维护 Pull Request。
 - 提交前运行 `bash scripts/secret_scan.sh` 和与改动相称的测试。
 - 生成变更说明、测试证据、已知限制和下一步建议。

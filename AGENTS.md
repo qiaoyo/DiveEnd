@@ -102,6 +102,8 @@ PDF service:
 
 ## Git Hygiene
 
+The canonical default branch is `main`. The pre-governance unrelated `master` history is preserved read-only as `archive/legacy-master-2026-07-31`; do not use it as a development base.
+
 Never stage local secrets or scratch files. The following must remain ignored:
 
 - `.DS_Store`

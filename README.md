@@ -180,6 +180,8 @@ wails build
 
 Real LLM, Semantic Scholar, and Baidu E2E remain explicit local checks and are never supplied with personal credentials in routine CI.
 
+The canonical default branch is `main`. The repository's former unrelated `master` history is retained only as `archive/legacy-master-2026-07-31` for recovery and must not be used as a development base.
+
 ## Runtime Configuration
 
 Runtime config is stored in the user config directory, not in tracked project files:
