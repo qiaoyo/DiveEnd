@@ -1,6 +1,6 @@
 # DiveEnd Project Map
 
-更新时间：2026-07-30
+更新时间：2026-07-31
 
 This document maps product workflows to the current code structure. Use it after reading `README.md` and `AGENTS.md`.
 
@@ -43,15 +43,15 @@ Purpose:
 Backend files:
 
 - `main.go`
-- `app.go`
-- `config_store.go`
-- `database.go`
-- `database_restore.go`
-- `wails_models.go`
+- `internal/app/app.go`
+- `internal/app/config_store.go`
+- `internal/app/database.go`
+- `internal/app/database_restore.go`
+- `internal/app/wails_models.go`
 - `internal/domain/`
 - `internal/contracts/`
 - `internal/platform/`
-- `pdf_service_process.go`
+- `internal/app/pdf_service_process.go`
 
 Frontend files:
 
@@ -62,11 +62,11 @@ Frontend files:
 
 Tests:
 
-- `app_test.go`
-- `app_lifecycle_test.go`
-- `config_store_test.go`
-- `database_test.go`
-- `database_restore_test.go`
+- `internal/app/app_test.go`
+- `internal/app/app_lifecycle_test.go`
+- `internal/app/config_store_test.go`
+- `internal/app/database_test.go`
+- `internal/app/database_restore_test.go`
 - `frontend/src/App.test.tsx`
 - `frontend/src/components/settings/SettingsPanel.test.tsx`
 - `frontend/src/stores/appStore.test.ts`
@@ -87,17 +87,17 @@ Purpose:
 
 Backend files:
 
-- `deepstart.go`
-- `deepstart_task.go`
-- `deepstart_search_rewrite.go`
-- `deepstart_enrichment.go`
-- `deepstart_pipeline.go`
-- `deepstart_background.go`
-- `clients.go`
-- `search_sources.go`
-- `llm_budget.go`
-- `llm_context.go`
-- `paper_import_assets.go`
+- `internal/app/deepstart.go`
+- `internal/app/deepstart_task.go`
+- `internal/app/deepstart_search_rewrite.go`
+- `internal/app/deepstart_enrichment.go`
+- `internal/app/deepstart_pipeline.go`
+- `internal/app/deepstart_background.go`
+- `internal/app/clients.go`
+- `internal/app/search_sources.go`
+- `internal/app/llm_budget.go`
+- `internal/app/llm_context.go`
+- `internal/app/paper_import_assets.go`
 
 Frontend files:
 
@@ -111,14 +111,14 @@ Frontend files:
 
 Tests:
 
-- `app_test.go`
-- `clients_test.go`
-- `search_sources_test.go`
-- `llm_budget_test.go`
-- `llm_real_e2e_test.go` (opt-in real providers)
-- `search_real_e2e_test.go` (opt-in weak rewrite + live search)
-- `deepstart_enrichment_test.go`
-- `deepstart_pipeline_test.go`
+- `internal/app/app_test.go`
+- `internal/app/clients_test.go`
+- `internal/app/search_sources_test.go`
+- `internal/app/llm_budget_test.go`
+- `internal/app/llm_real_e2e_test.go` (opt-in real providers)
+- `internal/app/search_real_e2e_test.go` (opt-in weak rewrite + live search)
+- `internal/app/deepstart_enrichment_test.go`
+- `internal/app/deepstart_pipeline_test.go`
 - `frontend/src/components/deepstart/SessionDetailPanel.test.tsx`
 
 ### 3. DeepRead Reading
@@ -139,17 +139,17 @@ Purpose:
 
 Backend files:
 
-- `deepread.go`
-- `deepread_task.go`
-- `clients.go`
-- `deepread_pdf_paths.go`
-- `deepread_asset_server.go`
-- `pdf_service_client.go`
-- `pdf_service_process.go`
-- `pdf_extraction_real_e2e_test.go` (opt-in managed service + provider usage)
-- `local_file_actions.go`
-- `paper_import_assets.go`
-- `secure_file.go`
+- `internal/app/deepread.go`
+- `internal/app/deepread_task.go`
+- `internal/app/clients.go`
+- `internal/app/deepread_pdf_paths.go`
+- `internal/app/deepread_asset_server.go`
+- `internal/app/pdf_service_client.go`
+- `internal/app/pdf_service_process.go`
+- `internal/app/pdf_extraction_real_e2e_test.go` (opt-in managed service + provider usage)
+- `internal/app/local_file_actions.go`
+- `internal/app/paper_import_assets.go`
+- `internal/app/secure_file.go`
 
 Frontend files:
 
@@ -159,13 +159,13 @@ Frontend files:
 
 Tests:
 
-- `deepread_pdf_paths_test.go`
-- `deepread_ai_test.go`
-- `deepread_task_test.go`
-- `deepread_real_e2e_test.go` (opt-in strong/weak provider grounding)
-- `pdf_service_client_test.go`
-- `local_file_actions_test.go`
-- `paper_import_assets_test.go`
+- `internal/app/deepread_pdf_paths_test.go`
+- `internal/app/deepread_ai_test.go`
+- `internal/app/deepread_task_test.go`
+- `internal/app/deepread_real_e2e_test.go` (opt-in strong/weak provider grounding)
+- `internal/app/pdf_service_client_test.go`
+- `internal/app/local_file_actions_test.go`
+- `internal/app/paper_import_assets_test.go`
 - `frontend/src/components/deepread/DeepReadPanel.test.tsx`
 
 ### 4. Screening Pipeline
@@ -183,12 +183,12 @@ Purpose:
 
 Backend files:
 
-- `screening.go`
-- `screening_workflow.go`
-- `screening_task.go`
-- `pdf_service_client.go`
-- `local_file_actions.go`
-- `wails_models.go` and `internal/domain/`
+- `internal/app/screening.go`
+- `internal/app/screening_workflow.go`
+- `internal/app/screening_task.go`
+- `internal/app/pdf_service_client.go`
+- `internal/app/local_file_actions.go`
+- `internal/app/wails_models.go` and `internal/domain/`
 
 Frontend files:
 
@@ -198,9 +198,9 @@ Frontend files:
 
 Tests:
 
-- `screening_sync_test.go`
-- `screening_task_test.go`
-- `pdf_service_client_test.go`
+- `internal/app/screening_sync_test.go`
+- `internal/app/screening_task_test.go`
+- `internal/app/pdf_service_client_test.go`
 - `frontend/src/pages/Screening.test.tsx`
 
 ### 5. Library And Managed Files
@@ -215,12 +215,12 @@ Purpose:
 
 Backend files:
 
-- `folders_api.go`
-- `folder_utils.go`
-- `paper_import_assets.go`
-- `local_file_actions.go`
-- `app.go`
-- `secure_file.go`
+- `internal/app/folders_api.go`
+- `internal/app/folder_utils.go`
+- `internal/app/paper_import_assets.go`
+- `internal/app/local_file_actions.go`
+- `internal/app/app.go`
+- `internal/app/secure_file.go`
 
 Frontend files:
 
@@ -230,11 +230,11 @@ Frontend files:
 
 Tests:
 
-- `folders_api_test.go`
-- `paper_delete_test.go`
-- `paper_move_test.go`
-- `paper_import_assets_test.go`
-- `local_file_actions_test.go`
+- `internal/app/folders_api_test.go`
+- `internal/app/paper_delete_test.go`
+- `internal/app/paper_move_test.go`
+- `internal/app/paper_import_assets_test.go`
+- `internal/app/local_file_actions_test.go`
 - `frontend/src/components/paperlist/PaperListPanel.test.tsx`
 
 ### 6. Sync And Cloud Restore
@@ -252,14 +252,13 @@ Purpose:
 
 Backend files:
 
-- `sync.go`
-- `sync_api.go`
-- `baidu_pcs.go`
-- `database_restore.go`
-- `secure_file.go`
-- `redaction.go`
-- `http_response.go`
-- `app_lifecycle.go`
+- `internal/app/sync.go`
+- `internal/app/sync_api.go`
+- `internal/app/baidu_pcs.go`
+- `internal/app/database_restore.go`
+- `internal/app/secure_file.go`
+- `internal/app/platform_compat.go`
+- `internal/app/app_lifecycle.go`
 
 Frontend files:
 
@@ -269,12 +268,12 @@ Frontend files:
 
 Tests:
 
-- `sync_progress_test.go`
-- `baidu_pcs_test.go`
-- `baidu_real_e2e_test.go`
-- `baidu_current_data_e2e_test.go`
-- `app_lifecycle_test.go`
-- `screening_sync_test.go`
+- `internal/app/sync_progress_test.go`
+- `internal/app/baidu_pcs_test.go`
+- `internal/app/baidu_real_e2e_test.go`
+- `internal/app/baidu_current_data_e2e_test.go`
+- `internal/app/app_lifecycle_test.go`
+- `internal/app/screening_sync_test.go`
 - `frontend/src/pages/Sync.test.tsx`
 
 ### 7. PDF Microservice
@@ -304,10 +303,11 @@ Tests:
 
 ## Shared Hardening Utilities
 
-- `secure_file.go`: symlink-safe directory creation, atomic writes, fd-relative rename/remove helpers.
-- `redaction.go`: Go-side secret redaction.
-- `http_response.go`: bounded HTTP response reads.
-- `llm_context.go`: context-aware LLM helper paths.
+- `internal/app/secure_file.go`: symlink-safe directory creation, atomic writes, fd-relative rename/remove helpers during the transition.
+- `internal/app/platform_compat.go`: compatibility wrappers over the platform packages.
+- `internal/platform/redaction/`: Go-side secret redaction.
+- `internal/platform/httpx/`: bounded HTTP response reads and JSON decoding.
+- `internal/app/llm_context.go`: context-aware LLM helper paths.
 - `services/pdf_service/core/redaction.py`: Python-side redaction.
 - `frontend/src/lib/errors.ts`: frontend user-visible error redaction.
 
@@ -315,8 +315,8 @@ Tests:
 
 Tracked generated files:
 
-- `frontend/wailsjs/go/main/App.d.ts`
-- `frontend/wailsjs/go/main/App.js`
+- `frontend/wailsjs/go/app/App.d.ts`
+- `frontend/wailsjs/go/app/App.js`
 - `frontend/wailsjs/go/models.ts`
 
 Ignored generated/build/dependency files:
