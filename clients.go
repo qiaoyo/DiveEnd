@@ -1227,22 +1227,10 @@ func buildSearchQueryCandidates(query string) []string {
 		candidates = append(candidates, strings.Join(keywords, " "))
 	}
 
-	// 对中英混合输入补一个纯英文关键词候选，提升 Semantic Scholar 命中率。
+	// Mixed-language prompts benefit from a provider-neutral ASCII fallback.
 	asciiKeywords := extractASCIISearchKeywords(original, 8)
 	if len(asciiKeywords) > 0 {
 		candidates = append(candidates, strings.Join(asciiKeywords, " "))
-	}
-
-	if strings.Contains(lowered, "embodied intelligence") || strings.Contains(original, "具身智能") {
-		candidates = append(candidates, "embodied intelligence robotics manipulation navigation")
-		candidates = append(candidates, "vision language action robotics")
-	}
-	if strings.Contains(lowered, "world model") || strings.Contains(original, "世界模型") {
-		candidates = append(candidates, "world model reinforcement learning robotics")
-	}
-
-	if strings.Contains(lowered, "vla") || strings.Contains(lowered, "vision-language-action") {
-		candidates = append(candidates, "vision language action robotics")
 	}
 
 	return uniqueStrings(candidates)
@@ -1486,8 +1474,12 @@ func utf8Len(value string) int {
 
 type SearchClient struct {
 	semanticScholarAPIKey string
+	openAlexAPIKey        string
 	enableSemanticScholar bool
 	enableArxiv           bool
+	enableOpenAlex        bool
+	enableOpenReview      bool
+	enableDBLP            bool
 	perSourceResultLimit  int
 	retryDuration         time.Duration
 	retryInterval         time.Duration
@@ -1500,6 +1492,7 @@ type SearchClient struct {
 	progressReporter      func(SearchProgressEvent)
 	statsMu               sync.RWMutex
 	lastSearchStats       SearchRetrievalStats
+	lastSearchSources     []SearchSourceProgress
 }
 
 type searchContextKey string
@@ -1523,7 +1516,23 @@ var searchEnglishStopWords = map[string]struct{}{
 const (
 	searchSourceSemantic = "Semantic Scholar"
 	searchSourceArxiv    = "arXiv"
+	searchSourceOpenAlex = "OpenAlex"
+	searchSourceReview   = "OpenReview"
+	searchSourceDBLP     = "DBLP"
 )
+
+var searchSourceOrder = []string{
+	searchSourceOpenAlex,
+	searchSourceArxiv,
+	searchSourceReview,
+	searchSourceDBLP,
+	searchSourceSemantic,
+}
+
+type searchSourceDefinition struct {
+	name   string
+	search func(context.Context, string, int, func(string, int, bool, bool, int, error)) ([]SearchPaper, error)
+}
 
 type SearchSourceProgress struct {
 	Name        string `json:"name"`
@@ -1550,6 +1559,7 @@ type SearchProgressEvent struct {
 type searchProviderHTTPError struct {
 	statusCode int
 	detail     string
+	retryAfter time.Duration
 }
 
 func (e *searchProviderHTTPError) Error() string {
@@ -1591,11 +1601,18 @@ func NewSearchClient(config AppConfig) *SearchClient {
 	if retryMax < 1 {
 		retryMax = 1
 	}
+	if retryMax > 8 {
+		retryMax = 8
+	}
 
 	return &SearchClient{
 		semanticScholarAPIKey: searchConfig.SemanticScholarAPIKey,
+		openAlexAPIKey:        searchConfig.OpenAlexAPIKey,
 		enableSemanticScholar: searchConfig.EnableSemanticScholar,
 		enableArxiv:           searchConfig.EnableArxiv,
+		enableOpenAlex:        searchConfig.EnableOpenAlex,
+		enableOpenReview:      searchConfig.EnableOpenReview,
+		enableDBLP:            searchConfig.EnableDBLP,
 		perSourceResultLimit:  searchConfig.PerSourceResultLimit,
 		retryDuration:         retryDuration,
 		retryInterval:         retryInterval,
@@ -1604,6 +1621,26 @@ func NewSearchClient(config AppConfig) *SearchClient {
 		overallTimeout:        retryDuration + searchOverallTimeoutPad,
 		httpClient:            &http.Client{Timeout: searchHTTPTimeout},
 	}
+}
+
+func (s *SearchClient) enabledSources() []searchSourceDefinition {
+	sources := make([]searchSourceDefinition, 0, len(searchSourceOrder))
+	if s.enableOpenAlex {
+		sources = append(sources, searchSourceDefinition{name: searchSourceOpenAlex, search: s.searchOpenAlex})
+	}
+	if s.enableArxiv {
+		sources = append(sources, searchSourceDefinition{name: searchSourceArxiv, search: s.searchArXiv})
+	}
+	if s.enableOpenReview {
+		sources = append(sources, searchSourceDefinition{name: searchSourceReview, search: s.searchOpenReview})
+	}
+	if s.enableDBLP {
+		sources = append(sources, searchSourceDefinition{name: searchSourceDBLP, search: s.searchDBLP})
+	}
+	if s.enableSemanticScholar {
+		sources = append(sources, searchSourceDefinition{name: searchSourceSemantic, search: s.searchSemanticScholar})
+	}
+	return sources
 }
 
 func (s *SearchClient) SetProgressReporter(reporter func(SearchProgressEvent)) {
@@ -1648,8 +1685,10 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 		limit = 200 // 最大限制200条
 	}
 	s.updateLastSearchStats(SearchRetrievalStats{Query: query})
-	if !s.enableSemanticScholar && !s.enableArxiv {
-		return nil, fmt.Errorf("no search source enabled; please enable Semantic Scholar and/or arXiv in config/app.yaml")
+	s.updateLastSearchSources(nil)
+	enabledSources := s.enabledSources()
+	if len(enabledSources) == 0 {
+		return nil, fmt.Errorf("no academic search source enabled in config/app.yaml")
 	}
 
 	var combined []SearchPaper
@@ -1663,20 +1702,16 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 	if searchLimit <= 0 {
 		searchLimit = 100
 	}
+	if searchLimit > 100 {
+		searchLimit = 100
+	}
 
 	startedAt := time.Now()
 
 	sourceStates := map[string]SearchSourceProgress{}
-	if s.enableSemanticScholar {
-		sourceStates[searchSourceSemantic] = SearchSourceProgress{
-			Name:        searchSourceSemantic,
-			MaxAttempts: s.retryMax,
-			Status:      "pending",
-		}
-	}
-	if s.enableArxiv {
-		sourceStates[searchSourceArxiv] = SearchSourceProgress{
-			Name:        searchSourceArxiv,
+	for _, source := range enabledSources {
+		sourceStates[source.name] = SearchSourceProgress{
+			Name:        source.name,
 			MaxAttempts: s.retryMax,
 			Status:      "pending",
 		}
@@ -1727,7 +1762,6 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 		Phase:          "searching",
 	})
 
-	// 并行调用两个核心搜索源。
 	type sourceResult struct {
 		papers []SearchPaper
 		err    error
@@ -1737,18 +1771,13 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 	overallCtx, overallCancel := context.WithTimeout(ctx, s.overallTimeout)
 	defer overallCancel()
 
-	totalSources := len(sourceStates)
+	totalSources := len(enabledSources)
 	results := make(chan sourceResult, totalSources)
-	if s.enableSemanticScholar {
+	for _, source := range enabledSources {
+		source := source
 		go func() {
-			papers, err := s.searchSemanticScholar(overallCtx, query, searchLimit, updateProgress)
-			results <- sourceResult{papers: papers, err: err, name: searchSourceSemantic}
-		}()
-	}
-	if s.enableArxiv {
-		go func() {
-			papers, err := s.searchArXiv(overallCtx, query, searchLimit, updateProgress)
-			results <- sourceResult{papers: papers, err: err, name: searchSourceArxiv}
+			papers, err := source.search(overallCtx, query, searchLimit, updateProgress)
+			results <- sourceResult{papers: papers, err: err, name: source.name}
 		}()
 	}
 
@@ -1779,6 +1808,7 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 	sourceStateMu.Lock()
 	sourceSnapshot := cloneSearchSourceStates(sourceStates)
 	sourceStateMu.Unlock()
+	s.updateLastSearchSources(sourceSnapshot)
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -1794,42 +1824,22 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 		Phase:            "completed",
 	})
 
-	summaryParts := make([]string, 0, 2)
-	if s.enableSemanticScholar {
-		summaryParts = append(summaryParts, fmt.Sprintf("Semantic Scholar=%s", formatSourceSummary(sourceSnapshot, searchSourceSemantic)))
-	}
-	if s.enableArxiv {
-		summaryParts = append(summaryParts, fmt.Sprintf("arXiv=%s", formatSourceSummary(sourceSnapshot, searchSourceArxiv)))
+	summaryParts := make([]string, 0, len(enabledSources))
+	for _, source := range enabledSources {
+		summaryParts = append(summaryParts, fmt.Sprintf("%s=%s", source.name, formatSourceSummary(sourceSnapshot, source.name)))
 	}
 	log.Printf("[Search] summary: %s", strings.Join(summaryParts, " | "))
 
-	// 去重（标题+年份为主，URL/ID 兜底）
 	rawCount := len(combined)
-	paperMap := make(map[string]SearchPaper)
-	fallbackCounter := 0
-	for _, paper := range combined {
-		key := dedupeSearchPaperKey(paper)
-		if key == "" {
-			fallbackCounter++
-			key = fmt.Sprintf("fallback-%d", fallbackCounter)
-		}
-		// 保留信息更完整的版本
-		if existing, ok := paperMap[key]; !ok || isSearchPaperPreferred(paper, existing) {
-			paperMap[key] = paper
-		}
-	}
-
-	papers := make([]SearchPaper, 0, len(paperMap))
-	for _, paper := range paperMap {
-		papers = append(papers, paper)
-	}
+	papers := mergeDuplicateSearchPapers(combined)
+	dedupCount := len(papers)
 
 	// 只有在完全没有结果时才返回错误
 	if len(papers) == 0 && len(errs) > 0 {
 		s.updateLastSearchStats(SearchRetrievalStats{
 			Query:      query,
 			RawCount:   rawCount,
-			DedupCount: len(paperMap),
+			DedupCount: dedupCount,
 			FinalCount: 0,
 		})
 		return nil, fmt.Errorf("all sources failed: %s", strings.Join(errs, "; "))
@@ -1841,6 +1851,7 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 		// 但这里我们选择静默处理，让用户至少能看到部分结果
 	}
 
+	papers = filterSearchPapersByQueries(papers, []string{query})
 	papers = rankSearchPapersByQueries(papers, []string{query})
 
 	if len(papers) > limit {
@@ -1850,7 +1861,7 @@ func (s *SearchClient) SearchWithContext(ctx context.Context, query string, limi
 	s.updateLastSearchStats(SearchRetrievalStats{
 		Query:      query,
 		RawCount:   rawCount,
-		DedupCount: len(paperMap),
+		DedupCount: dedupCount,
 		FinalCount: len(papers),
 	})
 
@@ -1861,6 +1872,18 @@ func (s *SearchClient) updateLastSearchStats(stats SearchRetrievalStats) {
 	s.statsMu.Lock()
 	s.lastSearchStats = stats
 	s.statsMu.Unlock()
+}
+
+func (s *SearchClient) updateLastSearchSources(sources []SearchSourceProgress) {
+	s.statsMu.Lock()
+	s.lastSearchSources = append([]SearchSourceProgress(nil), sources...)
+	s.statsMu.Unlock()
+}
+
+func (s *SearchClient) lastSourceSnapshot() []SearchSourceProgress {
+	s.statsMu.RLock()
+	defer s.statsMu.RUnlock()
+	return append([]SearchSourceProgress(nil), s.lastSearchSources...)
 }
 
 func (s *SearchClient) retrySourceSearch(
@@ -1915,7 +1938,8 @@ func (s *SearchClient) retrySourceSearch(
 			return nil, fmt.Errorf("%s failed after %d retries in %v: %s", sourceName, attempt, time.Since(startedAt), redactSearchErrorText(lastErr))
 		}
 		if attempt < s.retryMax {
-			if wait := s.retryInterval - time.Since(attemptStarted); wait > 0 {
+			waitDuration := searchRetryDelay(s.retryInterval, attempt, err)
+			if wait := waitDuration - time.Since(attemptStarted); wait > 0 {
 				if err := sleepWithContext(ctx, wait); err != nil {
 					return nil, err
 				}
@@ -1924,6 +1948,27 @@ func (s *SearchClient) retrySourceSearch(
 	}
 
 	return nil, fmt.Errorf("%s failed after %d retries in %v: %s", sourceName, s.retryMax, time.Since(startedAt), redactSearchErrorText(lastErr))
+}
+
+func searchRetryDelay(base time.Duration, attempt int, err error) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	delay := base
+	for exponent := 1; exponent < attempt && delay < 5*time.Second; exponent++ {
+		delay *= 2
+		if delay > 5*time.Second {
+			delay = 5 * time.Second
+		}
+	}
+	var providerErr *searchProviderHTTPError
+	if errors.As(err, &providerErr) && providerErr.retryAfter > delay {
+		delay = providerErr.retryAfter
+	}
+	if delay > 15*time.Second {
+		delay = 15 * time.Second
+	}
+	return delay
 }
 
 func redactSearchErrorText(err error) string {
@@ -1985,6 +2030,7 @@ func (s *SearchClient) searchSemanticScholar(
 				return nil, &searchProviderHTTPError{
 					statusCode: resp.StatusCode,
 					detail:     redactSensitiveText(string(body)),
+					retryAfter: searchRetryAfter(resp.Header),
 				}
 			}
 
@@ -2055,6 +2101,7 @@ func (s *SearchClient) searchSemanticScholar(
 					URL:              urlValue,
 					Tags:             []string{},
 					Source:           "semantic_scholar",
+					Sources:          []string{"semantic_scholar"},
 					ExternalIDs:      externalIDs,
 					PDFCandidates:    pdfCandidates,
 					SourceLabel:      "Semantic Scholar",
@@ -2123,6 +2170,7 @@ func (s *SearchClient) searchArXiv(
 			return nil, &searchProviderHTTPError{
 				statusCode: resp.StatusCode,
 				detail:     redactSensitiveText(string(body)),
+				retryAfter: searchRetryAfter(resp.Header),
 			}
 		}
 
@@ -2154,9 +2202,8 @@ func (s *SearchClient) emitSearchProgress(progress SearchProgressEvent) {
 }
 
 func cloneSearchSourceStates(state map[string]SearchSourceProgress) []SearchSourceProgress {
-	ordered := []string{searchSourceSemantic, searchSourceArxiv}
 	cloned := make([]SearchSourceProgress, 0, len(state))
-	for _, name := range ordered {
+	for _, name := range searchSourceOrder {
 		if value, ok := state[name]; ok {
 			cloned = append(cloned, value)
 		}
@@ -2274,6 +2321,8 @@ func parseArXivXML(data []byte) ([]SearchPaper, error) {
 			PDFCandidates:    []string{fmt.Sprintf("https://arxiv.org/pdf/%s.pdf", shortID)},
 			Tags:             []string{},
 			Source:           "arxiv",
+			Sources:          []string{"arxiv"},
+			ExternalIDs:      map[string]string{"ArXiv": normalizeArxivID(shortID)},
 			SourceLabel:      "arXiv",
 		})
 	}
@@ -2282,23 +2331,11 @@ func parseArXivXML(data []byte) ([]SearchPaper, error) {
 }
 
 func dedupeSearchPaperKey(paper SearchPaper) string {
-	title := normalizedDedupeToken(paper.Title)
-	if title == "" {
-		if urlKey := normalizedDedupeToken(paper.URL); urlKey != "" {
-			return "url|" + urlKey
-		}
-		if idKey := normalizedDedupeToken(paper.ID); idKey != "" {
-			return "id|" + idKey
-		}
+	keys := dedupeSearchPaperKeys(paper)
+	if len(keys) == 0 {
 		return ""
 	}
-
-	year := "unknown"
-	if paper.Year > 0 {
-		year = fmt.Sprintf("%d", paper.Year)
-	}
-
-	return "title_year|" + title + "|" + year
+	return keys[0]
 }
 
 func normalizedDedupeToken(value string) string {
@@ -2339,6 +2376,9 @@ func searchPaperQualityScore(paper SearchPaper) int {
 	if strings.TrimSpace(paper.ID) != "" {
 		score += 3
 	}
+	score += minInt(len(paper.ExternalIDs)*2, 8)
+	score += minInt(len(paper.PDFCandidates)*2, 6)
+	score += minInt(len(paper.Sources)*2, 8)
 	score += len(strings.TrimSpace(paper.Abstract)) / 80
 	score += len(paper.Tags)
 	return score
@@ -2394,16 +2434,33 @@ func rankSearchPapersByQueries(papers []SearchPaper, queries []string) []SearchP
 				titleWeight = 36
 				abstractWeight = 10
 			}
-			if strings.Contains(title, token) {
+			if textMatchesSearchTerm(title, token) {
 				value += titleWeight
 				titleTerms = append(titleTerms, token)
 			}
-			if strings.Contains(abstract, token) {
+			if textMatchesSearchTerm(abstract, token) {
 				value += abstractWeight
 				abstractTerms = append(abstractTerms, token)
 			}
 		}
 		matchedTerms := uniqueStrings(append(titleTerms, abstractTerms...))
+		if len(primaryTokens) > 0 {
+			primaryMatches := 0
+			for _, token := range matchedTerms {
+				if _, ok := primaryTokens[token]; ok {
+					primaryMatches++
+				}
+			}
+			value += primaryMatches * 12
+			value += primaryMatches * 48 / len(primaryTokens)
+		}
+		if len(paper.Sources) > 1 {
+			value += minInt(len(paper.Sources)-1, 3) * 4
+		}
+		if paper.CitationCount > 0 {
+			value += minInt(int(math.Log10(float64(paper.CitationCount)+1)*3), 12)
+		}
+		value += minInt(searchPaperQualityScore(paper)/10, 8)
 		if len(matchedTerms) > 6 {
 			matchedTerms = matchedTerms[:6]
 		}
@@ -2505,8 +2562,7 @@ func (s *SearchClient) EnhancedSearch(query string, limit int, offset int, yearS
 	case "year_asc":
 		sort.Slice(filtered, func(i, j int) bool { return filtered[i].Year < filtered[j].Year })
 	default:
-		// 默认按年份降序
-		sort.Slice(filtered, func(i, j int) bool { return filtered[i].Year > filtered[j].Year })
+		// Search already returns the unified relevance order.
 	}
 
 	// 分页处理
@@ -2522,6 +2578,17 @@ func (s *SearchClient) EnhancedSearch(query string, limit int, offset int, yearS
 		end = total
 	}
 
+	sourceSnapshot := s.lastSourceSnapshot()
+	sourceStatuses := make([]SearchSourceStatus, 0, len(sourceSnapshot))
+	for _, source := range sourceSnapshot {
+		sourceStatuses = append(sourceStatuses, SearchSourceStatus{
+			Name:    source.Name,
+			Success: source.Success,
+			Error:   source.Error,
+			Count:   source.ResultCount,
+		})
+	}
+
 	result := &EnhancedSearchResult{
 		Query:     query,
 		Limit:     limit,
@@ -2531,10 +2598,7 @@ func (s *SearchClient) EnhancedSearch(query string, limit int, offset int, yearS
 		SortBy:    sortBy,
 		Total:     total,
 		HasMore:   hasMore,
-		Sources: []SearchSourceStatus{
-			{Name: "Semantic Scholar", Success: true, Count: len(filtered)},
-			{Name: "arXiv", Success: true, Count: len(filtered)},
-		},
+		Sources:   sourceStatuses,
 	}
 
 	if start < end {

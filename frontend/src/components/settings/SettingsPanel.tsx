@@ -509,11 +509,11 @@ export function SettingsPanel() {
                   <div>
                     <p className="text-sm font-medium">论文搜索方案</p>
                     <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">
-                      搜索源与重试策略由 `config/app.yaml` 的 `search` 段控制；Semantic Scholar key 通过 `config/semantic_scholar.json` 管理，不会写入界面配置。
+                      OpenAlex、arXiv、OpenReview 与 DBLP 使用同一套查询、去重和排序流程。OpenAlex key 保存在本地忽略文件 `config/openalex.json`。
                     </p>
                   </div>
                   <div className="border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-4 py-3 text-sm leading-6 text-[var(--de-ink-muted)]">
-                    现在的方案偏向“能直接搜索就先用”，而不是先堆配置；等搜索策略真正拆成可配置能力后，再单独加搜索源设置。
+                    任一来源失败时继续保留其他结果；DOI、arXiv ID、OpenReview forum 和题名信息用于跨来源合并。
                   </div>
                 </div>
               </div>

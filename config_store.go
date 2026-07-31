@@ -38,7 +38,11 @@ type appYAMLSearchConfig struct {
 	Search struct {
 		EnableSemanticScholar  *bool  `yaml:"enable_semantic_scholar"`
 		EnableArxiv            *bool  `yaml:"enable_arxiv"`
+		EnableOpenAlex         *bool  `yaml:"enable_openalex"`
+		EnableOpenReview       *bool  `yaml:"enable_openreview"`
+		EnableDBLP             *bool  `yaml:"enable_dblp"`
 		SemanticScholarKeyPath string `yaml:"semantic_scholar_key_path"`
+		OpenAlexKeyPath        string `yaml:"openalex_key_path"`
 		PerSourceResultLimit   int    `yaml:"per_source_result_limit"`
 		DeepStartResultLimit   int    `yaml:"deepstart_result_limit"`
 		RetryDurationSeconds   int    `yaml:"retry_duration_seconds"`
@@ -50,7 +54,11 @@ type appYAMLSearchConfig struct {
 type appYAMLSearchSettings struct {
 	EnableSemanticScholar  *bool
 	EnableArxiv            *bool
+	EnableOpenAlex         *bool
+	EnableOpenReview       *bool
+	EnableDBLP             *bool
 	SemanticScholarKeyPath string
+	OpenAlexKeyPath        string
 	PerSourceResultLimit   int
 	DeepStartResultLimit   int
 	RetryDurationSeconds   int
@@ -97,9 +105,13 @@ func defaultWeakLLMConfig() LLMConfig {
 
 func defaultSearchAPIConfig() SearchAPIConfig {
 	return SearchAPIConfig{
-		EnableSemanticScholar:  true,
+		EnableSemanticScholar:  false,
 		EnableArxiv:            true,
+		EnableOpenAlex:         true,
+		EnableOpenReview:       true,
+		EnableDBLP:             true,
 		SemanticScholarKeyPath: filepath.Join("config", "semantic_scholar.json"),
+		OpenAlexKeyPath:        filepath.Join("config", "openalex.json"),
 		PerSourceResultLimit:   20,
 		DeepStartResultLimit:   20,
 		RetryDurationSeconds:   60,
@@ -270,18 +282,27 @@ func normalizeLLMConfig(config LLMConfig) LLMConfig {
 
 func normalizeSearchAPIConfig(config SearchAPIConfig) SearchAPIConfig {
 	defaults := defaultSearchAPIConfig()
-	if !config.EnableSemanticScholar && !config.EnableArxiv &&
+	if !config.EnableSemanticScholar && !config.EnableArxiv && !config.EnableOpenAlex &&
+		!config.EnableOpenReview && !config.EnableDBLP &&
 		strings.TrimSpace(config.SemanticScholarKeyPath) == "" &&
+		strings.TrimSpace(config.OpenAlexKeyPath) == "" &&
 		config.PerSourceResultLimit == 0 &&
 		config.RetryDurationSeconds == 0 &&
 		config.RetryIntervalSeconds == 0 {
 		config.EnableSemanticScholar = defaults.EnableSemanticScholar
 		config.EnableArxiv = defaults.EnableArxiv
+		config.EnableOpenAlex = defaults.EnableOpenAlex
+		config.EnableOpenReview = defaults.EnableOpenReview
+		config.EnableDBLP = defaults.EnableDBLP
 	}
 
 	config.SemanticScholarKeyPath = strings.TrimSpace(config.SemanticScholarKeyPath)
 	if config.SemanticScholarKeyPath == "" {
 		config.SemanticScholarKeyPath = defaults.SemanticScholarKeyPath
+	}
+	config.OpenAlexKeyPath = strings.TrimSpace(config.OpenAlexKeyPath)
+	if config.OpenAlexKeyPath == "" {
+		config.OpenAlexKeyPath = defaults.OpenAlexKeyPath
 	}
 	if config.PerSourceResultLimit <= 0 {
 		config.PerSourceResultLimit = defaults.PerSourceResultLimit
@@ -305,6 +326,9 @@ func normalizeSearchAPIConfig(config SearchAPIConfig) SearchAPIConfig {
 	config.SemanticScholarAPIKey = strings.TrimSpace(config.SemanticScholarAPIKey)
 	config.HasSemanticScholarAPIKey = config.SemanticScholarAPIKey != ""
 	config.ClearSemanticScholarAPIKey = false
+	config.OpenAlexAPIKey = strings.TrimSpace(config.OpenAlexAPIKey)
+	config.HasOpenAlexAPIKey = config.OpenAlexAPIKey != ""
+	config.ClearOpenAlexAPIKey = false
 	return config
 }
 
@@ -353,6 +377,11 @@ func mergeAppConfigSecrets(existing AppConfig, incoming AppConfig) AppConfig {
 	} else if strings.TrimSpace(incoming.Search.SemanticScholarAPIKey) == "" {
 		merged.Search.SemanticScholarAPIKey = existing.Search.SemanticScholarAPIKey
 	}
+	if incoming.Search.ClearOpenAlexAPIKey {
+		merged.Search.OpenAlexAPIKey = ""
+	} else if strings.TrimSpace(incoming.Search.OpenAlexAPIKey) == "" {
+		merged.Search.OpenAlexAPIKey = existing.Search.OpenAlexAPIKey
+	}
 
 	if incoming.BaiduCloud.ClearToken {
 		merged.BaiduCloud.Token = ""
@@ -382,6 +411,7 @@ func sanitizeAppConfig(config AppConfig) AppConfig {
 	safe.LLM.APIKey = ""
 	safe.WeakLLM.APIKey = ""
 	safe.Search.SemanticScholarAPIKey = ""
+	safe.Search.OpenAlexAPIKey = ""
 	safe.BaiduCloud.Token = ""
 	safe.BaiduCloud.RefreshToken = ""
 	safe.BaiduCloud.ClientID = ""
@@ -456,6 +486,11 @@ func loadBootstrapConfig() AppConfig {
 			config.Search.SemanticScholarAPIKey = key
 		}
 	}
+	if config.Search.EnableOpenAlex {
+		if key, ok := readSearchAPIKeySeed(config.Search.OpenAlexKeyPath); ok {
+			config.Search.OpenAlexAPIKey = key
+		}
+	}
 
 	return normalizeAppConfig(config)
 }
@@ -484,6 +519,11 @@ func mergeSeedSecrets(config AppConfig) AppConfig {
 			config.Search.SemanticScholarAPIKey = key
 		}
 	}
+	if config.Search.EnableOpenAlex && strings.TrimSpace(config.Search.OpenAlexAPIKey) == "" {
+		if key, ok := readSearchAPIKeySeed(config.Search.OpenAlexKeyPath); ok {
+			config.Search.OpenAlexAPIKey = key
+		}
+	}
 
 	return normalizeAppConfig(config)
 }
@@ -499,8 +539,23 @@ func mergeSearchConfigWithAppYAML(searchConfig SearchAPIConfig) SearchAPIConfig 
 	if yamlConfig.EnableArxiv != nil {
 		searchConfig.EnableArxiv = *yamlConfig.EnableArxiv
 	}
+	if yamlConfig.EnableOpenAlex != nil {
+		searchConfig.EnableOpenAlex = *yamlConfig.EnableOpenAlex
+	}
+	if yamlConfig.EnableOpenReview != nil {
+		searchConfig.EnableOpenReview = *yamlConfig.EnableOpenReview
+	}
+	if yamlConfig.EnableDBLP != nil {
+		searchConfig.EnableDBLP = *yamlConfig.EnableDBLP
+	}
 	if strings.TrimSpace(yamlConfig.SemanticScholarKeyPath) != "" {
 		searchConfig.SemanticScholarKeyPath = strings.TrimSpace(yamlConfig.SemanticScholarKeyPath)
+	}
+	if strings.TrimSpace(yamlConfig.OpenAlexKeyPath) != "" {
+		searchConfig.OpenAlexKeyPath = strings.TrimSpace(yamlConfig.OpenAlexKeyPath)
+	}
+	if yamlConfig.EnableSemanticScholar != nil && !*yamlConfig.EnableSemanticScholar {
+		searchConfig.SemanticScholarAPIKey = ""
 	}
 	if yamlConfig.PerSourceResultLimit > 0 {
 		searchConfig.PerSourceResultLimit = yamlConfig.PerSourceResultLimit
@@ -534,7 +589,11 @@ func readAppYAMLSearchConfig() (appYAMLSearchSettings, bool) {
 	return appYAMLSearchSettings{
 		EnableSemanticScholar:  raw.Search.EnableSemanticScholar,
 		EnableArxiv:            raw.Search.EnableArxiv,
+		EnableOpenAlex:         raw.Search.EnableOpenAlex,
+		EnableOpenReview:       raw.Search.EnableOpenReview,
+		EnableDBLP:             raw.Search.EnableDBLP,
 		SemanticScholarKeyPath: strings.TrimSpace(raw.Search.SemanticScholarKeyPath),
+		OpenAlexKeyPath:        strings.TrimSpace(raw.Search.OpenAlexKeyPath),
 		PerSourceResultLimit:   raw.Search.PerSourceResultLimit,
 		DeepStartResultLimit:   raw.Search.DeepStartResultLimit,
 		RetryDurationSeconds:   raw.Search.RetryDurationSeconds,
@@ -594,6 +653,10 @@ func defaultBaiduTokenPath() string {
 }
 
 func readSemanticScholarSeed(path string) (string, bool) {
+	return readSearchAPIKeySeed(path)
+}
+
+func readSearchAPIKeySeed(path string) (string, bool) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", false

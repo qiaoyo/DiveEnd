@@ -50,6 +50,10 @@ func TestLoadAppConfigReturnsDefaultWhenMissing(t *testing.T) {
 	if config.DataPath != filepath.Join(tempDir, "DiveEndData") {
 		t.Fatalf("expected default data path in temp home, got %q", config.DataPath)
 	}
+	if config.Search.EnableSemanticScholar || !config.Search.EnableArxiv ||
+		!config.Search.EnableOpenAlex || !config.Search.EnableOpenReview || !config.Search.EnableDBLP {
+		t.Fatalf("unexpected default academic source set: %+v", config.Search)
+	}
 }
 
 func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
@@ -72,6 +76,7 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	config.Theme = "dark"
 	config.DataPath = filepath.Join(tempDir, "LibraryData")
 	config.Search.SemanticScholarAPIKey = "semantic-key"
+	config.Search.OpenAlexAPIKey = "openalex-key"
 	config.BaiduCloud.Enabled = true
 	config.BaiduCloud.Token = "baidu-token"
 
@@ -111,6 +116,9 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.Search.SemanticScholarAPIKey != "semantic-key" {
 		t.Fatalf("expected Semantic Scholar key to round-trip")
+	}
+	if loaded.Search.OpenAlexAPIKey != "openalex-key" {
+		t.Fatalf("expected OpenAlex key to round-trip")
 	}
 	if loaded.BaiduCloud.Token != "baidu-token" {
 		t.Fatalf("expected Baidu token to round-trip")
@@ -175,6 +183,7 @@ func TestSanitizeAppConfigRemovesSecretValues(t *testing.T) {
 	config.LLM.APIKey = "secret"
 	config.WeakLLM.APIKey = "weak-secret"
 	config.Search.SemanticScholarAPIKey = "semantic-secret"
+	config.Search.OpenAlexAPIKey = "openalex-secret"
 	config.BaiduCloud.Token = "token-secret"
 	config.BaiduCloud.RefreshToken = "refresh-secret"
 	config.BaiduCloud.ClientID = "client-id-secret"
@@ -201,6 +210,9 @@ func TestSanitizeAppConfigRemovesSecretValues(t *testing.T) {
 	}
 	if !sanitized.Search.HasSemanticScholarAPIKey {
 		t.Fatal("expected search api key presence flag to remain true")
+	}
+	if sanitized.Search.OpenAlexAPIKey != "" || !sanitized.Search.HasOpenAlexAPIKey {
+		t.Fatal("expected OpenAlex key to be redacted while preserving its presence flag")
 	}
 	if sanitized.BaiduCloud.Token != "" {
 		t.Fatal("expected cloud token to be redacted")
@@ -487,5 +499,42 @@ func TestLoadAppConfigDoesNotReadSemanticKeyWhenSourceDisabled(t *testing.T) {
 	}
 	if config.Search.SemanticScholarAPIKey != "" {
 		t.Fatalf("expected semantic key to stay empty when semantic source disabled, got %q", config.Search.SemanticScholarAPIKey)
+	}
+}
+
+func TestLoadAppConfigBootstrapsUniversalSearchSourcesAndOpenAlexKey(t *testing.T) {
+	useTestConfigPath(t)
+
+	if err := os.MkdirAll("config", 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	appYAML := `search:
+  enable_semantic_scholar: false
+  enable_arxiv: true
+  enable_openalex: true
+  enable_openreview: true
+  enable_dblp: true
+  openalex_key_path: "config/openalex.private.json"
+`
+	if err := os.WriteFile(filepath.Join("config", "app.yaml"), []byte(appYAML), 0644); err != nil {
+		t.Fatalf("WriteFile app.yaml error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "openalex.private.json"), []byte(`{"api_key":"openalex-seed-key"}`), 0600); err != nil {
+		t.Fatalf("WriteFile OpenAlex key seed error = %v", err)
+	}
+
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if config.Search.EnableSemanticScholar {
+		t.Fatal("expected Semantic Scholar to remain disabled")
+	}
+	if !config.Search.EnableArxiv || !config.Search.EnableOpenAlex ||
+		!config.Search.EnableOpenReview || !config.Search.EnableDBLP {
+		t.Fatalf("expected universal source set to be enabled, got %+v", config.Search)
+	}
+	if config.Search.OpenAlexAPIKey != "openalex-seed-key" {
+		t.Fatal("expected OpenAlex key to load from ignored seed file")
 	}
 }

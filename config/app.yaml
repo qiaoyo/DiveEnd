@@ -41,9 +41,13 @@ llm:
 
 # Search runtime configuration (non-secret)
 search:
-  enable_semantic_scholar: true
+  enable_semantic_scholar: false
   enable_arxiv: true
+  enable_openalex: true
+  enable_openreview: true
+  enable_dblp: true
   semantic_scholar_key_path: "config/semantic_scholar.json"
+  openalex_key_path: "config/openalex.json"
   per_source_result_limit: 20
   deepstart_result_limit: 20
   retry_duration_seconds: 60

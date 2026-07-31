@@ -1,0 +1,10 @@
+OpenAlex terms and paper-license notice
+
+Recorded: 2026-07-31
+
+Before using OpenAlex data, check the current service terms:
+https://developers.openalex.org/
+
+Before downloading or redistributing a paper, check the license attached to
+that paper and its source location. Open-access availability does not imply
+permission for every form of reuse or redistribution.

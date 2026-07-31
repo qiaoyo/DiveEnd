@@ -16,6 +16,7 @@ config/weak_llm.json
 config/strong_llm.json
 config/stroing_llm.json
 config/semantic_scholar.json
+config/openalex.json
 DiveEnd
 data/diveend.db
 frontend/package.json.md5

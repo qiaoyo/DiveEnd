@@ -6,13 +6,13 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 
 ## 当前状态
 
-更新时间：2026-07-30
+更新时间：2026-07-31
 
 项目已完成 Phase 1-6 的功能骨架，并完成一轮 P0-P3 code review remediation。当前阶段是可靠性、真实环境验收、发布安全和体验打磨。
 
 已落地的主流程：
 
-- **DeepStart**：自然语言输入研究方向，聚合 Semantic Scholar 和 arXiv，执行最多 3 个重写 query 后统一按标题/摘要相关性和年份排序，默认收敛到约 20 篇高相关候选；每篇保留可核查的标题/摘要命中解释，只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
+- **DeepStart**：自然语言输入研究方向，对每个原始/改写 query 并行检索 OpenAlex、arXiv、OpenReview 和 DBLP，再按 DOI、arXiv ID、OpenReview forum 和规范化题名合并版本，使用统一的短语/词项覆盖、元数据质量、来源一致性、引用与时间信号过滤排序。所有主题使用同一套来源和规则，默认收敛到约 20 篇高相关候选；只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
 - **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文；抽取、首次分析和后续决策均可非破坏性停止，节点、路径和论文状态以 SQLite 事务一次提交，取消或模型失败不会留下半完成选择。分析页列出最近的本地会话，可恢复提取、筛选或已入库状态且不会自动重跑模型。
 - **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；低延迟问答优先走弱模型，全文总结走强模型，二者都只保留能在已解析章节中逐字验证的依据。长论文上下文按问题相关性和核心章节公平分配，AI 请求可主动取消。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
 - **Sync**：百度云同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB；同步工作台使用统一中文操作语义，集中呈现预检、进度、历史、冲突和自动化设置。
@@ -31,6 +31,7 @@ Go app backend
   |-- config_store.go        runtime config, secret merge, seed loading
   |-- database.go            SQLite migration and core persistence
   |-- deepstart*.go          search, AI analysis, preprocessing, background tasks
+  |-- search_sources.go      OpenAlex/OpenReview/DBLP providers, merge and filtering
   |-- deepread*.go           PDF preparation, cache, notes, asset-server URL
   |-- screening*.go          batch upload, extraction, decision tree, import
   |-- sync*.go               Baidu Cloud sync, progress, conflicts, restore
@@ -59,6 +60,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 
 - [AGENTS.md](AGENTS.md): concise agent entry point and current implementation status.
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md): map from product workflows to files and tests.
+- [docs/PAPER_SEARCH_SOURCE_EVALUATION.md](docs/PAPER_SEARCH_SOURCE_EVALUATION.md): tested academic search sources, agent tools, integration roles, and account prerequisites.
 - [docs/AUTONOMOUS_DEVELOPMENT_SETUP.md](docs/AUTONOMOUS_DEVELOPMENT_SETUP.md): responsibility boundaries, design decisions, account prerequisites, and the long-running autonomous development loop.
 - [docs/superpowers/plans/2026-06-10-code-review-remediation.md](docs/superpowers/plans/2026-06-10-code-review-remediation.md): detailed remediation record.
 - [docs/superpowers/plans/2026-06-11-secret-history-remediation.md](docs/superpowers/plans/2026-06-11-secret-history-remediation.md): Git history secret cleanup plan.
@@ -69,7 +71,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 - Git history still contains previously committed local files and at least one historical OpenAI-style key pattern. Current tracking is guarded, but public release requires history rewrite and credential rotation.
 - Packaged-window Computer Use passed on 2026-07-31: a real DeepStart run received live progress events and completed a 20-paper research map; DeepRead loaded a 10-page PDF and returned a grounded answer with three source excerpts; Sync and Settings loaded real backend state.
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic refresh and secure persistence of an expired access token.
-- The configured Semantic Scholar API key still returned `403 Forbidden` on 2026-07-31. The same paper endpoint returned `200` without the key, and the proxy configured by `~/setup_proxy.sh` timed out from this machine. The key file and documented `x-api-key` header are valid, so discovery must retain arXiv/cache degradation until Semantic Scholar issues a replacement.
+- Semantic Scholar is disabled and its local key is intentionally empty. OpenAlex, arXiv, OpenReview and DBLP now provide the default retrieval path; each source degrades independently.
 - GitHub SSH read/write and authenticated `gh` API access are available for `qiaoyo/DiveEnd`; the current account has `ADMIN` repository permission.
 - DeepRead can still be improved with finer page-level cache/prefetch, PDF 页码级证据定位、跨论文对比和更好的长文档导航。
 - High-DPI polish remains useful; library, sync, and settings have completed the current shared-token cleanup, and the main workflows pass narrow-window smoke coverage.
@@ -90,6 +92,7 @@ The following are intentionally local-only and must not be committed:
 - `config/strong_llm.json`
 - `config/stroing_llm.json`
 - `config/semantic_scholar.json`
+- `config/openalex.json`
 - `frontend/node_modules/`
 - `frontend/dist/`
 - `build/bin/`
@@ -178,7 +181,7 @@ wails build
 - PDF service tests on Python 3.13;
 - packaged Wails desktop build.
 
-Real LLM, Semantic Scholar, and Baidu E2E remain explicit local checks and are never supplied with personal credentials in routine CI.
+Real LLM, academic-source, and Baidu E2E remain explicit local checks and are never supplied with personal credentials in routine CI.
 
 The canonical default branch is `main`. The repository's former unrelated `master` history is retained only as `archive/legacy-master-2026-07-31` for recovery and must not be used as a development base.
 
@@ -195,6 +198,7 @@ Optional local seed files are read on first startup but remain ignored:
 - `config/strong_llm.json`
 - `config/weak_llm.json`
 - `config/semantic_scholar.json`
+- `config/openalex.json`
 - `baiduyun_token.json`
 
 ## Verification Baseline
@@ -215,7 +219,7 @@ Passed:
 - `wails build`
 - Real strong and weak LLM chat-completion probes.
 - Opt-in strong/weak LLM budget E2E (`DIVEEND_REAL_LLM_E2E=1`) verifies provider usage accounting and restart persistence.
-- Opt-in retrieval E2E (`DIVEEND_REAL_SEARCH_E2E=1`) verifies all rewritten queries, permanent Semantic Scholar failure degradation, arXiv results, and top-five topic relevance.
+- Opt-in retrieval E2E (`DIVEEND_REAL_SEARCH_E2E=1`) verifies all rewritten queries, OpenAlex/arXiv/OpenReview/DBLP partial-failure behavior, version merging, and top-five topic relevance. The 2026-07-31 live run returned relevant results from all four sources and placed five code/LLM/agent papers in the top five.
 - Opt-in PDF extraction E2E (`DIVEEND_REAL_PDF_EXTRACTION_E2E=1`) verifies managed service startup, real parsing/extraction, provider usage reporting, and exact shared-budget settlement.
 - Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
 - Browser and real-backend E2E through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, Screening decisions, and sync workflows.
@@ -226,5 +230,5 @@ Passed:
 Notes:
 
 - `npm audit --omit=dev` reports the React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses a client-only `HashRouter` and does not use RSC; the currently published `react-router-dom` line has no version that clears this advisory without a React 19/Router 8 migration. Keep this scoped exception under review.
-- The configured Semantic Scholar key returned `403 Forbidden` on both search and paper-detail endpoints, while the identical paper-detail request without a key returned `200`. `~/setup_proxy.sh` was also tested, but its proxy endpoint timed out. This isolates the remaining issue to the key's server-side status rather than the DiveEnd request format.
+- The configured OpenAlex key passed a real skill rate-limit probe and product retrieval E2E. Semantic Scholar remains disabled until a future need justifies obtaining a replacement key.
 - Workspace pages now load by route: the common entry bundle is about 236 KiB before gzip, while the roughly 407 KiB PDF reader chunk loads only when DeepRead is opened.

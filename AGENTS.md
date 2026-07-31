@@ -27,7 +27,7 @@ Implemented:
 
 - Config persistence, secret merging, local seed loading, redacted display values, and a shared persistent daily LLM token budget (default 100,000,000) covering both Go calls and Python Screening extraction.
 - SQLite migrations for folders, papers, translations, DeepStart, DeepRead, Screening, Sync records, and conflicts.
-- DeepStart search over Semantic Scholar and arXiv, all-query retrieval across up to three rewrites, relevance/recency ranking with persisted title/abstract match explanations, focused default retrieval of about 20 candidates, eager PDF/weak-model preprocessing for the top 4, on-demand handling for the rest, user-triggered supplemental expansion, enrichment, AI analysis, progress events, cancellation.
+- DeepStart uses one topic-independent retrieval pipeline over OpenAlex, arXiv, OpenReview, and DBLP for every original/rewritten query. It merges versions by DOI, arXiv ID, OpenReview forum, and normalized title; applies conservative relevance filtering and unified ranking; preserves source provenance; retries with bounded backoff; and degrades each source independently. Focused retrieval still returns about 20 candidates, eagerly preprocesses the top 4, and handles the rest on demand.
 - DeepRead paper state, PDF parsing cache, notes, translation history, weak-model low-latency questions, strong-model summaries, relevance-aware long-paper context, verbatim-grounded section evidence, cancellable AI requests, Wails asset-server PDF URL, bounded base64 fallback.
 - Screening sessions, recent-session resume without automatic model reruns, managed PDF upload storage, extraction progress, session-scoped cancellation across extraction and AI decisions, provider token usage reporting, shared-budget settlement, atomic node/path/paper decision persistence, LLM decision tree, final import.
 - Library folder tree, folder create/delete/rename/move, paper delete, single-paper move, batch move, managed PDF/cache path maintenance.
@@ -41,7 +41,7 @@ Remaining risks:
 - Git history still contains previously committed local secret/scratch files and at least one historical OpenAI-style key pattern. Current tree tracking is fixed, but public release requires history rewrite and token rotation.
 - Packaged-window Computer Use passed on 2026-07-31: a real DeepStart run received live Wails progress events and completed a 20-paper research map; DeepRead loaded a 10-page PDF and returned a grounded weak-model answer with three verified excerpts; Sync and Settings loaded real backend state.
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic token refresh and secure persistence.
-- The configured Semantic Scholar key still returned `403 Forbidden` on 2026-07-31. The same paper endpoint returned `200` without the key, while `~/setup_proxy.sh` pointed to a proxy that timed out from this machine. The local file is valid and uses the documented `x-api-key` header, so treat the key as rejected server-side and use arXiv/cache degradation until Semantic Scholar issues a replacement.
+- The OpenAlex key passed a real rate-limit probe and multi-query product E2E on 2026-07-31. Semantic Scholar is disabled and its local key is intentionally empty.
 - GitHub SSH read/write and `gh` CLI API access work for `qiaoyo/DiveEnd`; the authenticated account has `ADMIN` repository permission and `repo` scope.
 - DeepRead page-level evidence navigation, cross-paper analysis, and high-DPI polish remain future work; library, sync, and settings have completed the current shared-token cleanup, and the main workflows pass 900 px and 720 px smoke coverage without page-level horizontal overflow.
 
@@ -50,10 +50,11 @@ Remaining risks:
 1. `README.md` for product status and development commands.
 2. `AGENTS.md` for this current agent-facing summary.
 3. `docs/PROJECT_MAP.md` for the exact mapping from workflow to files and tests.
-4. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
-5. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
-6. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
-7. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
+4. `docs/PAPER_SEARCH_SOURCE_EVALUATION.md` for tested search sources, agent tools, integration roles, and account prerequisites.
+5. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
+6. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
+7. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
+8. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
 
 If a historical document conflicts with current code or this file, prefer current code, `README.md`, `AGENTS.md`, and `docs/PROJECT_MAP.md`.
 
@@ -66,7 +67,8 @@ Root Go files are the backend package. The legacy `src/config`, `src/database`, 
 - `models.go`: shared Go models exported to frontend bindings.
 - `database.go`: SQLite connection, migrations, core folder/paper/translation/DeepStart/DeepRead persistence.
 - `config_store.go`: runtime config loading, saving, sanitization, secret prefill, local seed loading.
-- `clients.go`: LLM clients and paper search clients.
+- `clients.go`: LLM clients and the provider-neutral search orchestrator.
+- `search_sources.go`: OpenAlex, OpenReview, and DBLP clients plus cross-source merge, filtering, retry metadata, and provenance helpers.
 - `deepstart*.go`: DeepStart session workflow, search rewrite, enrichment, preprocessing, background work, cancellation.
 - `deepread*.go`: DeepRead state, parse cache, notes, managed PDF path checks, Wails asset server.
 - `screening.go`, `screening_workflow.go`: Screening persistence and Wails workflow.
@@ -118,6 +120,7 @@ Never stage local secrets or scratch files. The following must remain ignored:
 - `config/strong_llm.json`
 - `config/stroing_llm.json`
 - `config/semantic_scholar.json`
+- `config/openalex.json`
 - `frontend/node_modules/`
 - `frontend/dist/`
 - `build/bin/`
