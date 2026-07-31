@@ -61,24 +61,25 @@ If a historical document conflicts with current code or this file, prefer curren
 
 ## Code Map
 
-Root Go files are the backend package. The legacy `src/config`, `src/database`, and `src/llm` packages have been removed from the active implementation.
+The repository root contains only the Wails desktop entrypoint. The backend
+application and all backend tests live under `internal/app`; the legacy
+`src/config`, `src/database`, and `src/llm` packages have been removed from the
+active implementation.
 
-- `main.go`: Wails app setup and asset server registration.
-- `app.go`: app lifecycle, config application, Wails methods, translation, paper import/move/delete entry points.
-- `wails_models.go`: Wails-compatible aliases for the shared contracts in `internal/domain`.
-- `internal/domain/`: shared Go models and workflow request/response contracts exported to frontend bindings.
+- `main.go`: Wails app setup, embedded frontend assets, dependency composition, and lifecycle callback wiring.
+- `internal/app/app.go`: application state, config application, Wails methods, translation, and paper workflow entry points.
+- `internal/app/clients.go`: LLM clients and the provider-neutral search orchestrator.
+- `internal/app/search_sources.go`: OpenAlex, OpenReview, and DBLP clients plus cross-source merge, filtering, retry metadata, and provenance helpers.
+- `internal/app/database.go`: SQLite connection, migrations, and core persistence.
+- `internal/app/deepstart*.go`: DeepStart session workflow, search rewrite, enrichment, preprocessing, background work, and cancellation.
+- `internal/app/deepread*.go`: DeepRead state, parse cache, notes, managed PDF paths, and asset server.
+- `internal/app/screening*.go`: Screening persistence, extraction, decision tree, and import workflow.
+- `internal/app/sync*.go`, `internal/app/baidu_pcs.go`: Baidu sync, progress, conflicts, restore flow, and PCS client.
+- `internal/app/paper_import_assets.go`, `internal/app/local_file_actions.go`, `internal/app/folders_api.go`: library asset management and user file actions.
+- `internal/app/wails_lifecycle.go`: package-level Wails lifecycle adapters; these are deliberately not bound as frontend methods.
+- `internal/domain/`: shared Go models and workflow request/response contracts.
 - `internal/contracts/`: service ports for strong/weak LLM, paper search, query rewrite, and DeepRead assistance.
 - `internal/platform/`: provider-neutral bounded HTTP, JSON decoding, and secret/error redaction helpers.
-- `database.go`: SQLite connection, migrations, core folder/paper/translation/DeepStart/DeepRead persistence.
-- `config_store.go`: runtime config loading, saving, sanitization, secret prefill, local seed loading.
-- `clients.go`: LLM clients and the provider-neutral search orchestrator.
-- `search_sources.go`: OpenAlex, OpenReview, and DBLP clients plus cross-source merge, filtering, retry metadata, and provenance helpers.
-- `deepstart*.go`: DeepStart session workflow, search rewrite, enrichment, preprocessing, background work, cancellation.
-- `deepread*.go`: DeepRead state, parse cache, notes, managed PDF path checks, Wails asset server.
-- `screening.go`, `screening_workflow.go`: Screening persistence and Wails workflow.
-- `sync.go`, `sync_api.go`, `baidu_pcs.go`, `database_restore.go`: Baidu sync, progress, conflicts, restore flow.
-- `paper_import_assets.go`, `local_file_actions.go`, `folders_api.go`, `folder_utils.go`: library asset management and user file actions.
-- `secure_file.go`, `redaction.go`, `http_response.go`, `llm_context.go`: shared hardening utilities.
 
 Frontend:
 
@@ -103,7 +104,7 @@ PDF service:
 - `services/pdf_service/core/config.py`: service settings.
 - `services/pdf_service/core/llm_client.py`: OpenAI/Anthropic-compatible client.
 - `services/pdf_service/core/redaction.py`: service-side secret redaction.
-- `pdf_service_process.go`: desktop-managed local PDF service discovery, Python verification, readiness wait, and shutdown.
+- `internal/app/pdf_service_process.go`: desktop-managed local PDF service discovery, Python verification, readiness wait, and shutdown.
 - `scripts/setup_pdf_service.sh`: one-time ignored `.venv` bootstrap for local desktop use.
 
 ## Git Hygiene

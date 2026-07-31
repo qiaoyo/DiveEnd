@@ -26,6 +26,16 @@ describe('backend runtime helpers', () => {
     expect(resolveFilePaths([])).toEqual([]);
   });
 
+  it('uses the internal app namespace exposed by the packaged Wails binary', () => {
+    (window as any).go = { app: { App: {} } };
+    (window as any).runtime = {
+      CanResolveFilePaths: vi.fn(() => true),
+      ResolveFilePaths: vi.fn(() => []),
+    };
+
+    expect(canResolveFilePaths()).toBe(true);
+  });
+
   it('resolves file paths and subscribes to extract progress inside Wails runtime', () => {
     const listeners = new Map<string, (...args: any[]) => void>();
     const unsubscribeSpy = vi.fn(() => listeners.delete('extract-progress'));

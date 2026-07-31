@@ -42,110 +42,92 @@ import { defaultConfig, defaultInitialState } from '../types';
 import { CanResolveFilePaths, EventsOn, ResolveFilePaths } from '../../wailsjs/runtime/runtime';
 import { sanitizeUserVisibleError } from './errors';
 
+interface DiveEndWailsApp {
+  GetInitialState(): Promise<InitialState>;
+  GetSecretPrefill(): Promise<ConfigSecretPrefill>;
+  GetPDFServiceStatus(): Promise<PDFServiceStatus>;
+  GetLLMUsage(): Promise<LLMUsageSnapshot>;
+  SaveConfig(config: AppConfig): Promise<SaveConfigResult>;
+  SearchPapers(query: string, limit: number): Promise<SearchPaper[]>;
+  EnhancedSearchPapers(
+    query: string,
+    limit: number,
+    offset: number,
+    yearStart: number,
+    yearEnd: number,
+    sortBy: string
+  ): Promise<EnhancedSearchResult>;
+  ListDeepStartSessions(): Promise<DeepStartSessionSummary[]>;
+  GetDeepStartSession(sessionId: string): Promise<DeepStartSessionDetail>;
+  StartDeepStartSession(prompt: string, targetFolderId: string): Promise<DeepStartSessionDetail>;
+  CancelDeepStartTask(sessionId: string): Promise<void>;
+  ReplyDeepStartSession(sessionId: string, message: string): Promise<DeepStartSessionDetail>;
+  SupplementDeepStartSearch(sessionId: string, query: string, perSourceLimit: number): Promise<DeepStartSessionDetail>;
+  UndoDeepStartNarrow(sessionId: string): Promise<DeepStartSessionDetail>;
+  RerunDeepStartSearch(sessionId: string, query: string): Promise<DeepStartSessionDetail>;
+  UpdateDeepStartSelections(sessionId: string, selectedPaperIds: string[], targetFolderId: string): Promise<DeepStartSessionDetail>;
+  GetFolders(): Promise<Folder[]>;
+  CreateFolder(name: string): Promise<Folder>;
+  GetFolderTree(): Promise<FolderNode[]>;
+  CreateFolderNode(request: CreateFolderNodeRequest): Promise<Folder>;
+  RenameFolderNode(request: RenameFolderNodeRequest): Promise<Folder>;
+  MoveFolderNode(request: MoveFolderNodeRequest): Promise<Folder>;
+  DeleteFolderNode(folderId: string): Promise<void>;
+  GetPapers(folderId: string): Promise<Paper[]>;
+  ImportPapers(folderId: string, papers: SearchPaper[]): Promise<Paper[]>;
+  ImportPapersWithAssets(folderId: string, papers: SearchPaper[]): Promise<ImportPapersWithAssetsResult>;
+  RetryPaperDownload(paperId: string): Promise<void>;
+  RetryPaperDownloadWithURL(paperId: string, manualURL: string): Promise<void>;
+  RetryFolderPendingDownloads(folderId: string): Promise<number>;
+  SelectAndAttachPaperPDF(paperId: string): Promise<Paper>;
+  AttachLocalPDFToPaper(paperId: string, sourcePath: string): Promise<Paper>;
+  GetLocalStorageOverview(): Promise<LocalStorageOverview>;
+  GetFolderStorageTreeOverview(): Promise<FolderStorageTreeOverview>;
+  MovePaperToFolder(paperId: string, targetFolderId: string): Promise<Paper>;
+  MovePapersToFolder(paperIds: string[], targetFolderId: string): Promise<Paper[]>;
+  DeletePaper(id: string): Promise<void>;
+  TranslatePaperSection(paperId: string, section: string, text: string): Promise<TranslationRecord>;
+  GetTranslations(paperId: string): Promise<TranslationRecord[]>;
+  GetDeepReadState(paperId: string): Promise<DeepReadState>;
+  PrepareDeepReadPaper(paperId: string): Promise<DeepReadState>;
+  SaveDeepReadNote(paperId: string, section: string, content: string): Promise<DeepReadNote>;
+  AskDeepReadPaper(paperId: string, sectionId: string, question: string, mode: 'question' | 'summary'): Promise<DeepReadAIResponse>;
+  CancelDeepReadAI(): Promise<boolean>;
+  GetDeepReadPDFURL(paperId: string): Promise<string>;
+  GetDeepReadPDFBytes(paperId: string): Promise<string>;
+  SelectScreeningPDFs(): Promise<string[]>;
+  CreateScreeningSession(title: string): Promise<ScreeningSession>;
+  UploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<ScreeningSessionDetail>;
+  ExtractPaperContent(sessionId: string): Promise<ExtractProgress>;
+  GetExtractProgress(sessionId: string): Promise<ExtractProgress>;
+  AnalyzePapers(sessionId: string): Promise<ScreeningDecisionNode>;
+  ApplyScreeningChoice(sessionId: string, selectedOptions: string[]): Promise<ScreeningDecisionNode>;
+  CompleteScreening(sessionId: string, targetFolderId: string): Promise<Paper[]>;
+  ListScreeningSessions(): Promise<ScreeningSession[]>;
+  GetScreeningSession(sessionId: string): Promise<ScreeningSessionDetail>;
+  CancelScreeningTask(sessionId: string): Promise<void>;
+  CancelScreening(sessionId: string): Promise<void>;
+  GetSyncStatus(): Promise<SyncStatus>;
+  TriggerSync(): Promise<SyncProgress>;
+  GetSyncProgress(): Promise<SyncProgress>;
+  GetSyncPreview(): Promise<SyncPreview>;
+  RefreshBaiduToken(): Promise<BaiduTokenRefreshStatus>;
+  GetSyncConflicts(): Promise<SyncConflict[]>;
+  GetSyncRecords(limit: number): Promise<SyncRecord[]>;
+  ResolveSyncConflict(conflictId: string, resolution: 'local' | 'remote' | 'skipped' | 'timestamp'): Promise<void>;
+  GetSyncSettings(): Promise<SyncSettings>;
+  SaveSyncSettings(settings: SyncSettings): Promise<SyncSettings>;
+  GetPendingDatabaseRestore(): Promise<DatabaseRestoreStatus>;
+  ApplyPendingDatabaseRestore(): Promise<DatabaseRestoreStatus>;
+  CancelPendingDatabaseRestore(): Promise<void>;
+}
+
 declare global {
   interface Window {
     go?: {
+      app?: { App?: DiveEndWailsApp };
       main?: {
-        App?: {
-          GetInitialState(): Promise<InitialState>;
-          GetSecretPrefill(): Promise<ConfigSecretPrefill>;
-          GetPDFServiceStatus(): Promise<PDFServiceStatus>;
-          GetLLMUsage(): Promise<LLMUsageSnapshot>;
-          SaveConfig(config: AppConfig): Promise<SaveConfigResult>;
-          SearchPapers(query: string, limit: number): Promise<SearchPaper[]>;
-          EnhancedSearchPapers(
-            query: string,
-            limit: number,
-            offset: number,
-            yearStart: number,
-            yearEnd: number,
-            sortBy: string
-          ): Promise<EnhancedSearchResult>;
-          ListDeepStartSessions(): Promise<DeepStartSessionSummary[]>;
-          GetDeepStartSession(sessionId: string): Promise<DeepStartSessionDetail>;
-          StartDeepStartSession(prompt: string, targetFolderId: string): Promise<DeepStartSessionDetail>;
-          CancelDeepStartTask(sessionId: string): Promise<void>;
-          ReplyDeepStartSession(sessionId: string, message: string): Promise<DeepStartSessionDetail>;
-          SupplementDeepStartSearch(
-            sessionId: string,
-            query: string,
-            perSourceLimit: number
-          ): Promise<DeepStartSessionDetail>;
-          UndoDeepStartNarrow(sessionId: string): Promise<DeepStartSessionDetail>;
-          RerunDeepStartSearch(sessionId: string, query: string): Promise<DeepStartSessionDetail>;
-          UpdateDeepStartSelections(
-            sessionId: string,
-            selectedPaperIds: string[],
-            targetFolderId: string
-          ): Promise<DeepStartSessionDetail>;
-          GetFolders(): Promise<Folder[]>;
-          CreateFolder(name: string): Promise<Folder>;
-          GetFolderTree(): Promise<FolderNode[]>;
-          CreateFolderNode(request: CreateFolderNodeRequest): Promise<Folder>;
-          RenameFolderNode(request: RenameFolderNodeRequest): Promise<Folder>;
-          MoveFolderNode(request: MoveFolderNodeRequest): Promise<Folder>;
-          DeleteFolderNode(folderId: string): Promise<void>;
-          GetPapers(folderId: string): Promise<Paper[]>;
-          ImportPapers(folderId: string, papers: SearchPaper[]): Promise<Paper[]>;
-          ImportPapersWithAssets(folderId: string, papers: SearchPaper[]): Promise<ImportPapersWithAssetsResult>;
-          RetryPaperDownload(paperId: string): Promise<void>;
-          RetryPaperDownloadWithURL(paperId: string, manualURL: string): Promise<void>;
-          RetryFolderPendingDownloads(folderId: string): Promise<number>;
-          SelectAndAttachPaperPDF(paperId: string): Promise<Paper>;
-          AttachLocalPDFToPaper(paperId: string, sourcePath: string): Promise<Paper>;
-          GetLocalStorageOverview(): Promise<LocalStorageOverview>;
-          GetFolderStorageTreeOverview(): Promise<FolderStorageTreeOverview>;
-          MovePaperToFolder(paperId: string, targetFolderId: string): Promise<Paper>;
-          MovePapersToFolder(paperIds: string[], targetFolderId: string): Promise<Paper[]>;
-          DeletePaper(id: string): Promise<void>;
-          TranslatePaperSection(
-            paperId: string,
-            section: string,
-            text: string
-          ): Promise<TranslationRecord>;
-          GetTranslations(paperId: string): Promise<TranslationRecord[]>;
-          GetDeepReadState(paperId: string): Promise<DeepReadState>;
-          PrepareDeepReadPaper(paperId: string): Promise<DeepReadState>;
-          SaveDeepReadNote(paperId: string, section: string, content: string): Promise<DeepReadNote>;
-          AskDeepReadPaper(
-            paperId: string,
-            sectionId: string,
-            question: string,
-            mode: 'question' | 'summary'
-          ): Promise<DeepReadAIResponse>;
-          CancelDeepReadAI(): Promise<boolean>;
-          GetDeepReadPDFURL(paperId: string): Promise<string>;
-          GetDeepReadPDFBytes(paperId: string): Promise<string>;
-
-          // Screening API
-          SelectScreeningPDFs(): Promise<string[]>;
-          CreateScreeningSession(title: string): Promise<ScreeningSession>;
-          UploadScreeningFiles(sessionId: string, filePaths: string[]): Promise<ScreeningSessionDetail>;
-          ExtractPaperContent(sessionId: string): Promise<ExtractProgress>;
-          GetExtractProgress(sessionId: string): Promise<ExtractProgress>;
-          AnalyzePapers(sessionId: string): Promise<ScreeningDecisionNode>;
-          ApplyScreeningChoice(sessionId: string, selectedOptions: string[]): Promise<ScreeningDecisionNode>;
-          CompleteScreening(sessionId: string, targetFolderId: string): Promise<Paper[]>;
-          ListScreeningSessions(): Promise<ScreeningSession[]>;
-          GetScreeningSession(sessionId: string): Promise<ScreeningSessionDetail>;
-          CancelScreeningTask(sessionId: string): Promise<void>;
-          CancelScreening(sessionId: string): Promise<void>;
-
-          // Sync API
-          GetSyncStatus(): Promise<SyncStatus>;
-          TriggerSync(): Promise<SyncProgress>;
-          GetSyncProgress(): Promise<SyncProgress>;
-          GetSyncPreview(): Promise<SyncPreview>;
-          RefreshBaiduToken(): Promise<BaiduTokenRefreshStatus>;
-          GetSyncConflicts(): Promise<SyncConflict[]>;
-          GetSyncRecords(limit: number): Promise<SyncRecord[]>;
-          ResolveSyncConflict(conflictId: string, resolution: 'local' | 'remote' | 'skipped' | 'timestamp'): Promise<void>;
-          GetSyncSettings(): Promise<SyncSettings>;
-          SaveSyncSettings(settings: SyncSettings): Promise<SyncSettings>;
-          GetPendingDatabaseRestore(): Promise<DatabaseRestoreStatus>;
-          ApplyPendingDatabaseRestore(): Promise<DatabaseRestoreStatus>;
-          CancelPendingDatabaseRestore(): Promise<void>;
-        };
+        App?: DiveEndWailsApp;
       };
     };
     runtime?: {
@@ -157,8 +139,8 @@ declare global {
   }
 }
 
-const runtimeApp = () => window.go?.main?.App;
-const hasWailsRuntime = () => Boolean(window.go?.main?.App && window.runtime);
+const runtimeApp = () => window.go?.app?.App ?? window.go?.main?.App;
+const hasWailsRuntime = () => Boolean(runtimeApp() && window.runtime);
 
 function assertMockFallbackAllowed(app: ReturnType<typeof runtimeApp>, methodName: string): void {
   if (app) {

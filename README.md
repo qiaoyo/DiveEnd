@@ -27,16 +27,19 @@ React/TypeScript UI
   |
   | Wails bridge + events
   v
-Go app backend
-  |-- config_store.go        runtime config, secret merge, seed loading
-  |-- database.go            SQLite migration and core persistence
-  |-- deepstart*.go          search, AI analysis, preprocessing, background tasks
-  |-- search_sources.go      OpenAlex/OpenReview/DBLP providers, merge and filtering
-  |-- deepread*.go           PDF preparation, cache, notes, asset-server URL
-  |-- screening*.go          batch upload, extraction, decision tree, import
-  |-- sync*.go               Baidu Cloud sync, progress, conflicts, restore
-  |-- baidu_pcs.go           Baidu PCS client
-  |-- secure_file.go         atomic and symlink-safe file operations
+Go desktop entrypoint and application backend
+  |-- main.go                Wails options, embedded assets, lifecycle wiring
+  |-- internal/app/          Wails facade and current workflow implementations
+  |   |-- deepstart*.go      search, AI analysis, preprocessing, background tasks
+  |   |-- deepread*.go       PDF preparation, cache, notes, asset-server URL
+  |   |-- screening*.go      batch upload, extraction, decision tree, import
+  |   |-- sync*.go           Baidu Cloud sync, progress, conflicts, restore
+  |   |-- database*.go       SQLite migration and persistence
+  |   |-- clients*.go        LLM, search providers, merge and filtering
+  |   |-- folders/paper*.go  library assets and local file actions
+  |-- internal/domain/       shared Wails-facing data contracts
+  |-- internal/contracts/    provider-neutral service ports
+  |-- internal/platform/     bounded HTTP/JSON and secret redaction helpers
   |
   v
 SQLite data path

@@ -1,3 +1,26 @@
+export namespace app {
+
+	export class LLMUsageSnapshot {
+	    date: string;
+	    usedTokens: number;
+	    limit: number;
+	    remaining: number;
+
+	    static createFrom(source: any = {}) {
+	        return new LLMUsageSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.date = source["date"];
+	        this.usedTokens = source["usedTokens"];
+	        this.limit = source["limit"];
+	        this.remaining = source["remaining"];
+	    }
+	}
+
+}
+
 export namespace domain {
 
 	export class SyncSettings {
@@ -1625,29 +1648,6 @@ export namespace domain {
 	        this.conflicts = source["conflicts"];
 	        this.totalSynced = source["totalSynced"];
 	        this.totalFailed = source["totalFailed"];
-	    }
-	}
-
-}
-
-export namespace main {
-
-	export class LLMUsageSnapshot {
-	    date: string;
-	    usedTokens: number;
-	    limit: number;
-	    remaining: number;
-
-	    static createFrom(source: any = {}) {
-	        return new LLMUsageSnapshot(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.date = source["date"];
-	        this.usedTokens = source["usedTokens"];
-	        this.limit = source["limit"];
-	        this.remaining = source["remaining"];
 	    }
 	}
 

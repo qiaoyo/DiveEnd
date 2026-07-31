@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"embed"
 
+	diveapp "github.com/qiaoyo/DiveEnd/internal/app"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -15,7 +17,7 @@ var assets embed.FS
 
 func main() {
 	// Create an instance of the app structure
-	app := NewApp()
+	application := diveapp.NewApp()
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -26,14 +28,20 @@ func main() {
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets:  assets,
-			Handler: app.assetServerHandler(),
+			Handler: diveapp.AssetServerHandler(application),
 		},
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
-		OnStartup:        app.startup,
-		OnBeforeClose:    app.beforeClose,
-		OnShutdown:       app.shutdown,
+		OnStartup: func(ctx context.Context) {
+			diveapp.Startup(application, ctx)
+		},
+		OnBeforeClose: func(ctx context.Context) bool {
+			return diveapp.BeforeClose(application, ctx)
+		},
+		OnShutdown: func(ctx context.Context) {
+			diveapp.Shutdown(application, ctx)
+		},
 		Bind: []interface{}{
-			app,
+			application,
 		},
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarDefault(),

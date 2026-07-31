@@ -233,7 +233,7 @@ function smokeBridgeSource() {
       ResolveFilePaths(files) { return Array.from(files || []).map((file) => '/mock/' + file.name); },
       BrowserOpenURL() {},
     };
-    window.go = { main: { App: {
+    window.go = { app: { App: {
       async GetInitialState() { const activeSession = deepStartDetail('scientific reading assistant'); return { config: {}, folders, papers: papers.filter((paper) => paper.folderId === 'folder-1'), activeFolderId: 'folder-1', deepStartSessions: [activeSession.summary], activeDeepStartSession: activeSession }; }, 
       async GetSecretPrefill() { return { strongLLMApiKey: '', hasStrongLLMApiKey: false, weakLLMApiKey: '', hasWeakLLMAPIKey: false, baiduToken: '', hasBaiduToken: true }; },
       async SaveConfig(config) { return { config, restartRequired: false, message: '配置已保存' }; },
