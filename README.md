@@ -59,6 +59,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 
 - [AGENTS.md](AGENTS.md): concise agent entry point and current implementation status.
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md): map from product workflows to files and tests.
+- [docs/PAPER_SEARCH_SOURCE_EVALUATION.md](docs/PAPER_SEARCH_SOURCE_EVALUATION.md): tested academic search sources, agent tools, integration roles, and account prerequisites.
 - [docs/AUTONOMOUS_DEVELOPMENT_SETUP.md](docs/AUTONOMOUS_DEVELOPMENT_SETUP.md): responsibility boundaries, design decisions, account prerequisites, and the long-running autonomous development loop.
 - [docs/superpowers/plans/2026-06-10-code-review-remediation.md](docs/superpowers/plans/2026-06-10-code-review-remediation.md): detailed remediation record.
 - [docs/superpowers/plans/2026-06-11-secret-history-remediation.md](docs/superpowers/plans/2026-06-11-secret-history-remediation.md): Git history secret cleanup plan.

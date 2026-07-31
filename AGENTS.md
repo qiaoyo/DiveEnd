@@ -50,10 +50,11 @@ Remaining risks:
 1. `README.md` for product status and development commands.
 2. `AGENTS.md` for this current agent-facing summary.
 3. `docs/PROJECT_MAP.md` for the exact mapping from workflow to files and tests.
-4. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
-5. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
-6. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
-7. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
+4. `docs/PAPER_SEARCH_SOURCE_EVALUATION.md` for tested search sources, agent tools, integration roles, and account prerequisites.
+5. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
+6. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
+7. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
+8. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
 
 If a historical document conflicts with current code or this file, prefer current code, `README.md`, `AGENTS.md`, and `docs/PROJECT_MAP.md`.
 
