@@ -67,10 +67,10 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 ## Current Gaps
 
 - Git history still contains previously committed local files and at least one historical OpenAI-style key pattern. Current tracking is guarded, but public release requires history rewrite and credential rotation.
-- Wails desktop event bridge needs manual verification in the packaged desktop app for `deepstart-progress`, `extract-progress`, and `sync-progress`.
+- Packaged-window Computer Use passed on 2026-07-31: a real DeepStart run received live progress events and completed a 20-paper research map; DeepRead loaded a 10-page PDF and returned a grounded answer with three source excerpts; Sync and Settings loaded real backend state.
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic refresh and secure persistence of an expired access token.
-- The configured Semantic Scholar API key returned `403 Forbidden` on 2026-07-30, while the unauthenticated shared endpoint returned `429`; discovery must retain arXiv/cache degradation until the key is replaced.
-- GitHub SSH read/write access is available, but the local `gh` CLI is not authenticated, so automatic PR creation through `gh` remains blocked.
+- The configured Semantic Scholar API key still returned `403 Forbidden` on 2026-07-31. The same paper endpoint returned `200` without the key, and the proxy configured by `~/setup_proxy.sh` timed out from this machine. The key file and documented `x-api-key` header are valid, so discovery must retain arXiv/cache degradation until Semantic Scholar issues a replacement.
+- GitHub SSH read/write and authenticated `gh` API access are available for `qiaoyo/DiveEnd`; the current account has `ADMIN` repository permission.
 - DeepRead can still be improved with finer page-level cache/prefetch, PDF 页码级证据定位、跨论文对比和更好的长文档导航。
 - High-DPI polish remains useful; library, sync, and settings have completed the current shared-token cleanup, and the main workflows pass narrow-window smoke coverage.
 
@@ -197,7 +197,7 @@ Optional local seed files are read on first startup but remain ignored:
 
 ## Verification Baseline
 
-Last local baseline: 2026-07-30.
+Last local baseline: 2026-07-31.
 
 Passed:
 
@@ -218,11 +218,11 @@ Passed:
 - Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
 - Browser and real-backend E2E through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, Screening decisions, and sync workflows.
 - Browser UI smoke covers 24 visible states across discovery, reading, screening, and sync at 1440, 900, and 720 px widths with no console errors; the narrow runs assert zero page-level horizontal overflow before every screenshot.
-- Packaged Wails build and managed PDF-service startup/shutdown lifecycle. Direct packaged-window click and Wails event-delivery verification remains pending because the macOS session was locked during the 2026-07-30 run.
+- Packaged Wails build and managed PDF-service startup/shutdown lifecycle.
+- Direct packaged-window Computer Use: real DeepStart progress events and completed research map, DeepRead 10-page PDF rendering and grounded weak-model Q&A, Baidu Sync state, and Settings budget/provider state.
 
 Notes:
 
 - `npm audit --omit=dev` reports the React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses a client-only `HashRouter` and does not use RSC; the currently published `react-router-dom` line has no version that clears this advisory without a React 19/Router 8 migration. Keep this scoped exception under review.
-- The configured Semantic Scholar key returned `403 Forbidden`; arXiv fallback and permanent-error fast failure were verified.
-- Computer Use could not inspect the packaged window while macOS was locked; do not infer packaged UI event verification from browser smoke coverage.
+- The configured Semantic Scholar key returned `403 Forbidden` on both search and paper-detail endpoints, while the identical paper-detail request without a key returned `200`. `~/setup_proxy.sh` was also tested, but its proxy endpoint timed out. This isolates the remaining issue to the key's server-side status rather than the DiveEnd request format.
 - Workspace pages now load by route: the common entry bundle is about 236 KiB before gzip, while the roughly 407 KiB PDF reader chunk loads only when DeepRead is opened.

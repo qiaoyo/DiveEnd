@@ -1,6 +1,6 @@
 # DiveEnd 长期自治开发前置清单
 
-更新时间：2026-07-30
+更新时间：2026-07-31
 
 ## 目的
 
@@ -30,8 +30,8 @@
 | 弱 LLM | 可用 | `config/weak_llm.json` 的模型完成真实 chat completion；配置文件权限已收紧为 `0600`。 |
 | 百度网盘 | 可用 | 原 access token 已过期，正式客户端成功使用 refresh token 更新并以 `0600` 落盘；真实 E2E 完成数据库、PDF、manifest 上传、列举、下载和隔离测试目录清理。 |
 | GitHub Git 远端 | 可用 | SSH 可读取 `qiaoyo/DiveEnd`，push dry-run 验证可创建远端分支。 |
-| GitHub CLI | 未完成 | `gh` 尚未登录；Git commit/push 不受影响，但用 `gh` 自动创建 PR 前需要执行 `gh auth login`。 |
-| Semantic Scholar | 不可用 | 当前 key 的认证请求返回 `403 Forbidden`；无 key 请求受到共享限流并返回 `429`。需要更换或重新申请 key，代码应继续保留 arXiv、缓存和明确失败提示。 |
+| GitHub CLI | 可用 | `gh` 已通过 keyring 登录 `qiaoyo`；对 `qiaoyo/DiveEnd` 具有 `ADMIN` 权限和 `repo` scope，可用于创建 PR。 |
+| Semantic Scholar | Key 不可用 | 2026-07-31 对同一论文详情接口复测：无 key 返回 `200`，当前 key 返回 `403 Forbidden`。配置为 `0600`、JSON 字段、40 字符 ASCII token 和 `x-api-key` 请求头均正确。`~/setup_proxy.sh` 已执行，但代理端点连接超时。需要 Semantic Scholar 支持或重新签发 key；代码继续保留 arXiv、缓存和明确失败提示。 |
 
 2026-07-30 后续实现验证：
 
@@ -54,7 +54,8 @@
 - Settings 控制面已统一到共享字段、面板和状态 token，去模板扫描由 62 个命中降为 8；保留项全部是 Radix 开关的圆形轨道和滑块。浏览器验证强弱模型、每日 1 亿 token 预算和固定保存栏可见且无横向溢出。
 - Library 面板已将文件夹操作、批量选择、论文列表、移动和删除统一为紧凑资料管理样式，去模板扫描由 65 个命中降为 0；7 条文件夹与论文交互测试及生产构建通过。
 - Go 最低补丁版本已提升到 1.25.12；旧的本机 1.25.5 被 `govulncheck` 识别出 9 条可达标准库漏洞，随后将 Windows-only 不可达告警对应的 `x/sys` 升级到 v0.44.0，完整扫描结果为 `No vulnerabilities found`，Go test/vet/race 和 Wails build 均通过。
-- 2026-07-30 完整本地基线通过 Go test/vet/race、全部 70 条前端测试、18 条 PDF 服务测试、前端构建、Wails build 和秘密扫描；独立浏览器烟测在 1440、900、720 px 三档宽度覆盖发现、阅读、筛选、同步的 24 个可见状态且无控制台错误，窄窗口每张截图前均验证无页面级横向溢出。打包应用的启动/退出与 PDF 服务生命周期已验证，但 macOS 锁屏阻止了本轮 Computer Use 点击，不能记为 Wails 窗口事件验收完成。
+- 2026-07-30 完整本地基线通过 Go test/vet/race、全部 70 条前端测试、18 条 PDF 服务测试、前端构建、Wails build 和秘密扫描；独立浏览器烟测在 1440、900、720 px 三档宽度覆盖发现、阅读、筛选、同步的 24 个可见状态且无控制台错误，窄窗口每张截图前均验证无页面级横向溢出。
+- 2026-07-31 补完打包窗口验收：Computer Use 发起真实 DeepStart，Wails 事件从 3% 持续推进并完成 20 篇研究地图；DeepRead 加载 10 页 PDF，弱模型问答返回三条可核查原文证据；Sync 读取百度连接、200 条成功记录、0 冲突和 0 失败；Settings 读取强弱模型与 1 亿 token 日预算。
 
 ## 一、LLM Agent 可以自动化完成
 
@@ -180,8 +181,7 @@
 
 | 平台或事项 | 你今天需要做什么 | 完成后如何交接 |
 | --- | --- | --- |
-| Semantic Scholar Academic Graph API | 当前本地 key 已存在，但真实认证请求返回 `403 Forbidden`。在[官方 API 页面](https://www.semanticscholar.org/product/api)重新申请或更换 key。 | 收到后更新忽略文件 `config/semantic_scholar.json`。只告诉我“文件已更新”，不要发送 key。 |
-| GitHub CLI 登录 | Git SSH 读写已可用，但 `gh` CLI 尚未登录。 | 在本机运行 `gh auth login` 并授予仓库和 PR 所需的最小权限，然后回复“gh 已登录”。 |
+| Semantic Scholar Academic Graph API | 当前 key 已被服务端拒绝。官方没有公开的自助轮换控制台；先在[官方 API 页面](https://www.semanticscholar.org/product/api)通过 “Request an API Key” 重新提交个人研究用途申请。若希望恢复原 key，请联系 `feedback@semanticscholar.org`，提供申请邮箱、2026-04-10 申请日期、请求端点和 `403` 状态，切勿附上完整 key。 | 收到新 key 后更新忽略文件 `config/semantic_scholar.json`。只告诉 agent“文件已更新”，不要在聊天中发送 key。 |
 | 历史凭证轮换 | Git 历史仍包含至少一个历史 OpenAI-style key pattern。当前强弱模型可用不代表旧凭证可以继续信任。 | 公开仓库或发布前轮换受影响凭证，并单独批准历史重写。 |
 
 ### 当前不需要申请

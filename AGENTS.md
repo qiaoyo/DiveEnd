@@ -2,7 +2,7 @@
 
 This file is the canonical entry point for LLM agents working in this repository.
 
-更新时间：2026-07-30
+更新时间：2026-07-31
 
 ## Project Summary
 
@@ -39,10 +39,10 @@ Implemented:
 Remaining risks:
 
 - Git history still contains previously committed local secret/scratch files and at least one historical OpenAI-style key pattern. Current tree tracking is fixed, but public release requires history rewrite and token rotation.
-- Wails desktop event delivery still needs manual verification in the packaged desktop app.
+- Packaged-window Computer Use passed on 2026-07-31: a real DeepStart run received live Wails progress events and completed a 20-paper research map; DeepRead loaded a 10-page PDF and returned a grounded weak-model answer with three verified excerpts; Sync and Settings loaded real backend state.
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic token refresh and secure persistence.
-- The configured Semantic Scholar key returned `403 Forbidden` on 2026-07-30 and the shared unauthenticated endpoint returned `429`; use arXiv/cache degradation until the key is replaced.
-- GitHub SSH read/write works, but `gh` CLI authentication is still required for automatic PR creation through `gh`.
+- The configured Semantic Scholar key still returned `403 Forbidden` on 2026-07-31. The same paper endpoint returned `200` without the key, while `~/setup_proxy.sh` pointed to a proxy that timed out from this machine. The local file is valid and uses the documented `x-api-key` header, so treat the key as rejected server-side and use arXiv/cache degradation until Semantic Scholar issues a replacement.
+- GitHub SSH read/write and `gh` CLI API access work for `qiaoyo/DiveEnd`; the authenticated account has `ADMIN` repository permission and `repo` scope.
 - DeepRead page-level evidence navigation, cross-paper analysis, and high-DPI polish remain future work; library, sync, and settings have completed the current shared-token cleanup, and the main workflows pass 900 px and 720 px smoke coverage without page-level horizontal overflow.
 
 ## Reading Order
@@ -151,7 +151,7 @@ python -m pytest services/pdf_service/tests
 bash scripts/secret_scan.sh
 ```
 
-Last full run on 2026-07-30: Go test/vet/race, all 70 frontend tests, 18 PDF service tests, frontend build, Wails build, secret scan, and the 24-state browser UI smoke at 1440, 900, and 720 px widths passed. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
+Last full run on 2026-07-30: Go test/vet/race, all 70 frontend tests, 18 PDF service tests, frontend build, Wails build, secret scan, and the 24-state browser UI smoke at 1440, 900, and 720 px widths passed. On 2026-07-31, packaged-window DeepStart progress/completion, DeepRead PDF/grounded Q&A, Sync status, and Settings state were additionally verified with Computer Use. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
 
 Known audit exception: `npm audit --omit=dev` reports a React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses client-only `HashRouter`, not RSC. The published `react-router-dom` line currently has no clean upgrade path without a React 19/Router 8 migration; do not describe the production audit as zero-vulnerability until this is resolved upstream or migrated.
 
