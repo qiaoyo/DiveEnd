@@ -6,6 +6,9 @@ import { defaultConfig } from '../../types';
 const backendMocks = vi.hoisted(() => ({
   getSecretPrefill: vi.fn(),
   getLLMUsage: vi.fn(),
+  getGoogleDriveStatus: vi.fn(),
+  authorizeGoogleDrive: vi.fn(),
+  disconnectGoogleDrive: vi.fn(),
   saveConfig: vi.fn(),
 }));
 
@@ -40,6 +43,16 @@ describe('SettingsPanel', () => {
       usedTokens: 1234,
       limit: 100_000_000,
       remaining: 99_998_766,
+    });
+    backendMocks.getGoogleDriveStatus.mockResolvedValue({
+      enabled: false,
+      clientSecretPath: 'config/google_drive_client.json',
+      tokenPath: '/Users/example/Library/Application Support/DiveEnd/google_drive_token.json',
+      rootFolderName: 'DiveEnd Backup',
+      hasClientSecret: false,
+      authorized: false,
+      checkedAt: new Date().toISOString(),
+      message: 'Google Drive OAuth 客户端 JSON 尚未配置',
     });
     backendMocks.saveConfig.mockImplementation(async (incomingConfig) => ({
       config: {

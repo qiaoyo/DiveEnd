@@ -131,10 +131,16 @@ func defaultAppConfig() AppConfig {
 		WeakLLM:             defaultWeakLLMConfig(),
 		DailyLLMTokenBudget: defaultDailyLLMTokenBudget,
 		Search:              defaultSearchAPIConfig(),
-		Theme:               "light",
-		LeftPanelWidth:      280,
-		RightPanelWidth:     340,
-		DataPath:            filepath.Join(homeDir, "DiveEndData"),
+		GoogleDrive: GoogleDriveConfig{
+			Enabled:          false,
+			ClientSecretPath: filepath.Join("config", "google_drive_client.json"),
+			RootFolderName:   "DiveEnd Backup",
+			FallbackToBaidu:  true,
+		},
+		Theme:           "light",
+		LeftPanelWidth:  280,
+		RightPanelWidth: 340,
+		DataPath:        filepath.Join(homeDir, "DiveEndData"),
 		BaiduCloud: BaiduCloudConfig{
 			Enabled: false,
 			Quota:   0,
@@ -156,6 +162,7 @@ func normalizeAppConfig(config AppConfig) AppConfig {
 		config.DailyLLMTokenBudget = defaults.DailyLLMTokenBudget
 	}
 	config.Search = normalizeSearchAPIConfig(config.Search)
+	config.GoogleDrive = normalizeGoogleDriveConfig(config.GoogleDrive)
 	config.BaiduCloud = normalizeBaiduCloudConfig(config.BaiduCloud)
 	config.Sync = normalizeSyncSettings(config.Sync)
 	if config.Theme != "dark" && config.Theme != "light" {
@@ -339,6 +346,25 @@ func normalizeBaiduCloudConfig(config BaiduCloudConfig) BaiduCloudConfig {
 	config.ClientSecret = strings.TrimSpace(config.ClientSecret)
 	config.HasToken = config.Token != ""
 	config.ClearToken = false
+	return config
+}
+
+func normalizeGoogleDriveConfig(config GoogleDriveConfig) GoogleDriveConfig {
+	defaults := defaultAppConfig().GoogleDrive
+	if !config.Enabled && !config.FallbackToBaidu && strings.TrimSpace(config.ClientSecretPath) == "" && strings.TrimSpace(config.RootFolderName) == "" {
+		config.FallbackToBaidu = defaults.FallbackToBaidu
+	}
+	config.ClientSecretPath = strings.TrimSpace(config.ClientSecretPath)
+	if config.ClientSecretPath == "" {
+		config.ClientSecretPath = defaults.ClientSecretPath
+	}
+	config.RootFolderName = strings.TrimSpace(config.RootFolderName)
+	if config.RootFolderName == "" {
+		config.RootFolderName = defaults.RootFolderName
+	}
+	if len(config.RootFolderName) > 120 {
+		config.RootFolderName = config.RootFolderName[:120]
+	}
 	return config
 }
 

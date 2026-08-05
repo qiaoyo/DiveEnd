@@ -30,6 +30,7 @@ import type {
   SearchPaper,
   SearchProgressEvent,
   BaiduTokenRefreshStatus,
+  GoogleDriveAuthStatus,
   SyncConflict,
   SyncPreview,
   SyncProgress,
@@ -108,6 +109,9 @@ interface DiveEndWailsApp {
   CancelScreeningTask(sessionId: string): Promise<void>;
   CancelScreening(sessionId: string): Promise<void>;
   GetSyncStatus(): Promise<SyncStatus>;
+  GetGoogleDriveStatus(): Promise<GoogleDriveAuthStatus>;
+  AuthorizeGoogleDrive(): Promise<GoogleDriveAuthStatus>;
+  DisconnectGoogleDrive(): Promise<void>;
   TriggerSync(): Promise<SyncProgress>;
   GetSyncProgress(): Promise<SyncProgress>;
   GetSyncPreview(): Promise<SyncPreview>;
@@ -449,6 +453,10 @@ function normalizeConfig(config: Partial<AppConfig> | null | undefined): AppConf
       ...defaultConfig.search,
       ...config?.search,
     },
+    googleDrive: {
+      ...defaultConfig.googleDrive,
+      ...config?.googleDrive,
+    },
     baiduCloud: {
       ...defaultConfig.baiduCloud,
       ...config?.baiduCloud,
@@ -585,13 +593,47 @@ function normalizeExtractProgress(
 function normalizeSyncStatus(status: Partial<SyncStatus> | null | undefined): SyncStatus {
   return {
     enabled: Boolean(status?.enabled),
-    provider: status?.provider ?? 'baidu_cloud',
+    provider: status?.provider ?? 'none',
     lastSync: status?.lastSync ?? null,
     syncInProgress: Boolean(status?.syncInProgress),
     pendingFiles: status?.pendingFiles ?? 0,
     conflicts: status?.conflicts ?? 0,
     totalSynced: status?.totalSynced ?? 0,
     totalFailed: status?.totalFailed ?? 0,
+  };
+}
+
+function normalizeGoogleDriveStatus(
+  status: Partial<GoogleDriveAuthStatus> | null | undefined,
+): GoogleDriveAuthStatus {
+  return {
+    enabled: Boolean(status?.enabled),
+    clientSecretPath: status?.clientSecretPath ?? defaultConfig.googleDrive.clientSecretPath,
+    tokenPath: status?.tokenPath ?? '',
+    rootFolderName: status?.rootFolderName ?? defaultConfig.googleDrive.rootFolderName,
+    hasClientSecret: Boolean(status?.hasClientSecret),
+    authorized: Boolean(status?.authorized),
+    checkedAt: status?.checkedAt ?? new Date().toISOString(),
+    message: sanitizeUserVisibleError(status?.message ?? ''),
+  };
+}
+
+function normalizeSyncPreview(preview: Partial<SyncPreview> | null | undefined): SyncPreview {
+  return {
+    provider: preview?.provider ?? 'none',
+    enabled: Boolean(preview?.enabled),
+    dataPath: preview?.dataPath ?? '',
+    remoteRoot: preview?.remoteRoot ?? '',
+    tokenFile: preview?.tokenFile ?? '',
+    totalFiles: Number(preview?.totalFiles ?? 0) || 0,
+    totalBytes: Number(preview?.totalBytes ?? 0) || 0,
+    databaseBytes: Number(preview?.databaseBytes ?? 0) || 0,
+    paperPdfCount: Number(preview?.paperPdfCount ?? 0) || 0,
+    paperPdfBytes: Number(preview?.paperPdfBytes ?? 0) || 0,
+    otherFiles: Number(preview?.otherFiles ?? 0) || 0,
+    files: normalizeArray(preview?.files),
+    checkedAt: preview?.checkedAt ?? new Date().toISOString(),
+    warning: sanitizeUserVisibleError(preview?.warning ?? ''),
   };
 }
 
@@ -2249,7 +2291,38 @@ export async function getSyncStatus(): Promise<SyncStatus> {
     return normalizeSyncStatus(await app.GetSyncStatus());
   }
   assertMockFallbackAllowed(app, 'GetSyncStatus');
-  return normalizeSyncStatus({ enabled: false, provider: 'baidu_cloud', lastSync: null });
+  return normalizeSyncStatus({ enabled: false, provider: 'none', lastSync: null });
+}
+
+export async function getGoogleDriveStatus(): Promise<GoogleDriveAuthStatus> {
+  const app = runtimeApp();
+  if (app?.GetGoogleDriveStatus) {
+    return normalizeGoogleDriveStatus(await app.GetGoogleDriveStatus());
+  }
+  assertMockFallbackAllowed(app, 'GetGoogleDriveStatus');
+  return normalizeGoogleDriveStatus({
+    enabled: false,
+    clientSecretPath: defaultConfig.googleDrive.clientSecretPath,
+    rootFolderName: defaultConfig.googleDrive.rootFolderName,
+    message: 'Google Drive status is only available in the desktop app.',
+  });
+}
+
+export async function authorizeGoogleDrive(): Promise<GoogleDriveAuthStatus> {
+  const app = runtimeApp();
+  if (app?.AuthorizeGoogleDrive) {
+    return normalizeGoogleDriveStatus(await app.AuthorizeGoogleDrive());
+  }
+  assertMockFallbackAllowed(app, 'AuthorizeGoogleDrive');
+  throw new Error('Google Drive authorization is only available in the desktop app.');
+}
+
+export async function disconnectGoogleDrive(): Promise<void> {
+  const app = runtimeApp();
+  if (app?.DisconnectGoogleDrive) {
+    return app.DisconnectGoogleDrive();
+  }
+  assertMockFallbackAllowed(app, 'DisconnectGoogleDrive');
 }
 
 export async function triggerSync(): Promise<SyncProgress> {
@@ -2282,10 +2355,11 @@ export async function refreshBaiduToken(): Promise<BaiduTokenRefreshStatus> {
 export async function getSyncPreview(): Promise<SyncPreview> {
   const app = runtimeApp();
   if (app?.GetSyncPreview) {
-    return app.GetSyncPreview();
+    return normalizeSyncPreview(await app.GetSyncPreview());
   }
   assertMockFallbackAllowed(app, 'GetSyncPreview');
   return {
+    provider: 'none',
     enabled: false,
     dataPath: '',
     remoteRoot: '',

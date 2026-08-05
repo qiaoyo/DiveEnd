@@ -6,6 +6,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) GetSyncStatus() (*SyncStatus, error) {
@@ -15,7 +17,7 @@ func (a *App) GetSyncStatus() (*SyncStatus, error) {
 
 	status := &SyncStatus{
 		Enabled:  syncConfigured(a.config),
-		Provider: "baidu_cloud",
+		Provider: "none",
 	}
 
 	records, err := a.db.GetSyncRecords(200)
@@ -40,6 +42,7 @@ func (a *App) GetSyncStatus() (*SyncStatus, error) {
 
 	syncInProgress := false
 	if manager := a.ensureSyncManager(); manager != nil {
+		status.Provider = syncProviderName(manager.activeProvider())
 		progress := manager.GetSyncProgress()
 		syncInProgress = syncProgressActive(progress)
 		status.SyncInProgress = syncInProgress
@@ -80,12 +83,12 @@ func (a *App) TriggerSync() (*SyncProgress, error) {
 		return nil, err
 	}
 	if !syncConfigured(a.config) {
-		return nil, fmt.Errorf("baidu sync is not configured")
+		return nil, fmt.Errorf("cloud sync is not configured or authorized")
 	}
 
 	manager := a.ensureSyncManager()
 	if manager == nil {
-		return nil, fmt.Errorf("sync manager is not initialized")
+		return nil, fmt.Errorf("cloud sync manager is not initialized")
 	}
 
 	progress := manager.GetSyncProgress()
@@ -132,13 +135,66 @@ func (a *App) RefreshBaiduToken() (*BaiduTokenRefreshStatus, error) {
 	return manager.RefreshBaiduToken()
 }
 
+func (a *App) GetGoogleDriveStatus() (*GoogleDriveAuthStatus, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return googleDriveAuthStatus(a.config.GoogleDrive), nil
+}
+
+func (a *App) AuthorizeGoogleDrive() (*GoogleDriveAuthStatus, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	if a.syncManagerActive() {
+		return nil, fmt.Errorf("cannot change Google Drive authorization while cloud sync is in progress")
+	}
+	clientSecretPath, err := resolveGoogleDriveClientSecretPath(a.config.GoogleDrive.ClientSecretPath)
+	if err != nil {
+		return nil, err
+	}
+	if a.ctx == nil {
+		return nil, fmt.Errorf("Google Drive authorization requires the desktop application context")
+	}
+	_, err = authorizeGoogleDrive(a.ctx, clientSecretPath, defaultGoogleDriveTokenPath(), func(authURL string) error {
+		runtime.BrowserOpenURL(a.ctx, authURL)
+		return nil
+	})
+	if err != nil {
+		return googleDriveAuthStatus(a.config.GoogleDrive), err
+	}
+	status := googleDriveAuthStatus(a.config.GoogleDrive)
+	if a.db != nil && !a.syncManagerActive() {
+		a.syncManager = NewSyncManager(a.db, a.config)
+		a.configureSyncManager()
+	}
+	return status, nil
+}
+
+func (a *App) DisconnectGoogleDrive() error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	if a.syncManagerActive() {
+		return fmt.Errorf("cannot remove Google Drive authorization while cloud sync is in progress")
+	}
+	if err := deleteGoogleDriveToken(); err != nil {
+		return err
+	}
+	if a.syncManager == nil || !a.syncManagerActive() {
+		a.syncManager = NewSyncManager(a.db, a.config)
+		a.configureSyncManager()
+	}
+	return nil
+}
+
 func (a *App) GetSyncPreview() (*SyncPreview, error) {
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
 	manager := a.ensureSyncManager()
 	if manager == nil {
-		return &SyncPreview{Enabled: false, TokenFile: defaultBaiduTokenPath(), CheckedAt: time.Now(), Warning: "百度云同步未配置"}, fmt.Errorf("baidu client not initialized")
+		return &SyncPreview{Enabled: false, Provider: "none", TokenFile: syncProviderCredentialPath(nil), CheckedAt: time.Now(), Warning: "云同步未配置或授权未完成"}, fmt.Errorf("cloud sync provider not initialized")
 	}
 	return manager.BuildSyncPreview()
 }
@@ -402,11 +458,33 @@ func (a *App) conflictAlreadyHandledByPendingRestore(manager *SyncManager, confl
 }
 
 func syncConfigured(config AppConfig) bool {
-	return config.BaiduCloud.Enabled && strings.TrimSpace(config.BaiduCloud.Token) != ""
+	if googleDriveReadyForSync(config.GoogleDrive) {
+		return true
+	}
+	if config.GoogleDrive.Enabled && !config.GoogleDrive.FallbackToBaidu {
+		return false
+	}
+	return config.BaiduCloud.Enabled && baiduTokenForSync(config) != nil
+}
+
+func googleDriveReadyForSync(config GoogleDriveConfig) bool {
+	if !config.Enabled || !googleDriveTokenAvailable() {
+		return false
+	}
+	clientSecretPath, err := resolveGoogleDriveClientSecretPath(config.ClientSecretPath)
+	if err != nil {
+		return false
+	}
+	_, err = loadGoogleDriveOAuthConfig(clientSecretPath)
+	return err == nil
 }
 
 func syncManagerConfigChanged(previous, next AppConfig) bool {
 	return previous.DataPath != next.DataPath ||
+		previous.GoogleDrive.Enabled != next.GoogleDrive.Enabled ||
+		previous.GoogleDrive.ClientSecretPath != next.GoogleDrive.ClientSecretPath ||
+		previous.GoogleDrive.RootFolderName != next.GoogleDrive.RootFolderName ||
+		previous.GoogleDrive.FallbackToBaidu != next.GoogleDrive.FallbackToBaidu ||
 		previous.BaiduCloud.Enabled != next.BaiduCloud.Enabled ||
 		previous.BaiduCloud.Token != next.BaiduCloud.Token ||
 		previous.BaiduCloud.RefreshToken != next.BaiduCloud.RefreshToken ||

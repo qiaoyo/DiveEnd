@@ -6,7 +6,7 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 
 ## 当前状态
 
-更新时间：2026-07-31
+更新时间：2026-08-05
 
 项目已完成 Phase 1-6 的功能骨架，并完成一轮 P0-P3 code review remediation。当前阶段是可靠性、真实环境验收、发布安全和体验打磨。
 
@@ -15,7 +15,7 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 - **DeepStart**：自然语言输入研究方向，对每个原始/改写 query 并行检索 OpenAlex、arXiv、OpenReview 和 DBLP，再按 DOI、arXiv ID、OpenReview forum 和规范化题名合并版本，使用统一的短语/词项覆盖、元数据质量、来源一致性、引用与时间信号过滤排序。所有主题使用同一套来源和规则，默认收敛到约 20 篇高相关候选；只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
 - **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文；抽取、首次分析和后续决策均可非破坏性停止，节点、路径和论文状态以 SQLite 事务一次提交，取消或模型失败不会留下半完成选择。分析页列出最近的本地会话，可恢复提取、筛选或已入库状态且不会自动重跑模型。
 - **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；低延迟问答优先走弱模型，全文总结走强模型，二者都只保留能在已解析章节中逐字验证的依据。长论文上下文按问题相关性和核心章节公平分配，AI 请求可主动取消。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
-- **Sync**：百度云同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB；同步工作台使用统一中文操作语义，集中呈现预检、进度、历史、冲突和自动化设置。
+- **Sync**：Google Drive 主同步、百度云 fallback，同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB；同步工作台使用统一中文操作语义，集中呈现 provider 预检、进度、历史、冲突和自动化设置。
 - **Library**：右侧论文库支持文件夹树、创建、删除、重命名、移动、单篇移动、批量移动，并同步维护 managed PDF 路径和 DeepRead cache。
 - **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、覆盖 Go 与 Python 抽取链路的每日共享 LLM token 硬预算、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
 - **当前信息架构**：一级任务收敛为“发现 / 阅读 / 分析”，研究记录、同步和设置作为工具入口；检索页不再展示伪造预览数据，阅读页默认提供可收起论文库的专注三栏工作区。
@@ -33,7 +33,7 @@ Go desktop entrypoint and application backend
   |   |-- deepstart*.go      search, AI analysis, preprocessing, background tasks
   |   |-- deepread*.go       PDF preparation, cache, notes, asset-server URL
   |   |-- screening*.go      batch upload, extraction, decision tree, import
-  |   |-- sync*.go           Baidu Cloud sync, progress, conflicts, restore
+  |   |-- sync*.go           Google Drive primary, Baidu fallback, progress, conflicts, restore
   |   |-- database*.go       SQLite migration and persistence
   |   |-- clients*.go        LLM, search providers, merge and filtering
   |   |-- folders/paper*.go  library assets and local file actions
@@ -65,6 +65,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md): map from product workflows to files and tests.
 - [docs/GO_STRUCTURE.md](docs/GO_STRUCTURE.md): Go package boundaries, migration order, and feature PR ownership.
 - [docs/PAPER_SEARCH_SOURCE_EVALUATION.md](docs/PAPER_SEARCH_SOURCE_EVALUATION.md): tested academic search sources, agent tools, integration roles, and account prerequisites.
+- [docs/GOOGLE_DRIVE_SYNC_SETUP.md](docs/GOOGLE_DRIVE_SYNC_SETUP.md): Google Cloud OAuth client setup, local authorization, provider fallback policy, and troubleshooting.
 - [docs/AUTONOMOUS_DEVELOPMENT_SETUP.md](docs/AUTONOMOUS_DEVELOPMENT_SETUP.md): responsibility boundaries, design decisions, account prerequisites, and the long-running autonomous development loop.
 - [docs/superpowers/plans/2026-06-10-code-review-remediation.md](docs/superpowers/plans/2026-06-10-code-review-remediation.md): detailed remediation record.
 - [docs/superpowers/plans/2026-06-11-secret-history-remediation.md](docs/superpowers/plans/2026-06-11-secret-history-remediation.md): Git history secret cleanup plan.
@@ -75,6 +76,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 - Git history still contains previously committed local files and at least one historical OpenAI-style key pattern. Current tracking is guarded, but public release requires history rewrite and credential rotation.
 - Packaged-window Computer Use passed on 2026-07-31: a real DeepStart run received live progress events and completed a 20-paper research map; DeepRead loaded a 10-page PDF and returned a grounded answer with three source excerpts; Sync and Settings loaded real backend state.
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic refresh and secure persistence of an expired access token.
+- Google Drive sync code, OAuth loopback authorization, resumable uploads, atomic downloads, token refresh persistence, and Baidu fallback are implemented; real Google Drive E2E awaits the Desktop OAuth client JSON and browser authorization.
 - Semantic Scholar is disabled and its local key is intentionally empty. OpenAlex, arXiv, OpenReview and DBLP now provide the default retrieval path; each source degrades independently.
 - GitHub SSH read/write and authenticated `gh` API access are available for `qiaoyo/DiveEnd`; the current account has `ADMIN` repository permission.
 - DeepRead can still be improved with finer page-level cache/prefetch, PDF 页码级证据定位、跨论文对比和更好的长文档导航。
@@ -97,13 +99,15 @@ The following are intentionally local-only and must not be committed:
 - `config/stroing_llm.json`
 - `config/semantic_scholar.json`
 - `config/openalex.json`
+- `config/google_drive_client.json`
+- `google_drive_token.json`
 - `frontend/node_modules/`
 - `frontend/dist/`
 - `build/bin/`
 - `.pytest_cache/`
 - `__pycache__/`
 
-Use the `.example` files under `config/` and `baiduyun_token.json.example` as templates.
+Use the `.example` files under `config/` and `baiduyun_token.json.example` as templates. For Google Drive, follow [docs/GOOGLE_DRIVE_SYNC_SETUP.md](docs/GOOGLE_DRIVE_SYNC_SETUP.md); the downloaded OAuth client JSON is intentionally not checked in.
 
 ## Development
 

@@ -242,18 +242,21 @@ Tests:
 Purpose:
 
 - Preview local files before upload.
-- Upload SQLite snapshot, manifest, and managed PDFs to Baidu Cloud.
+- Upload SQLite snapshot, manifest, and managed PDFs to Google Drive by default, with Baidu Cloud as a preflight fallback.
 - Download missing remote files on startup.
 - Detect local/remote conflicts.
 - Resolve file conflicts.
 - Stage remote database restore safely and apply/cancel through user confirmation.
 - Emit `sync-progress` events while preserving polling fallback.
 - Present preflight, live progress, history, conflicts, restore confirmation, and automation settings in one restrained Chinese-language workspace.
+- Keep provider-neutral remote keys stable so a complete run can move between Google Drive and Baidu without changing restore or conflict semantics.
 
 Backend files:
 
 - `internal/app/sync.go`
 - `internal/app/sync_api.go`
+- `internal/app/sync_provider.go`
+- `internal/app/google_drive.go`
 - `internal/app/baidu_pcs.go`
 - `internal/app/database_restore.go`
 - `internal/app/secure_file.go`
@@ -270,6 +273,7 @@ Tests:
 
 - `internal/app/sync_progress_test.go`
 - `internal/app/baidu_pcs_test.go`
+- `internal/app/google_drive_test.go`
 - `internal/app/baidu_real_e2e_test.go`
 - `internal/app/baidu_current_data_e2e_test.go`
 - `internal/app/app_lifecycle_test.go`
@@ -341,7 +345,7 @@ Use this table to pick tests for a change:
 | DeepRead/PDF | `go test ./... -run 'Test(DeepRead|PDFServiceClient|AttachLocalPDF|DownloadPDF)'` |
 | Screening | `go test ./... -run 'Test(AppScreening|UploadScreening|CancelScreening)'` |
 | Library moves/deletes | `go test ./... -run 'Test(MovePaper|MovePapers|DeletePaper|Folder)'` |
-| Sync/Baidu | `go test ./... -run 'Test(Sync|Baidu|DatabaseRestore)'` |
+| Sync/Google Drive/Baidu | `go test ./... -run 'Test(Sync|GoogleDrive|Baidu|DatabaseRestore)'` |
 | Frontend | `cd frontend && npm test -- --run` |
 | Browser UI | `node frontend/scripts/ui-smoke.mjs` (set `UI_SMOKE_WIDTH` and `UI_SMOKE_HEIGHT` for narrow-window checks) |
 | PDF service | `python -m pytest services/pdf_service/tests` |

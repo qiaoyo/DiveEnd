@@ -22,6 +22,10 @@ export function AttachLocalPDFToPaper(arg1, arg2) {
   return window['go']['app']['App']['AttachLocalPDFToPaper'](arg1, arg2);
 }
 
+export function AuthorizeGoogleDrive() {
+  return window['go']['app']['App']['AuthorizeGoogleDrive']();
+}
+
 export function CancelDeepReadAI() {
   return window['go']['app']['App']['CancelDeepReadAI']();
 }
@@ -66,6 +70,10 @@ export function DeletePaper(arg1) {
   return window['go']['app']['App']['DeletePaper'](arg1);
 }
 
+export function DisconnectGoogleDrive() {
+  return window['go']['app']['App']['DisconnectGoogleDrive']();
+}
+
 export function EnhancedSearchPapers(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['app']['App']['EnhancedSearchPapers'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
@@ -104,6 +112,10 @@ export function GetFolderTree() {
 
 export function GetFolders() {
   return window['go']['app']['App']['GetFolders']();
+}
+
+export function GetGoogleDriveStatus() {
+  return window['go']['app']['App']['GetGoogleDriveStatus']();
 }
 
 export function GetInitialState() {

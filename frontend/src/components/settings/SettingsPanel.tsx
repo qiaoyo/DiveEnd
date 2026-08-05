@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import * as Switch from '@radix-ui/react-switch';
 import {
   Bot,
+  CheckCircle2,
   Cloud,
   Eye,
   EyeOff,
   Gauge,
+  HardDrive,
   Key,
   Save,
   Search,
@@ -13,10 +15,23 @@ import {
   Settings,
   Trash2,
 } from 'lucide-react';
-import { getLLMUsage, getSecretPrefill, saveConfig } from '../../lib/backend';
+import {
+  authorizeGoogleDrive,
+  disconnectGoogleDrive,
+  getGoogleDriveStatus,
+  getLLMUsage,
+  getSecretPrefill,
+  saveConfig,
+} from '../../lib/backend';
 import { errorToUserMessage } from '../../lib/errors';
 import { useAppStore } from '../../stores/appStore';
-import type { AppConfig, ConfigSecretPrefill, LLMConfig, LLMUsageSnapshot } from '../../types';
+import type {
+  AppConfig,
+  ConfigSecretPrefill,
+  GoogleDriveAuthStatus,
+  LLMConfig,
+  LLMUsageSnapshot,
+} from '../../types';
 
 const providerPresets: Record<'openai_compatible' | 'anthropic', Partial<LLMConfig>> = {
   openai_compatible: {
@@ -332,6 +347,8 @@ export function SettingsPanel() {
   const [showStrongKey, setShowStrongKey] = useState(false);
   const [showWeakKey, setShowWeakKey] = useState(false);
   const [llmUsage, setLLMUsage] = useState<LLMUsageSnapshot | null>(null);
+  const [googleDriveStatus, setGoogleDriveStatus] = useState<GoogleDriveAuthStatus | null>(null);
+  const [isAuthorizingGoogleDrive, setIsAuthorizingGoogleDrive] = useState(false);
 
   useEffect(() => {
     setDraftConfig(mergeConfigWithSecretPrefill(config, secretPrefill));
@@ -365,6 +382,20 @@ export function SettingsPanel() {
 
   useEffect(() => {
     let cancelled = false;
+    void getGoogleDriveStatus()
+      .then((status) => {
+        if (!cancelled) setGoogleDriveStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleDriveStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     void getLLMUsage()
       .then((usage) => {
         if (!cancelled) setLLMUsage(usage);
@@ -391,7 +422,7 @@ export function SettingsPanel() {
     } as AppConfig));
   };
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
     setSavingConfig(true);
     setSaveMessage('');
     try {
@@ -399,12 +430,60 @@ export function SettingsPanel() {
       setSecretPrefill(secretPrefillFromConfig(draftConfig));
       setConfig(result.config);
       setSaveMessage(result.restartRequired ? '配置已保存，数据路径改动将在重启后生效。' : '配置已保存。');
+      return true;
     } catch (error) {
       const message = errorToUserMessage(error, '保存配置失败');
       setError(message);
       setSaveMessage(message);
+      return false;
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const handleAuthorizeGoogleDrive = async () => {
+    setIsAuthorizingGoogleDrive(true);
+    setSaveMessage('');
+    try {
+      // Persist a newly edited client path before the desktop bridge reads it.
+      if (!(await handleSave())) {
+        return;
+      }
+      const status = await authorizeGoogleDrive();
+      setGoogleDriveStatus(status);
+      setDraftConfig((current) => ({
+        ...current,
+        googleDrive: {
+          ...current.googleDrive,
+          enabled: true,
+        },
+      }));
+      setSaveMessage('Google Drive 授权完成，请保存配置后启用主同步。');
+    } catch (error) {
+      const message = errorToUserMessage(error, 'Google Drive 授权失败');
+      setError(message);
+      setSaveMessage(message);
+    } finally {
+      setIsAuthorizingGoogleDrive(false);
+    }
+  };
+
+  const handleDisconnectGoogleDrive = async () => {
+    try {
+      await disconnectGoogleDrive();
+      setGoogleDriveStatus((current) => (current ? { ...current, authorized: false, message: 'Google Drive 尚未完成授权' } : current));
+      setDraftConfig((current) => ({
+        ...current,
+        googleDrive: {
+          ...current.googleDrive,
+          enabled: false,
+        },
+      }));
+      setSaveMessage('Google Drive 本地授权已移除。');
+    } catch (error) {
+      const message = errorToUserMessage(error, '移除 Google Drive 授权失败');
+      setError(message);
+      setSaveMessage(message);
     }
   };
 
@@ -587,6 +666,131 @@ export function SettingsPanel() {
 
         {activeTab === 'cloud' && (
           <div className="space-y-4">
+            <div className="de-panel p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <HardDrive className="mt-0.5 h-5 w-5 text-[var(--de-accent)]" aria-hidden="true" />
+                  <div>
+                    <p className="font-semibold">Google Drive 主同步</p>
+                    <p className="mt-1 text-xs leading-6 text-[var(--de-ink-muted)]">
+                      使用桌面 OAuth 和可恢复上传保存 DiveEnd 数据。refresh token 保存在系统配置目录，不会写入项目文件。
+                    </p>
+                  </div>
+                </div>
+                <Switch.Root
+                  checked={draftConfig.googleDrive.enabled}
+                  onCheckedChange={(checked) =>
+                    updateDraft({
+                      googleDrive: {
+                        ...draftConfig.googleDrive,
+                        enabled: checked,
+                      },
+                    })
+                  }
+                  aria-label="启用 Google Drive 主同步"
+                  className="relative h-6 w-11 rounded-full bg-[var(--de-rule-strong)] transition data-[state=checked]:bg-[var(--de-accent)]"
+                >
+                  <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-5" />
+                </Switch.Root>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium" htmlFor="google-drive-client-secret-path">
+                    OAuth 客户端 JSON 路径
+                  </label>
+                  <input
+                    id="google-drive-client-secret-path"
+                    type="text"
+                    value={draftConfig.googleDrive.clientSecretPath}
+                    onChange={(event) =>
+                      updateDraft({
+                        googleDrive: {
+                          ...draftConfig.googleDrive,
+                          clientSecretPath: event.target.value,
+                        },
+                      })
+                    }
+                    className="de-field w-full px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium" htmlFor="google-drive-root-folder">
+                    Drive 备份文件夹
+                  </label>
+                  <input
+                    id="google-drive-root-folder"
+                    type="text"
+                    value={draftConfig.googleDrive.rootFolderName}
+                    onChange={(event) =>
+                      updateDraft({
+                        googleDrive: {
+                          ...draftConfig.googleDrive,
+                          rootFolderName: event.target.value,
+                        },
+                      })
+                    }
+                    className="de-field w-full px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-3 py-2 text-xs">
+                <div className="flex items-center gap-2 text-[var(--de-ink-muted)]">
+                  <CheckCircle2 className={`h-4 w-4 ${googleDriveStatus?.authorized ? 'text-[var(--de-accent)]' : 'text-[var(--de-ink-muted)]'}`} />
+                  <span>{googleDriveStatus?.message ?? '正在读取 Google Drive 状态...'}</span>
+                </div>
+                <span className="text-[var(--de-ink-muted)]">
+                  {googleDriveStatus?.hasClientSecret ? '客户端文件已找到' : '客户端文件未找到'}
+                </span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs text-[var(--de-ink-muted)]">
+                  <input
+                    type="checkbox"
+                    checked={draftConfig.googleDrive.fallbackToBaidu}
+                    onChange={(event) =>
+                      updateDraft({
+                        googleDrive: {
+                          ...draftConfig.googleDrive,
+                          fallbackToBaidu: event.target.checked,
+                        },
+                      })
+                    }
+                  />
+                  Google 预检失败时使用百度云备用同步
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleAuthorizeGoogleDrive()}
+                    disabled={isAuthorizingGoogleDrive}
+                    className="de-button-primary inline-flex items-center gap-1.5 px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <HardDrive className={`h-4 w-4 ${isAuthorizingGoogleDrive ? 'animate-pulse' : ''}`} />
+                    {isAuthorizingGoogleDrive ? '等待浏览器授权...' : googleDriveStatus?.authorized ? '重新授权' : '连接 Google Drive'}
+                  </button>
+                  {googleDriveStatus?.authorized && (
+                    <button
+                      type="button"
+                      onClick={() => void handleDisconnectGoogleDrive()}
+                      className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-2 text-xs text-[var(--de-danger)]"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      移除本机授权
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {googleDriveStatus?.tokenPath && (
+                <p className="mt-3 break-all text-[11px] leading-5 text-[var(--de-ink-muted)]">
+                  本机 token：{googleDriveStatus.tokenPath}
+                </p>
+              )}
+            </div>
+
             <div className="de-panel flex items-center justify-between px-4 py-3">
               <span className="font-medium">启用百度网盘同步</span>
               <Switch.Root

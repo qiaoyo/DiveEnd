@@ -79,6 +79,10 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	config.Search.OpenAlexAPIKey = "openalex-key"
 	config.BaiduCloud.Enabled = true
 	config.BaiduCloud.Token = "baidu-token"
+	config.GoogleDrive.Enabled = true
+	config.GoogleDrive.ClientSecretPath = "/tmp/diveend-google-client.json"
+	config.GoogleDrive.RootFolderName = "Research Backup"
+	config.GoogleDrive.FallbackToBaidu = false
 
 	if err := os.MkdirAll(filepath.Dir(configPathOverride), 0700); err != nil {
 		t.Fatalf("MkdirAll config dir error = %v", err)
@@ -122,6 +126,9 @@ func TestSaveAndLoadAppConfigRoundTrip(t *testing.T) {
 	}
 	if loaded.BaiduCloud.Token != "baidu-token" {
 		t.Fatalf("expected Baidu token to round-trip")
+	}
+	if !loaded.GoogleDrive.Enabled || loaded.GoogleDrive.ClientSecretPath != config.GoogleDrive.ClientSecretPath || loaded.GoogleDrive.RootFolderName != config.GoogleDrive.RootFolderName || loaded.GoogleDrive.FallbackToBaidu {
+		t.Fatalf("expected Google Drive settings to round-trip, got %+v", loaded.GoogleDrive)
 	}
 	if loaded.DataPath != config.DataPath {
 		t.Fatalf("expected data path %q, got %q", config.DataPath, loaded.DataPath)

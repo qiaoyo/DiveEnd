@@ -13,6 +13,8 @@ export function AskDeepReadPaper(arg1:string,arg2:string,arg3:string,arg4:string
 
 export function AttachLocalPDFToPaper(arg1:string,arg2:string):Promise<domain.Paper>;
 
+export function AuthorizeGoogleDrive():Promise<domain.GoogleDriveAuthStatus>;
+
 export function CancelDeepReadAI():Promise<boolean>;
 
 export function CancelDeepStartTask(arg1:string):Promise<void>;
@@ -35,6 +37,8 @@ export function DeleteFolderNode(arg1:string):Promise<void>;
 
 export function DeletePaper(arg1:string):Promise<void>;
 
+export function DisconnectGoogleDrive():Promise<void>;
+
 export function EnhancedSearchPapers(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number,arg6:string):Promise<domain.EnhancedSearchResult>;
 
 export function ExtractPaperContent(arg1:string):Promise<domain.ExtractProgress>;
@@ -54,6 +58,8 @@ export function GetFolderStorageTreeOverview():Promise<domain.FolderStorageTreeO
 export function GetFolderTree():Promise<Array<domain.FolderNode>>;
 
 export function GetFolders():Promise<Array<domain.Folder>>;
+
+export function GetGoogleDriveStatus():Promise<domain.GoogleDriveAuthStatus>;
 
 export function GetInitialState():Promise<domain.InitialState>;
 

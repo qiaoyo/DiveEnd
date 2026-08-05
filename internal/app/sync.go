@@ -450,6 +450,9 @@ func (db *DB) ClearSyncConflicts() error {
 // SyncManager 同步管理器
 type SyncManager struct {
 	db          *DB
+	primary     syncProvider
+	provider    syncProvider
+	fallback    syncProvider
 	baiduClient *BaiduPCSClient
 	config      AppConfig
 	syncMu      sync.Mutex
@@ -460,15 +463,31 @@ type SyncManager struct {
 
 // NewSyncManager 创建同步管理器
 func NewSyncManager(db *DB, config AppConfig) *SyncManager {
+	config = normalizeAppConfig(config)
+	googleDriveEnabled := config.GoogleDrive.Enabled
+	var provider syncProvider
 	var baiduClient *BaiduPCSClient
+	if config.GoogleDrive.Enabled {
+		if candidate, err := NewGoogleDriveProvider(config.GoogleDrive); err == nil {
+			provider = candidate
+		} else {
+			log.Printf("[Sync] Google Drive is configured but unavailable: %s", redactErrorText(err))
+		}
+	}
 	if config.BaiduCloud.Enabled {
 		if token := baiduTokenForSync(config); token != nil {
 			baiduClient = NewBaiduPCSClientWithTokenPath(token, defaultBaiduTokenPath())
+			if provider == nil && (!googleDriveEnabled || config.GoogleDrive.FallbackToBaidu) {
+				provider = baiduClient
+			}
 		}
 	}
 
 	return &SyncManager{
 		db:          db,
+		primary:     provider,
+		provider:    provider,
+		fallback:    baiduClient,
 		baiduClient: baiduClient,
 		config:      config,
 		progress:    &SyncProgress{Status: "idle"},
@@ -492,21 +511,31 @@ func baiduTokenForSync(config AppConfig) *BaiduToken {
 }
 
 func (sm *SyncManager) BuildSyncPreview() (*SyncPreview, error) {
-	preview := &SyncPreview{
-		Enabled:    sm != nil && sm.baiduClient != nil,
-		DataPath:   "",
-		RemoteRoot: syncRemoteRootPath(),
-		TokenFile:  defaultBaiduTokenPath(),
-		CheckedAt:  time.Now(),
-	}
 	if sm == nil {
-		preview.Warning = "同步管理器未初始化"
+		preview := &SyncPreview{Enabled: false, Provider: "none", RemoteRoot: syncRemoteRootPath(), CheckedAt: time.Now(), Warning: "同步管理器未初始化"}
 		return preview, fmt.Errorf("sync manager is nil")
 	}
+
+	sm.syncMu.Lock()
+	defer sm.syncMu.Unlock()
+
+	provider, providerErr := sm.prepareProviderForRun()
+	defer sm.restorePrimaryProvider()
+	preview := &SyncPreview{
+		Provider:   syncProviderName(provider),
+		Enabled:    provider != nil,
+		DataPath:   "",
+		RemoteRoot: syncRemoteRootPath(),
+		TokenFile:  syncProviderCredentialPath(provider),
+		CheckedAt:  time.Now(),
+	}
 	preview.DataPath = sm.config.DataPath
-	if sm.baiduClient == nil {
-		preview.Warning = "百度云同步未配置"
-		return preview, fmt.Errorf("baidu client not initialized")
+	if providerErr != nil {
+		preview.Warning = fmt.Sprintf("云同步预检失败: %v", providerErr)
+		return preview, providerErr
+	}
+	if sm.primary != nil && provider != sm.primary {
+		preview.Warning = "Google Drive 当前不可用，本次预览和同步将使用百度云 fallback。"
 	}
 
 	localFiles, cleanup, err := sm.prepareSyncSnapshot()
@@ -543,7 +572,10 @@ func (sm *SyncManager) BuildSyncPreview() (*SyncPreview, error) {
 		})
 	}
 	if preview.TotalBytes >= 1024*1024*1024 {
-		preview.Warning = "本次同步超过 1 GiB，建议确认网络稳定并保持应用打开。"
+		if preview.Warning != "" {
+			preview.Warning += " "
+		}
+		preview.Warning += "本次同步超过 1 GiB，建议确认网络稳定并保持应用打开。"
 	}
 	return preview, nil
 }
@@ -586,9 +618,10 @@ func (sm *SyncManager) baiduTokenStatus(refreshed bool, message string) *BaiduTo
 func (sm *SyncManager) SyncOnStartup() error {
 	sm.syncMu.Lock()
 	defer sm.syncMu.Unlock()
+	defer sm.restorePrimaryProvider()
 
-	if sm.baiduClient == nil {
-		return fmt.Errorf("baidu client not initialized")
+	if _, err := sm.prepareProviderForRun(); err != nil {
+		return err
 	}
 
 	sm.updateProgress(func(progress *SyncProgress) {
@@ -730,9 +763,9 @@ func (sm *SyncManager) StartSyncToCloudAsync(onComplete func(error)) (*SyncProgr
 	if !sm.syncMu.TryLock() {
 		return sm.GetSyncProgress(), errSyncAlreadyInProgress
 	}
-	if sm.baiduClient == nil {
+	if sm.activeProvider() == nil {
 		sm.syncMu.Unlock()
-		return nil, fmt.Errorf("baidu client not initialized")
+		return nil, fmt.Errorf("cloud sync provider not initialized")
 	}
 
 	sm.updateProgress(func(progress *SyncProgress) {
@@ -756,8 +789,10 @@ func (sm *SyncManager) StartSyncToCloudAsync(onComplete func(error)) (*SyncProgr
 }
 
 func (sm *SyncManager) syncToCloudLocked() error {
-	if sm.baiduClient == nil {
-		return fmt.Errorf("baidu client not initialized")
+	defer sm.restorePrimaryProvider()
+	provider, err := sm.prepareProviderForRun()
+	if err != nil {
+		return err
 	}
 
 	sm.updateProgress(func(progress *SyncProgress) {
@@ -769,12 +804,6 @@ func (sm *SyncManager) syncToCloudLocked() error {
 	})
 
 	log.Println("[Sync] 开始同步到云端...")
-
-	if _, err := sm.baiduClient.GetAccessToken(); err != nil {
-		message := fmt.Sprintf("百度云凭据不可用: %v", err)
-		sm.failProgress(message)
-		return fmt.Errorf("baidu token preflight failed: %w", err)
-	}
 
 	localFiles, cleanup, err := sm.prepareSyncSnapshot()
 	if err != nil {
@@ -800,7 +829,7 @@ func (sm *SyncManager) syncToCloudLocked() error {
 		})
 		log.Printf("[Sync] 上传文件: %s", localFile.Key)
 
-		if err := sm.baiduClient.UploadFileToPath(localPath, remotePath); err != nil {
+		if err := provider.UploadFileToPath(localPath, remotePath); err != nil {
 			failedUploads++
 			if firstUploadErr == "" {
 				firstUploadErr = fmt.Sprintf("%s: %v", localFile.Key, err)
@@ -942,11 +971,15 @@ func (sm *SyncManager) downloadFile(remotePath string) (string, error) {
 }
 
 func (sm *SyncManager) downloadSyncKeyToPath(remotePath, key, targetPath string) error {
+	provider, err := sm.providerOrError()
+	if err != nil {
+		return err
+	}
 	if strings.HasPrefix(key, "papers/") {
 		return sm.downloadManagedPaperPDFToPath(remotePath, targetPath)
 	}
 	if key == syncDatabaseKey {
-		if err := sm.baiduClient.DownloadFile(remotePath, targetPath); err != nil {
+		if err := provider.DownloadFile(remotePath, targetPath); err != nil {
 			return err
 		}
 		if err := validateSQLiteDatabase(targetPath); err != nil {
@@ -959,6 +992,10 @@ func (sm *SyncManager) downloadSyncKeyToPath(remotePath, key, targetPath string)
 }
 
 func (sm *SyncManager) downloadManagedPaperPDFToPath(remotePath, targetPath string) error {
+	provider, err := sm.providerOrError()
+	if err != nil {
+		return err
+	}
 	managedTargetPath, err := ensureManagedFileParent(filepath.Join(sm.config.DataPath, "papers"), targetPath)
 	if err != nil {
 		return err
@@ -970,7 +1007,7 @@ func (sm *SyncManager) downloadManagedPaperPDFToPath(remotePath, targetPath stri
 		_ = removeFileAndSyncDir(stagePath)
 	}()
 
-	if err := sm.baiduClient.DownloadFile(remotePath, stagePath); err != nil {
+	if err := provider.DownloadFile(remotePath, stagePath); err != nil {
 		return err
 	}
 	if err := validateLocalPDFFile(stagePath); err != nil {
@@ -987,9 +1024,10 @@ func (sm *SyncManager) DetectConflicts() ([]SyncConflict, error) {
 	sm.syncMu.Lock()
 	defer sm.syncMu.Unlock()
 
-	if sm.baiduClient == nil {
-		return nil, fmt.Errorf("baidu client not initialized")
+	if _, err := sm.prepareProviderForRun(); err != nil {
+		return nil, err
 	}
+	defer sm.restorePrimaryProvider()
 
 	remoteFiles, err := sm.listRemoteSyncFiles()
 	if err != nil {
@@ -1065,9 +1103,6 @@ func (sm *SyncManager) ResolveConflict(conflict *SyncConflict, resolution string
 	sm.syncMu.Lock()
 	defer sm.syncMu.Unlock()
 
-	if sm.baiduClient == nil {
-		return fmt.Errorf("baidu client not initialized")
-	}
 	if conflict == nil {
 		return fmt.Errorf("sync conflict is nil")
 	}
@@ -1106,6 +1141,10 @@ func (sm *SyncManager) ResolveConflict(conflict *SyncConflict, resolution string
 			sm.saveConflictResolutionRecord(conflict, recordType, recordLocalPath, "failed", wrapped.Error(), "")
 			return wrapped
 		}
+		if _, err := sm.prepareProviderForRun(); err != nil {
+			return err
+		}
+		defer sm.restorePrimaryProvider()
 		archivePath, err := sm.archiveRemoteConflictVersion(conflict, remoteKey)
 		if err != nil {
 			wrapped := fmt.Errorf("failed to preserve cloud conflict version before upload: %w", err)
@@ -1113,7 +1152,12 @@ func (sm *SyncManager) ResolveConflict(conflict *SyncConflict, resolution string
 			return wrapped
 		}
 		preservedPath = archivePath
-		if err := sm.baiduClient.UploadFileToPath(conflict.LocalPath, conflict.RemotePath); err != nil {
+		provider, providerErr := sm.providerOrError()
+		if providerErr != nil {
+			sm.saveConflictResolutionRecord(conflict, recordType, recordLocalPath, "failed", providerErr.Error(), preservedPath)
+			return providerErr
+		}
+		if err := provider.UploadFileToPath(conflict.LocalPath, conflict.RemotePath); err != nil {
 			recordStatus = "failed"
 			recordError = err.Error()
 			sm.saveConflictResolutionRecord(conflict, recordType, recordLocalPath, recordStatus, recordError, preservedPath)
@@ -1129,6 +1173,16 @@ func (sm *SyncManager) ResolveConflict(conflict *SyncConflict, resolution string
 			return wrapped
 		}
 		preservedPath = archivePath
+		if sm.isLiveDatabasePath(conflict.LocalPath) {
+			if err := ensureDatabaseRestoreDir(sm.config.DataPath); err != nil {
+				sm.saveConflictResolutionRecord(conflict, recordType, recordLocalPath, "failed", err.Error(), preservedPath)
+				return err
+			}
+		}
+		if _, err := sm.prepareProviderForRun(); err != nil {
+			return err
+		}
+		defer sm.restorePrimaryProvider()
 		if sm.isLiveDatabasePath(conflict.LocalPath) {
 			stagedPath, err := sm.stageRemoteDatabase(conflict.RemotePath)
 			if err != nil {
@@ -1294,7 +1348,11 @@ func (sm *SyncManager) archiveRemoteConflictVersion(conflict *SyncConflict, remo
 	if err != nil {
 		return "", err
 	}
-	if err := sm.baiduClient.DownloadFile(conflict.RemotePath, targetPath); err != nil {
+	provider, err := sm.providerOrError()
+	if err != nil {
+		return "", err
+	}
+	if err := provider.DownloadFile(conflict.RemotePath, targetPath); err != nil {
 		return "", err
 	}
 	if err := validateConflictArchiveFile(remoteKey, targetPath); err != nil {
@@ -1519,7 +1577,11 @@ func syncManagedPaperPDFPath(dataPath string, paper Paper) (string, bool) {
 }
 
 func (sm *SyncManager) listRemoteSyncFiles() ([]FileInfo, error) {
-	files, err := sm.baiduClient.ListFilesRecursive(syncRemoteRootPath())
+	provider, err := sm.providerOrError()
+	if err != nil {
+		return nil, err
+	}
+	files, err := provider.ListFilesRecursive(syncRemoteRootPath())
 	if err != nil {
 		errText := strings.ToLower(err.Error())
 		if strings.Contains(errText, "errno:-9") ||
@@ -1602,7 +1664,11 @@ func (sm *SyncManager) stageRemoteDatabase(remotePath string) (string, error) {
 		return "", err
 	}
 	localPath := filepath.Join(databaseRestoreDir(sm.config.DataPath), "diveend-remote-"+uuid.NewString()+".db")
-	if err := sm.baiduClient.DownloadFile(remotePath, localPath); err != nil {
+	provider, err := sm.providerOrError()
+	if err != nil {
+		return "", err
+	}
+	if err := provider.DownloadFile(remotePath, localPath); err != nil {
 		return "", err
 	}
 	return localPath, nil

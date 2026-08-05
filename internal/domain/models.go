@@ -51,23 +51,34 @@ type BaiduCloudConfig struct {
 	ClearToken   bool   `json:"clearToken,omitempty"`
 }
 
+// GoogleDriveConfig stores non-secret Drive integration preferences. The
+// OAuth client JSON and refresh token are kept outside AppConfig so they can
+// use separate filesystem permissions and never cross the Wails boundary.
+type GoogleDriveConfig struct {
+	Enabled          bool   `json:"enabled"`
+	ClientSecretPath string `json:"clientSecretPath"`
+	RootFolderName   string `json:"rootFolderName"`
+	FallbackToBaidu  bool   `json:"fallbackToBaidu"`
+}
+
 type AppConfig struct {
-	LLM                   LLMConfig        `json:"llm"`
-	WeakLLM               LLMConfig        `json:"weakLLM"`
-	DailyLLMTokenBudget   int64            `json:"dailyLLMTokenBudget"`
-	Search                SearchAPIConfig  `json:"search"`
-	BaiduCloud            BaiduCloudConfig `json:"baiduCloud"`
-	Sync                  SyncSettings     `json:"sync"`
-	Theme                 string           `json:"theme"`
-	LeftPanelWidth        int              `json:"leftPanelWidth"`
-	RightPanelWidth       int              `json:"rightPanelWidth"`
-	DataPath              string           `json:"dataPath"`
-	SelectedProvider      string           `json:"selectedProvider,omitempty"`
-	OpenAIAPIKey          string           `json:"openaiApiKey,omitempty"`
-	OpenAIModel           string           `json:"openaiModel,omitempty"`
-	AnthropicAPIKey       string           `json:"anthropicApiKey,omitempty"`
-	AnthropicModel        string           `json:"anthropicModel,omitempty"`
-	SemanticScholarAPIKey string           `json:"semanticScholarApiKey,omitempty"`
+	LLM                   LLMConfig         `json:"llm"`
+	WeakLLM               LLMConfig         `json:"weakLLM"`
+	DailyLLMTokenBudget   int64             `json:"dailyLLMTokenBudget"`
+	Search                SearchAPIConfig   `json:"search"`
+	GoogleDrive           GoogleDriveConfig `json:"googleDrive"`
+	BaiduCloud            BaiduCloudConfig  `json:"baiduCloud"`
+	Sync                  SyncSettings      `json:"sync"`
+	Theme                 string            `json:"theme"`
+	LeftPanelWidth        int               `json:"leftPanelWidth"`
+	RightPanelWidth       int               `json:"rightPanelWidth"`
+	DataPath              string            `json:"dataPath"`
+	SelectedProvider      string            `json:"selectedProvider,omitempty"`
+	OpenAIAPIKey          string            `json:"openaiApiKey,omitempty"`
+	OpenAIModel           string            `json:"openaiModel,omitempty"`
+	AnthropicAPIKey       string            `json:"anthropicApiKey,omitempty"`
+	AnthropicModel        string            `json:"anthropicModel,omitempty"`
+	SemanticScholarAPIKey string            `json:"semanticScholarApiKey,omitempty"`
 }
 
 type SaveConfigResult struct {
@@ -563,6 +574,17 @@ type SyncStatus struct {
 	TotalFailed    int        `json:"totalFailed"`
 }
 
+type GoogleDriveAuthStatus struct {
+	Enabled          bool      `json:"enabled"`
+	ClientSecretPath string    `json:"clientSecretPath"`
+	TokenPath        string    `json:"tokenPath"`
+	RootFolderName   string    `json:"rootFolderName"`
+	HasClientSecret  bool      `json:"hasClientSecret"`
+	Authorized       bool      `json:"authorized"`
+	CheckedAt        time.Time `json:"checkedAt" ts_type:"string"`
+	Message          string    `json:"message,omitempty"`
+}
+
 // SyncSettings 同步设置
 type SyncSettings struct {
 	AutoSync           bool   `json:"autoSync"`
@@ -602,6 +624,7 @@ type SyncPreviewFile struct {
 }
 
 type SyncPreview struct {
+	Provider      string            `json:"provider"`
 	Enabled       bool              `json:"enabled"`
 	DataPath      string            `json:"dataPath"`
 	RemoteRoot    string            `json:"remoteRoot"`

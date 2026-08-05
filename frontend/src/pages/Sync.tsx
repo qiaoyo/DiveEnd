@@ -6,7 +6,7 @@ import { errorToUserMessage } from '../lib/errors';
 
 const emptyStatus: SyncStatus = {
   enabled: false,
-  provider: 'baidu_cloud',
+  provider: 'none',
   lastSync: null,
   syncInProgress: false,
   pendingFiles: 0,
@@ -234,6 +234,18 @@ export const Sync: React.FC = () => {
   };
 
   const syncIsActive = syncStatus.syncInProgress || isSyncProgressActive(syncProgress.status);
+  const providerLabel = syncStatus.provider === 'google_drive'
+    ? 'Google Drive'
+    : syncStatus.provider === 'baidu_cloud'
+      ? '百度网盘'
+      : '云端同步';
+  const previewProviderLabel = syncPreview?.provider === 'google_drive'
+    ? 'Google Drive'
+    : syncPreview?.provider === 'baidu_cloud'
+      ? '百度云'
+      : syncStatus.provider === 'baidu_cloud'
+        ? '百度云'
+        : providerLabel;
 
   const handleSyncNow = async () => {
     if (syncIsActive) {
@@ -387,7 +399,7 @@ export const Sync: React.FC = () => {
               云端同步
             </h2>
             <p className="mt-1 text-sm text-[var(--de-ink-muted)]">
-              百度网盘 · {syncStatus.enabled ? '已连接' : '未连接'} · 最后同步 {formatTimestamp(syncStatus.lastSync)}
+              {providerLabel} · {syncStatus.enabled ? '已连接' : '未连接'} · 最后同步 {formatTimestamp(syncStatus.lastSync)}
             </p>
           </div>
 
@@ -400,14 +412,16 @@ export const Sync: React.FC = () => {
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               刷新
             </button>
-            <button
-              onClick={() => void handleRefreshBaiduToken()}
-              disabled={isRefreshingToken || isRefreshing || isLoadingPreview || syncIsActive || !syncStatus.enabled}
-              className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCw className={`h-4 w-4 ${isRefreshingToken ? 'animate-spin' : ''}`} />
-              {isRefreshingToken ? '正在更新凭证...' : '更新凭证'}
-            </button>
+            {syncStatus.provider === 'baidu_cloud' && (
+              <button
+                onClick={() => void handleRefreshBaiduToken()}
+                disabled={isRefreshingToken || isRefreshing || isLoadingPreview || syncIsActive || !syncStatus.enabled}
+                className="de-button-secondary inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshingToken ? 'animate-spin' : ''}`} />
+                {isRefreshingToken ? '正在更新凭证...' : '更新凭证'}
+              </button>
+            )}
             <button
               onClick={() => void handleSyncNow()}
               disabled={isRefreshing || isRefreshingToken || isLoadingPreview || syncIsActive || !syncStatus.enabled}
@@ -434,7 +448,7 @@ export const Sync: React.FC = () => {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium text-[var(--de-accent)]">同步预检</p>
-                    <h3 className="mt-1 text-lg font-semibold">确认本次百度云同步</h3>
+                    <h3 className="mt-1 text-lg font-semibold">确认本次{previewProviderLabel}同步</h3>
                     <p className="mt-2 text-sm leading-6 text-[var(--de-ink-muted)]">
                       DiveEnd 将先上传当前数据库快照、manifest 和已管理的论文 PDF。请确认文件数量和总大小后再开始。
                     </p>
@@ -476,7 +490,7 @@ export const Sync: React.FC = () => {
                 <div className="mt-4 space-y-1 border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] p-3 text-xs text-[var(--de-ink-muted)]">
                   <div className="break-all">本地数据：{syncPreview.dataPath}</div>
                   <div className="break-all">远端目录：{syncPreview.remoteRoot}</div>
-                  <div>Token 文件：{syncPreview.tokenFile}</div>
+                  <div>凭据文件：{syncPreview.tokenFile}</div>
                 </div>
 
                 <div className="mt-4 max-h-56 overflow-y-auto border border-[var(--de-rule)]">
@@ -574,7 +588,7 @@ export const Sync: React.FC = () => {
             </div>
 
             <div className="de-panel p-4">
-              <h3 className="text-sm font-semibold text-[var(--de-ink)]">百度网盘</h3>
+              <h3 className="text-sm font-semibold text-[var(--de-ink)]">{providerLabel}</h3>
               <div className="mt-3 flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">

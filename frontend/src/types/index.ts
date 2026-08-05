@@ -45,11 +45,19 @@ export interface BaiduCloudConfig {
   clearToken: boolean;
 }
 
+export interface GoogleDriveConfig {
+  enabled: boolean;
+  clientSecretPath: string;
+  rootFolderName: string;
+  fallbackToBaidu: boolean;
+}
+
 export interface AppConfig {
   llm: LLMConfig;
   weakLLM: LLMConfig;
   dailyLLMTokenBudget: number;
   search: SearchAPIConfig;
+  googleDrive: GoogleDriveConfig;
   baiduCloud: BaiduCloudConfig;
   sync: SyncSettings;
   theme: 'light' | 'dark';
@@ -567,6 +575,7 @@ export interface SyncPreviewFile {
 }
 
 export interface SyncPreview {
+  provider: string;
   enabled: boolean;
   dataPath: string;
   remoteRoot: string;
@@ -580,6 +589,17 @@ export interface SyncPreview {
   files: SyncPreviewFile[];
   checkedAt: string;
   warning?: string;
+}
+
+export interface GoogleDriveAuthStatus {
+  enabled: boolean;
+  clientSecretPath: string;
+  tokenPath: string;
+  rootFolderName: string;
+  hasClientSecret: boolean;
+  authorized: boolean;
+  checkedAt: string;
+  message?: string;
 }
 
 export interface SyncConflict {
@@ -719,6 +739,12 @@ export const defaultConfig: AppConfig = {
     openAlexApiKey: '',
     hasOpenAlexApiKey: false,
     clearOpenAlexApiKey: false,
+  },
+  googleDrive: {
+    enabled: false,
+    clientSecretPath: 'config/google_drive_client.json',
+    rootFolderName: 'DiveEnd Backup',
+    fallbackToBaidu: true,
   },
   baiduCloud: {
     enabled: false,

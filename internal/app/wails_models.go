@@ -9,6 +9,7 @@ const defaultFolderName = domain.DefaultFolderName
 
 type LLMConfig = domain.LLMConfig
 type SearchAPIConfig = domain.SearchAPIConfig
+type GoogleDriveConfig = domain.GoogleDriveConfig
 type BaiduCloudConfig = domain.BaiduCloudConfig
 type AppConfig = domain.AppConfig
 type SaveConfigResult = domain.SaveConfigResult
@@ -60,6 +61,7 @@ type BaiduToken = domain.BaiduToken
 type SyncRecord = domain.SyncRecord
 type SyncConflict = domain.SyncConflict
 type SyncStatus = domain.SyncStatus
+type GoogleDriveAuthStatus = domain.GoogleDriveAuthStatus
 type SyncSettings = domain.SyncSettings
 type SyncProgress = domain.SyncProgress
 type BaiduTokenRefreshStatus = domain.BaiduTokenRefreshStatus

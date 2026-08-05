@@ -69,6 +69,24 @@ export namespace domain {
 	        this.clearToken = source["clearToken"];
 	    }
 	}
+	export class GoogleDriveConfig {
+	    enabled: boolean;
+	    clientSecretPath: string;
+	    rootFolderName: string;
+	    fallbackToBaidu: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new GoogleDriveConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.clientSecretPath = source["clientSecretPath"];
+	        this.rootFolderName = source["rootFolderName"];
+	        this.fallbackToBaidu = source["fallbackToBaidu"];
+	    }
+	}
 	export class SearchAPIConfig {
 	    enableSemanticScholar: boolean;
 	    enableArxiv: boolean;
@@ -154,6 +172,7 @@ export namespace domain {
 	    weakLLM: LLMConfig;
 	    dailyLLMTokenBudget: number;
 	    search: SearchAPIConfig;
+	    googleDrive: GoogleDriveConfig;
 	    baiduCloud: BaiduCloudConfig;
 	    sync: SyncSettings;
 	    theme: string;
@@ -177,6 +196,7 @@ export namespace domain {
 	        this.weakLLM = this.convertValues(source["weakLLM"], LLMConfig);
 	        this.dailyLLMTokenBudget = source["dailyLLMTokenBudget"];
 	        this.search = this.convertValues(source["search"], SearchAPIConfig);
+	        this.googleDrive = this.convertValues(source["googleDrive"], GoogleDriveConfig);
 	        this.baiduCloud = this.convertValues(source["baiduCloud"], BaiduCloudConfig);
 	        this.sync = this.convertValues(source["sync"], SyncSettings);
 	        this.theme = source["theme"];
@@ -978,6 +998,33 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class GoogleDriveAuthStatus {
+	    enabled: boolean;
+	    clientSecretPath: string;
+	    tokenPath: string;
+	    rootFolderName: string;
+	    hasClientSecret: boolean;
+	    authorized: boolean;
+	    checkedAt: string;
+	    message?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GoogleDriveAuthStatus(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.clientSecretPath = source["clientSecretPath"];
+	        this.tokenPath = source["tokenPath"];
+	        this.rootFolderName = source["rootFolderName"];
+	        this.hasClientSecret = source["hasClientSecret"];
+	        this.authorized = source["authorized"];
+	        this.checkedAt = source["checkedAt"];
+	        this.message = source["message"];
+	    }
+	}
+
 	export class ImportSkippedPaper {
 	    sourcePaperId: string;
 	    title: string;
@@ -1517,6 +1564,7 @@ export namespace domain {
 	    }
 	}
 	export class SyncPreview {
+	    provider: string;
 	    enabled: boolean;
 	    dataPath: string;
 	    remoteRoot: string;
@@ -1537,6 +1585,7 @@ export namespace domain {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
 	        this.enabled = source["enabled"];
 	        this.dataPath = source["dataPath"];
 	        this.remoteRoot = source["remoteRoot"];

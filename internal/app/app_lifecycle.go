@@ -41,7 +41,7 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:          runtime.QuestionDialog,
 		Title:         "退出前同步",
-		Message:       fmt.Sprintf("检测到 %d 个本地同步候选文件。退出前是否先同步到百度网盘？", pendingCount),
+		Message:       fmt.Sprintf("检测到 %d 个本地同步候选文件。退出前是否先同步到云端？", pendingCount),
 		Buttons:       []string{"同步后退出", "直接退出", "取消"},
 		DefaultButton: "同步后退出",
 		CancelButton:  "取消",
