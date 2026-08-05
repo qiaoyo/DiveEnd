@@ -494,9 +494,36 @@ func resolveGoogleDriveClientSecretPath(configuredPath string) (string, error) {
 	if filepath.IsAbs(configuredPath) {
 		return filepath.Clean(configuredPath), nil
 	}
-	candidates := []string{filepath.Clean(configuredPath)}
+	candidates := make([]string, 0, 12)
+	seen := make(map[string]struct{})
+	addCandidate := func(candidate string) {
+		candidate = filepath.Clean(candidate)
+		if _, exists := seen[candidate]; exists {
+			return
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	addCandidate(configuredPath)
+	if workingDir, err := os.Getwd(); err == nil && strings.TrimSpace(workingDir) != "" {
+		addCandidate(filepath.Join(workingDir, configuredPath))
+	}
+	// Finder does not preserve the repository as the process working directory.
+	// Walk up from the executable so a packaged app built inside this repository
+	// can still resolve the documented relative config path.
+	if executable, err := os.Executable(); err == nil {
+		current := filepath.Dir(executable)
+		for level := 0; level < 8; level++ {
+			addCandidate(filepath.Join(current, configuredPath))
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
 	if configDir, err := userConfigDirFunc(); err == nil && strings.TrimSpace(configDir) != "" {
-		candidates = append(candidates, filepath.Join(configDir, "DiveEnd", filepath.Base(configuredPath)))
+		addCandidate(filepath.Join(configDir, "DiveEnd", filepath.Base(configuredPath)))
 	}
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {
