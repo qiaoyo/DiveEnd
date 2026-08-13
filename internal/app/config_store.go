@@ -105,7 +105,7 @@ func defaultWeakLLMConfig() LLMConfig {
 
 func defaultSearchAPIConfig() SearchAPIConfig {
 	return SearchAPIConfig{
-		EnableSemanticScholar:  false,
+		EnableSemanticScholar:  true,
 		EnableArxiv:            true,
 		EnableOpenAlex:         true,
 		EnableOpenReview:       true,
@@ -251,6 +251,18 @@ func normalizeLLMConfig(config LLMConfig) LLMConfig {
 	config.APIKey = strings.TrimSpace(config.APIKey)
 	config.Model = strings.TrimSpace(config.Model)
 	config.ReasoningEffort = strings.TrimSpace(config.ReasoningEffort)
+
+	// Volcengine's coding endpoint exposes the OpenAI-compatible Chat
+	// Completions wire format. Older persisted configs could retain the
+	// Responses default and an old provider label even after the seed JSON was
+	// changed, which sent valid credentials to the wrong endpoint.
+	if isVolcengineBaseURL(config.BaseURL) {
+		config.ProviderID = "volcengine-coding"
+		config.ProviderName = "Volcengine Coding"
+		config.ProviderType = "openai_compatible"
+		config.WireAPI = "chat_completions"
+		config.RequiresOpenAIAuth = true
+	}
 
 	if config.ProviderType != "openai_compatible" && config.ProviderType != "anthropic" {
 		config.ProviderType = defaultAnthropicLLMConfig().ProviderType
@@ -602,7 +614,7 @@ func mergeSearchConfigWithAppYAML(searchConfig SearchAPIConfig) SearchAPIConfig 
 }
 
 func readAppYAMLSearchConfig() (appYAMLSearchSettings, bool) {
-	data, err := readLimitedFile(filepath.Join("config", "app.yaml"), seedConfigFileLimitBytes)
+	data, err := readLimitedFile(resolveConfigAssetPath(filepath.Join("config", "app.yaml")), seedConfigFileLimitBytes)
 	if err != nil {
 		return appYAMLSearchSettings{}, false
 	}
@@ -637,7 +649,7 @@ func readWeakLLMSeed() (llmSeedConfig, bool) {
 }
 
 func readLLMSeed(path string) (llmSeedConfig, bool) {
-	data, err := readLimitedFile(path, seedConfigFileLimitBytes)
+	data, err := readLimitedFile(resolveConfigAssetPath(path), seedConfigFileLimitBytes)
 	if err != nil {
 		return llmSeedConfig{}, false
 	}
@@ -688,7 +700,7 @@ func readSearchAPIKeySeed(path string) (string, bool) {
 		return "", false
 	}
 
-	data, err := readLimitedFile(path, seedConfigFileLimitBytes)
+	data, err := readLimitedFile(resolveConfigAssetPath(path), seedConfigFileLimitBytes)
 	if err != nil {
 		return "", false
 	}
@@ -700,6 +712,58 @@ func readSearchAPIKeySeed(path string) (string, bool) {
 
 	key := strings.TrimSpace(seed.APIKey)
 	return key, key != ""
+}
+
+// resolveConfigAssetPath keeps project-level seed files discoverable when the
+// desktop app, a test binary, or a developer command starts below the repo
+// root. Absolute paths remain untouched so user-selected credentials keep
+// their existing semantics.
+func resolveConfigAssetPath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." || path == "" || filepath.IsAbs(path) {
+		return path
+	}
+
+	candidates := make([]string, 0, 12)
+	seen := make(map[string]struct{})
+	appendCandidate := func(candidate string) {
+		candidate = filepath.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	appendParents := func(start string) {
+		start = filepath.Clean(start)
+		if start == "" || start == "." {
+			return
+		}
+		for dir := start; ; dir = filepath.Dir(dir) {
+			appendCandidate(filepath.Join(dir, path))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+
+	// Preserve the old working-directory behavior first. This is important for
+	// tests and for users who intentionally run with a local config overlay.
+	appendCandidate(path)
+	if cwd, err := os.Getwd(); err == nil {
+		appendParents(cwd)
+	}
+	if executable, err := os.Executable(); err == nil {
+		appendParents(filepath.Dir(executable))
+	}
+
+	for _, candidate := range candidates {
+		if _, err := os.Lstat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return path
 }
 
 func readLimitedFile(path string, limit int64) ([]byte, error) {
@@ -780,9 +844,10 @@ func llmConfigFromSeed(seed llmSeedConfig) LLMConfig {
 	if strings.Contains(baseURL, "duckcoding.ai") {
 		config.ProviderID = "duckcoding"
 		config.ProviderName = "DuckCoding"
-	} else if strings.Contains(baseURL, "ark.cn-beijing.volces.com") {
+	} else if isVolcengineBaseURL(baseURL) {
 		config.ProviderID = "volcengine-coding"
 		config.ProviderName = "Volcengine Coding"
+		config.WireAPI = "chat_completions"
 	}
 	if baseURL != "" {
 		config.BaseURL = baseURL
@@ -797,36 +862,33 @@ func llmConfigFromSeed(seed llmSeedConfig) LLMConfig {
 func mergeLLMSeedConfig(config LLMConfig, seed llmSeedConfig) LLMConfig {
 	seedConfig := llmConfigFromSeed(seed)
 
-	if strings.TrimSpace(config.ProviderType) == "" {
+	// A local seed file is the user's explicit runtime credential source. When
+	// it carries a provider or endpoint, update the complete route metadata so
+	// stale persisted settings cannot keep sending requests through an older
+	// provider or protocol.
+	if strings.TrimSpace(seed.Provider) != "" || strings.TrimSpace(seed.BaseURL) != "" {
 		config.ProviderType = seedConfig.ProviderType
-	}
-	if strings.TrimSpace(config.ProviderID) == "" {
 		config.ProviderID = seedConfig.ProviderID
-	}
-	if strings.TrimSpace(config.ProviderName) == "" {
 		config.ProviderName = seedConfig.ProviderName
-	}
-	if strings.TrimSpace(config.BaseURL) == "" {
 		config.BaseURL = seedConfig.BaseURL
-	}
-	if strings.TrimSpace(config.WireAPI) == "" {
 		config.WireAPI = seedConfig.WireAPI
+		config.RequiresOpenAIAuth = seedConfig.RequiresOpenAIAuth
+		config.DisableResponseStorage = seedConfig.DisableResponseStorage
 	}
-	if strings.TrimSpace(config.Model) == "" {
+	if strings.TrimSpace(seed.Model) != "" {
 		config.Model = seedConfig.Model
 	}
-	if strings.TrimSpace(config.APIKey) == "" {
+	if strings.TrimSpace(seed.APIKey) != "" {
 		config.APIKey = seedConfig.APIKey
 	}
-	if strings.TrimSpace(config.ReasoningEffort) == "" {
+	if strings.TrimSpace(seedConfig.ReasoningEffort) != "" && strings.TrimSpace(config.ReasoningEffort) == "" {
 		config.ReasoningEffort = seedConfig.ReasoningEffort
-	}
-	if !config.RequiresOpenAIAuth {
-		config.RequiresOpenAIAuth = seedConfig.RequiresOpenAIAuth
-	}
-	if !config.DisableResponseStorage {
-		config.DisableResponseStorage = seedConfig.DisableResponseStorage
 	}
 
 	return normalizeLLMConfig(config)
+}
+
+func isVolcengineBaseURL(baseURL string) bool {
+	baseURL = strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(baseURL, "ark.cn-beijing.volces.com") || strings.Contains(baseURL, "volces.com")
 }

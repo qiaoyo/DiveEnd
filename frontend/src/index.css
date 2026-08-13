@@ -144,6 +144,11 @@ textarea:focus-visible {
   background: var(--de-accent-hover);
 }
 
+.de-button-primary:active:not(:disabled),
+.de-button-secondary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .de-button-primary:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -174,6 +179,19 @@ textarea:focus-visible {
   border-color: var(--de-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--de-accent) 14%, transparent);
   outline: none;
+}
+
+@keyframes de-page-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.de-page-enter {
+  animation: de-page-fade-in 180ms ease-out both;
 }
 
 .de-session [class*="rounded-2xl"],

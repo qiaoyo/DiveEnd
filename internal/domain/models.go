@@ -370,7 +370,7 @@ type DeepStartSessionSummary struct {
 	RootPrompt          string    `json:"rootPrompt"`
 	CurrentQuery        string    `json:"currentQuery"`
 	TargetFolderID      string    `json:"targetFolderId"`
-	ProcessingStatus    string    `json:"processingStatus,omitempty"` // initializing | background_processing | completed
+	ProcessingStatus    string    `json:"processingStatus,omitempty"` // initializing | background_processing | failed | completed
 	InitialReadyCount   int       `json:"initialReadyCount,omitempty"`
 	TotalPlannedCount   int       `json:"totalPlannedCount,omitempty"`
 	BackgroundRemaining int       `json:"backgroundRemaining,omitempty"`
@@ -422,7 +422,7 @@ type DeepStartSessionDetail struct {
 
 type DeepStartProgressEvent struct {
 	SessionID                 string                `json:"sessionId,omitempty"`
-	Phase                     string                `json:"phase"` // searching | enriching | downloading | parsing | weak_extracting | initial_batch_ready | background_processing | analyzing | persisting | cancelling | cancelled | completed
+	Phase                     string                `json:"phase"` // searching | enriching | downloading | parsing | weak_extracting | initial_batch_ready | background_processing | analyzing | persisting | cancelling | cancelled | failed | completed
 	Message                   string                `json:"message,omitempty"`
 	ElapsedSeconds            int                   `json:"elapsedSeconds"`
 	EstimatedRemainingSeconds int                   `json:"estimatedRemainingSeconds"`
@@ -443,6 +443,7 @@ type DeepStartProgressEvent struct {
 
 type DeepStartEnrichmentCache struct {
 	CacheKey          string
+	Authors           string
 	Institutions      []string
 	Keywords          []string
 	SourceLabel       string

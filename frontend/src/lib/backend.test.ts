@@ -10,6 +10,7 @@ import {
   onExtractProgress,
   onSearchProgress,
   onSyncProgress,
+  openExternalURL,
   resolveFilePaths,
   saveConfig,
 } from './backend';
@@ -34,6 +35,22 @@ describe('backend runtime helpers', () => {
     };
 
     expect(canResolveFilePaths()).toBe(true);
+  });
+
+  it('opens external paper links through the Wails browser bridge', () => {
+    const browserOpenURL = vi.fn();
+    (window as any).go = { app: { App: {} } };
+    (window as any).runtime = {
+      BrowserOpenURL: browserOpenURL,
+    };
+
+    openExternalURL('https://example.org/paper');
+
+    expect(browserOpenURL).toHaveBeenCalledWith('https://example.org/paper');
+  });
+
+  it('rejects non-http external links before opening them', () => {
+    expect(() => openExternalURL('javascript:alert(1)')).toThrow('外部链接格式无效');
   });
 
   it('resolves file paths and subscribes to extract progress inside Wails runtime', () => {
@@ -79,6 +96,34 @@ describe('backend runtime helpers', () => {
     unsubscribe();
     expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
     expect(window.runtime?.EventsOff).not.toHaveBeenCalled();
+  });
+
+  it('preserves cancelled extract progress from the desktop bridge', () => {
+    const listeners = new Map<string, (...args: any[]) => void>();
+
+    (window as any).go = { main: { App: {} } };
+    (window as any).runtime = {
+      EventsOnMultiple: vi.fn((eventName: string, callback: (...args: any[]) => void) => {
+        listeners.set(eventName, callback);
+        return vi.fn();
+      }),
+    };
+
+    const callback = vi.fn();
+    onExtractProgress(callback);
+
+    listeners.get('extract-progress')?.({
+      sessionId: 'session-1',
+      total: 3,
+      completed: 1,
+      currentFile: '',
+      status: 'cancelled',
+    });
+
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      status: 'cancelled',
+    }));
   });
 
   it('subscribes to search progress events in Wails runtime', () => {

@@ -42,7 +42,7 @@ Remaining risks:
 - Packaged-window Computer Use passed on 2026-07-31: a real DeepStart run received live Wails progress events and completed a 20-paper research map; DeepRead loaded a 10-page PDF and returned a grounded weak-model answer with three verified excerpts; Sync and Settings loaded real backend state.
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic token refresh and secure persistence.
 - Google Drive implementation and mocked fallback tests are complete; real Google Drive E2E awaits the user's Desktop OAuth client JSON and browser authorization. Setup is documented in `docs/GOOGLE_DRIVE_SYNC_SETUP.md`.
-- The OpenAlex key passed a real rate-limit probe and multi-query product E2E on 2026-07-31. Semantic Scholar is disabled and its local key is intentionally empty.
+- The OpenAlex key passed a real rate-limit probe and multi-query product E2E on 2026-07-31. A Semantic Scholar key is now configured locally; a 2026-08-07 smoke test returned `200` directly, and the project client recovered from one `429` on its second attempt. Semantic Scholar is included in the default source set; an explicit configuration can still disable it.
 - GitHub SSH read/write and `gh` CLI API access work for `qiaoyo/DiveEnd`; the authenticated account has `ADMIN` repository permission and `repo` scope.
 - DeepRead page-level evidence navigation, cross-paper analysis, and high-DPI polish remain future work; library, sync, and settings have completed the current shared-token cleanup, and the main workflows pass 900 px and 720 px smoke coverage without page-level horizontal overflow.
 
@@ -55,9 +55,10 @@ Remaining risks:
 5. `docs/PAPER_SEARCH_SOURCE_EVALUATION.md` for tested search sources, agent tools, integration roles, and account prerequisites.
 6. `docs/GOOGLE_DRIVE_SYNC_SETUP.md` for Google Cloud OAuth setup, local authorization, provider fallback behavior, and credential hygiene.
 7. `docs/AUTONOMOUS_DEVELOPMENT_SETUP.md` for responsibility boundaries, design decisions, external account prerequisites, and autonomous execution rules.
-8. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
-9. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
-10. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
+8. `docs/USER_ACCEPTANCE_MANUAL.md` for the full real-user workflow, failure recovery, and developer verification checklist.
+9. `docs/superpowers/plans/2026-06-10-code-review-remediation.md` for the large reliability/security remediation history.
+10. `docs/superpowers/plans/2026-06-11-secret-history-remediation.md` before any public push or release.
+11. Historical specs in `docs/superpowers/specs/` only after reading the current docs above.
 
 If a historical document conflicts with current code or this file, prefer current code, `README.md`, `AGENTS.md`, and `docs/PROJECT_MAP.md`.
 
@@ -87,6 +88,7 @@ Frontend:
 
 - `frontend/src/App.tsx`: initial hydration and theme setup.
 - `frontend/src/components/layout/`: router, global nav, app layout.
+- `frontend/src/components/home/`: product home / research desk with quick entry points into discovery, reading, analysis, and history.
 - `frontend/src/components/deepstart/`: DeepStart page and session detail.
 - `frontend/src/components/deepread/`: DeepRead reader.
 - `frontend/src/pages/Screening.tsx`: Screening workflow page.
@@ -166,6 +168,8 @@ bash scripts/secret_scan.sh
 ```
 
 Last full run on 2026-07-30: Go test/vet/race, all 71 frontend tests, 18 PDF service tests, frontend build, Wails build, secret scan, and the 24-state browser UI smoke at 1440, 900, and 720 px widths passed. On 2026-07-31, packaged-window DeepStart progress/completion, DeepRead PDF/grounded Q&A, Sync status, and Settings state were additionally verified with Computer Use. Google Drive provider tests and the frontend's 71 tests pass after the provider integration; real Google Drive E2E remains credential-gated. The managed PDF service environment is `services/pdf_service/.venv` and remains ignored.
+
+On 2026-08-10, the current tree passed `go test ./...`, `go vet ./...`, all 74 frontend tests, the frontend production build, all 18 PDF service tests, `git diff --check`, and the secret scan. The browser smoke now covers 25 states, including the home dashboard, and passed at desktop and 720 px widths without page-level horizontal overflow.
 
 Known audit exception: `npm audit --omit=dev` reports a React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses client-only `HashRouter`, not RSC. The published `react-router-dom` line currently has no clean upgrade path without a React 19/Router 8 migration; do not describe the production audit as zero-vulnerability until this is resolved upstream or migrated.
 

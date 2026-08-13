@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -126,6 +127,9 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 			if isDeepStartCancelledError(batchErr) || isDeepStartCancelledError(taskCtx.Err()) {
 				return nil, abortIfCancelled("本次探索已停止，批处理结果未写入历史", &searchStats)
 			}
+			if errors.Is(batchErr, ErrDeepStartAIUnavailable) {
+				return nil, batchErr
+			}
 			if strings.TrimSpace(searchWarning) == "" {
 				searchWarning = fmt.Sprintf("PDF 批处理阶段发生部分失败：%v", batchErr)
 			} else {
@@ -185,7 +189,7 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 	if err := abortIfCancelled("本次探索已停止，分析结果未写入历史", &searchStats); err != nil {
 		return nil, err
 	}
-	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+	analysisTitle, analysis, assistantContent, analysisErr := a.generateDeepStartAnalysis(
 		taskCtx,
 		summary,
 		[]DeepStartMessage{userMessage},
@@ -194,6 +198,9 @@ func (a *App) StartDeepStartSession(prompt, targetFolderID string) (*DeepStartSe
 		searchWarning,
 		searchStats,
 	)
+	if analysisErr != nil {
+		return nil, fmt.Errorf("DeepStart AI 分析失败：%w", analysisErr)
+	}
 	summary.Title = analysisTitle
 	if err := abortIfCancelled("本次探索已停止，分析结果未写入历史", &searchStats); err != nil {
 		return nil, err
@@ -324,7 +331,7 @@ func (a *App) ReplyDeepStartSession(sessionID, message string) (*DeepStartSessio
 	if detail.CurrentAnalysis != nil {
 		searchStats = detail.CurrentAnalysis.SearchStats
 	}
-	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+	analysisTitle, analysis, assistantContent, analysisErr := a.generateDeepStartAnalysis(
 		a.ctx,
 		detail.Summary,
 		messages,
@@ -333,6 +340,9 @@ func (a *App) ReplyDeepStartSession(sessionID, message string) (*DeepStartSessio
 		"",
 		searchStats,
 	)
+	if analysisErr != nil {
+		return nil, fmt.Errorf("DeepStart AI 分析失败：%w", analysisErr)
+	}
 	beforeCount := len(detail.CurrentResults)
 	narrowedResults, retainedIDs, narrowReason := applyDeepStartNarrowing(detail.CurrentResults, analysis, userMessage.Content)
 	analysis.RetainedPaperIDs = retainedIDs
@@ -514,6 +524,9 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 			if isDeepStartCancelledError(batchErr) || isDeepStartCancelledError(taskCtx.Err()) {
 				return nil, abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats)
 			}
+			if errors.Is(batchErr, ErrDeepStartAIUnavailable) {
+				return nil, batchErr
+			}
 			if strings.TrimSpace(searchWarning) == "" {
 				searchWarning = fmt.Sprintf("PDF 批处理阶段发生部分失败：%v", batchErr)
 			} else {
@@ -564,7 +577,7 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
 		return nil, err
 	}
-	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+	analysisTitle, analysis, assistantContent, analysisErr := a.generateDeepStartAnalysis(
 		taskCtx,
 		detail.Summary,
 		messages,
@@ -573,6 +586,9 @@ func (a *App) RerunDeepStartSearch(sessionID, query string) (*DeepStartSessionDe
 		searchWarning,
 		searchStats,
 	)
+	if analysisErr != nil {
+		return nil, deepStartAIUnavailableError("强模型分析失败", analysisErr)
+	}
 	detail.Summary.Title = analysisTitle
 	detail.CurrentAnalysis = analysis
 	if err := abortIfCancelled("本次重搜已停止，原会话保持不变", &searchStats); err != nil {
@@ -866,7 +882,7 @@ func (a *App) generateDeepStartAnalysis(
 	targetFolderName,
 	searchWarning string,
 	searchStats SearchRetrievalStats,
-) (string, *DeepStartAnalysis, string) {
+) (string, *DeepStartAnalysis, string, error) {
 	request := DeepStartAIRequest{
 		RootPrompt:       summary.RootPrompt,
 		CurrentQuery:     summary.CurrentQuery,
@@ -875,36 +891,33 @@ func (a *App) generateDeepStartAnalysis(
 		Results:          results,
 	}
 
-	var (
-		title    string
-		analysis DeepStartAnalysis
-	)
-
-	shouldSkipLLM := len(results) == 0 && strings.TrimSpace(searchWarning) != ""
-	strong := a.strongLLM
+	strong := a.currentStrongLLM()
 	if strong == nil {
-		strong = a.llm
+		return "", nil, "", deepStartAIUnavailableError("强模型未初始化", nil)
 	}
-	if strong != nil && !shouldSkipLLM {
-		if response, err := analyzeDeepStartWithContext(ctx, strong, request); err == nil {
-			title = response.Title
-			analysis = response.Analysis
-			if searchWarning != "" {
-				if strings.TrimSpace(analysis.Overview) == "" {
-					analysis.Overview = searchWarning
-				} else {
-					analysis.Overview = strings.TrimSpace(analysis.Overview) + " " + searchWarning
-				}
-			}
+	if len(results) == 0 {
+		if warning := strings.TrimSpace(searchWarning); warning != "" {
+			return "", nil, "", deepStartAIUnavailableError("检索没有返回可供 AI 分析的论文："+warning, nil)
+		}
+		return "", nil, "", deepStartAIUnavailableError("检索没有返回可供 AI 分析的论文", nil)
+	}
+
+	response, err := analyzeDeepStartWithRetry(ctx, strong, request)
+	if err != nil {
+		return "", nil, "", deepStartAIUnavailableError("强模型分析请求失败", err)
+	}
+	if response == nil {
+		return "", nil, "", fmt.Errorf("强模型返回了空的分析结果")
+	}
+
+	title := response.Title
+	analysis := response.Analysis
+	if warning := strings.TrimSpace(searchWarning); warning != "" {
+		if strings.TrimSpace(analysis.Overview) == "" {
+			analysis.Overview = warning
 		} else {
-			analysis = buildFallbackDeepStartAnalysis(summary.RootPrompt, summary.CurrentQuery, results, err.Error(), searchWarning, searchStats)
+			analysis.Overview = strings.TrimSpace(analysis.Overview) + " " + warning
 		}
-	} else {
-		aiWarning := "AI 辅助暂不可用"
-		if shouldSkipLLM {
-			aiWarning = ""
-		}
-		analysis = buildFallbackDeepStartAnalysis(summary.RootPrompt, summary.CurrentQuery, results, aiWarning, searchWarning, searchStats)
 	}
 	analysis.SearchStats = normalizeDeepStartSearchStats(searchStats, summary.CurrentQuery, len(results))
 	if statsLine := formatDeepStartSearchStats(analysis.SearchStats, len(results)); statsLine != "" {
@@ -920,7 +933,7 @@ func (a *App) generateDeepStartAnalysis(
 	}
 	assistantContent := renderDeepStartAssistantMessage(&analysis)
 
-	return title, &analysis, assistantContent
+	return title, &analysis, assistantContent, nil
 }
 
 func trimDeepStartMessages(messages []DeepStartMessage, limit int) []DeepStartMessage {
@@ -928,224 +941,6 @@ func trimDeepStartMessages(messages []DeepStartMessage, limit int) []DeepStartMe
 		return messages
 	}
 	return append([]DeepStartMessage{}, messages[len(messages)-limit:]...)
-}
-
-func buildFallbackDeepStartAnalysis(
-	rootPrompt,
-	currentQuery string,
-	results []SearchPaper,
-	aiWarning,
-	searchWarning string,
-	searchStats SearchRetrievalStats,
-) DeepStartAnalysis {
-	query := strings.TrimSpace(currentQuery)
-	if query == "" {
-		query = strings.TrimSpace(rootPrompt)
-	}
-
-	recommended := rankDeepStartResults(results)
-	questions := compactStrings([]string{
-		fmt.Sprintf("如果你更看重综述和全景地图，我可以优先帮你挑 `%s` 方向的 survey 吗？", query),
-		"你更想先看代表性方法、最新进展，还是落地应用？",
-		"你希望我优先筛掉过旧、过泛，还是偏工程实现的论文？",
-	}, 3)
-
-	suggestedQueries := compactStrings([]string{
-		query + " survey",
-		query + " benchmark",
-		query + " recent progress",
-		query + " tutorial",
-	}, 4)
-
-	var overviewParts []string
-	switch {
-	case len(results) == 0 && searchWarning != "":
-		overviewParts = append(overviewParts, "这一轮暂时没有检索到稳定结果。")
-	case len(results) == 0:
-		overviewParts = append(overviewParts, "这一轮还没有拿到候选论文。")
-	default:
-		overviewParts = append(overviewParts, fmt.Sprintf("我先把当前检索到的 %d 篇候选论文整理成一个可继续收窄的阅读面板。", len(results)))
-	}
-	if searchWarning != "" {
-		overviewParts = append(overviewParts, searchWarning)
-	}
-	if aiWarning != "" {
-		overviewParts = append(overviewParts, fmt.Sprintf("AI 辅助当前走降级路径：%s。你仍然可以继续手动筛选和导入。", aiWarning))
-	}
-
-	directions := buildFallbackDeepStartDirections(results, recommended)
-	notes := buildFallbackDeepStartNotes(results, directions)
-
-	return DeepStartAnalysis{
-		Overview:            strings.Join(overviewParts, " "),
-		Directions:          directions,
-		PaperNotes:          notes,
-		FollowUpQuestions:   questions,
-		SuggestedQueries:    suggestedQueries,
-		RecommendedPaperIDs: recommended,
-		RetainedPaperIDs:    recommended,
-		SearchStats:         normalizeDeepStartSearchStats(searchStats, currentQuery, len(results)),
-	}
-}
-
-func rankDeepStartResults(results []SearchPaper) []string {
-	type rankedPaper struct {
-		ID    string
-		Score int
-	}
-
-	ranked := make([]rankedPaper, 0, len(results))
-	for index, paper := range results {
-		score := 100 - index
-		title := strings.ToLower(strings.TrimSpace(paper.Title))
-		if strings.Contains(title, "survey") || strings.Contains(title, "review") || strings.Contains(title, "overview") {
-			score += 40
-		}
-		if strings.Contains(title, "benchmark") || strings.Contains(title, "leaderboard") {
-			score += 20
-		}
-		score += paper.Year
-		ranked = append(ranked, rankedPaper{ID: paper.ID, Score: score})
-	}
-
-	sort.SliceStable(ranked, func(i, j int) bool {
-		return ranked[i].Score > ranked[j].Score
-	})
-
-	recommended := make([]string, 0, minInt(5, len(ranked)))
-	for _, paper := range ranked {
-		if strings.TrimSpace(paper.ID) == "" {
-			continue
-		}
-		recommended = append(recommended, paper.ID)
-		if len(recommended) >= 5 {
-			break
-		}
-	}
-
-	return recommended
-}
-
-func buildFallbackDeepStartDirections(results []SearchPaper, recommended []string) []DeepStartDirection {
-	if len(results) == 0 {
-		return []DeepStartDirection{
-			{
-				ID:       "refocus",
-				Name:     "重新聚焦问题",
-				Summary:  "先把检索词收窄到 survey、benchmark、recent progress 之类的词组，更容易拿到稳定结果。",
-				Why:      "当前没有候选论文，先优化问题表述最有效。",
-				PaperIDs: []string{},
-			},
-		}
-	}
-
-	categoryBuckets := map[string][]string{}
-	categoryOrder := []string{}
-	for _, paper := range results {
-		category := strings.TrimSpace(paper.Category)
-		if category == "" {
-			continue
-		}
-		if _, exists := categoryBuckets[category]; !exists {
-			categoryOrder = append(categoryOrder, category)
-		}
-		categoryBuckets[category] = append(categoryBuckets[category], paper.ID)
-	}
-
-	directions := make([]DeepStartDirection, 0, 3)
-	if len(categoryOrder) >= 2 {
-		for index, category := range categoryOrder {
-			paperIDs := uniqueStrings(categoryBuckets[category])
-			if len(paperIDs) == 0 {
-				continue
-			}
-			directions = append(directions, DeepStartDirection{
-				ID:       fmt.Sprintf("category-%d", index+1),
-				Name:     category,
-				Summary:  "这一组候选更接近同一条技术支线。",
-				Why:      "先按主题拆开看，更容易判断该不该入库。",
-				PaperIDs: paperIDs,
-			})
-			if len(directions) >= 3 {
-				break
-			}
-		}
-	}
-
-	if len(directions) == 0 {
-		directions = append(directions, DeepStartDirection{
-			ID:       "priority",
-			Name:     "优先阅读",
-			Summary:  "先从更可能搭建领域地图的论文开始。",
-			Why:      "这样能最快建立这轮探索的主线。",
-			PaperIDs: recommended,
-		})
-
-		var remaining []string
-		recommendedSet := make(map[string]struct{}, len(recommended))
-		for _, id := range recommended {
-			recommendedSet[id] = struct{}{}
-		}
-		for _, paper := range results {
-			if _, exists := recommendedSet[paper.ID]; exists {
-				continue
-			}
-			remaining = append(remaining, paper.ID)
-		}
-		if len(remaining) > 0 {
-			directions = append(directions, DeepStartDirection{
-				ID:       "extended",
-				Name:     "扩展阅读",
-				Summary:  "这些候选适合在主线确认后再补充。",
-				Why:      "可以避免第一次筛选时信息过载。",
-				PaperIDs: remaining,
-			})
-		}
-	}
-
-	return directions
-}
-
-func buildFallbackDeepStartNotes(results []SearchPaper, directions []DeepStartDirection) []DeepStartPaperNote {
-	directionByPaper := make(map[string][]string)
-	for _, direction := range directions {
-		for _, paperID := range direction.PaperIDs {
-			directionByPaper[paperID] = append(directionByPaper[paperID], direction.ID)
-		}
-	}
-
-	notes := make([]DeepStartPaperNote, 0, len(results))
-	for index, paper := range results {
-		tier := "optional"
-		if index == 0 {
-			tier = "core"
-		} else if index < 4 {
-			tier = "important"
-		}
-
-		reason := "适合作为补充阅读。"
-		title := strings.ToLower(paper.Title)
-		switch {
-		case strings.Contains(title, "survey") || strings.Contains(title, "review") || strings.Contains(title, "overview"):
-			reason = "标题看起来更像综述或全景材料，适合先建立整体地图。"
-			tier = "core"
-		case strings.Contains(title, "benchmark") || strings.Contains(title, "leaderboard"):
-			reason = "更适合用来判断这个方向的评测基线和对比方式。"
-		case paper.Year >= time.Now().Year()-1:
-			reason = "相对较新，适合快速补最近一轮进展。"
-		default:
-			reason = "能帮助你补齐这轮主题里的代表性样本。"
-		}
-
-		notes = append(notes, DeepStartPaperNote{
-			PaperID:      paper.ID,
-			Tier:         tier,
-			Reason:       reason,
-			DirectionIDs: uniqueStrings(directionByPaper[paper.ID]),
-		})
-	}
-
-	return notes
 }
 
 func renderDeepStartAssistantMessage(analysis *DeepStartAnalysis) string {
@@ -1221,46 +1016,11 @@ func formatDeepStartSearchStats(stats SearchRetrievalStats, currentPool int) str
 	if stats.RawCount == 0 && stats.DedupCount == 0 && stats.FinalCount == 0 && currentPool <= 0 {
 		return ""
 	}
-	lines := make([]string, 0, 5)
-	originalQuery := strings.TrimSpace(stats.OriginalQuery)
-	if originalQuery == "" {
-		originalQuery = strings.TrimSpace(stats.Query)
-	}
-	if originalQuery != "" {
-		lines = append(lines, fmt.Sprintf("原始问题：%s。", originalQuery))
-	}
-	if len(stats.RewrittenQueries) > 0 {
-		lines = append(lines, "英文检索词："+strings.Join(stats.RewrittenQueries, " | "))
-	}
-	if len(stats.QueryHits) > 0 {
-		hits := make([]string, 0, len(stats.QueryHits))
-		for _, rewritten := range stats.RewrittenQueries {
-			hits = append(hits, fmt.Sprintf("%s=%d", rewritten, stats.QueryHits[rewritten]))
-		}
-		if len(hits) == 0 {
-			keys := make([]string, 0, len(stats.QueryHits))
-			for query := range stats.QueryHits {
-				keys = append(keys, query)
-			}
-			sort.Strings(keys)
-			for _, query := range keys {
-				hits = append(hits, fmt.Sprintf("%s=%d", query, stats.QueryHits[query]))
-			}
-		}
-		lines = append(lines, "重写命中："+strings.Join(hits, "；"))
-	}
-	if stats.RawCount > 0 || stats.DedupCount > 0 || stats.FinalCount > 0 {
-		lines = append(lines, fmt.Sprintf(
-			"首轮检索基线：原始候选 %d 篇，去重后 %d 篇，本轮进入探索区 %d 篇。",
-			stats.RawCount,
-			stats.DedupCount,
-			stats.FinalCount,
-		))
-	}
+	raw, dedup, final := stats.RawCount, stats.DedupCount, stats.FinalCount
 	if currentPool > 0 {
-		lines = append(lines, fmt.Sprintf("当前候选池：%d 篇。", currentPool))
+		final = currentPool
 	}
-	return strings.Join(lines, "\n")
+	return fmt.Sprintf("本轮从来源获取 %d 条记录，合并重复版本后得到 %d 篇候选，当前纳入 %d 篇。", raw, dedup, final)
 }
 
 func firstNonEmpty(values ...string) string {

@@ -21,7 +21,7 @@ export function HistoryPanel() {
           </div>
           <button
             type="button"
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/discover')}
             className="de-button-primary inline-flex h-9 items-center gap-2 px-3 text-sm font-medium"
           >
             <Plus className="h-4 w-4" />
@@ -38,7 +38,7 @@ export function HistoryPanel() {
             </p>
             <button
               type="button"
-              onClick={() => navigate('/')}
+            onClick={() => navigate('/discover')}
               className="de-button-secondary mt-6 inline-flex h-9 items-center gap-2 px-4 text-sm"
             >
               前往发现

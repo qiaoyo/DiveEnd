@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Clock3, FileUp, Filter, Loader2, Sparkles } from 'lucide-react';
 import type {
   ExtractProgress,
@@ -43,6 +43,7 @@ export const Screening: React.FC = () => {
   const [recentSessions, setRecentSessions] = useState<ScreeningSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [isAlreadyImported, setIsAlreadyImported] = useState(false);
+  const busyRef = useRef(false);
   const { setPapers, setActiveFolderId } = useAppStore();
 
   useEffect(() => {
@@ -53,7 +54,11 @@ export const Screening: React.FC = () => {
           setRecentSessions(sessions.filter((session) => session.totalPapers > 0).slice(0, 5));
         }
       })
-      .catch(() => undefined)
+      .catch((cause) => {
+        if (active) {
+          setError(errorToUserMessage(cause, '读取最近筛选会话失败'));
+        }
+      })
       .finally(() => {
         if (active) {
           setLoadingSessions(false);
@@ -90,6 +95,11 @@ export const Screening: React.FC = () => {
     ? Math.round((extractionProgress.completed / extractionProgress.total) * 100)
     : 0;
 
+  const markBusy = (busy: boolean) => {
+    busyRef.current = busy;
+    setIsBusy(busy);
+  };
+
   const resetFlow = () => {
     setCurrentStage('upload');
     setSessionId('');
@@ -100,12 +110,15 @@ export const Screening: React.FC = () => {
     setError(null);
     setImportedPapers([]);
     setIsAlreadyImported(false);
-    setIsBusy(false);
+    markBusy(false);
     setIsCancelling(false);
   };
 
   const resumeSession = async (session: ScreeningSession) => {
-    setIsBusy(true);
+    if (busyRef.current) {
+      return;
+    }
+    markBusy(true);
     setError(null);
     setImportedPapers([]);
     try {
@@ -129,7 +142,7 @@ export const Screening: React.FC = () => {
     } catch (cause) {
       setError(errorToUserMessage(cause, '恢复筛选会话失败'));
     } finally {
-      setIsBusy(false);
+      markBusy(false);
     }
   };
 
@@ -158,11 +171,17 @@ export const Screening: React.FC = () => {
   const runExtraction = async (nextSessionId: string) => {
     setCurrentStage('extract');
     setError(null);
-    setIsBusy(true);
+    markBusy(true);
 
     try {
       const progress = await backend.extractPaperContent(nextSessionId);
       setExtractionProgress(progress);
+
+      if (progress.status === 'cancelled') {
+        setError(null);
+        setCurrentStage('extract');
+        return;
+      }
 
       if (progress.status !== 'completed') {
         throw new Error(progress.errorMessage || 'PDF 抽取未能完成，请检查 PDF 服务和模型配置。');
@@ -187,7 +206,7 @@ export const Screening: React.FC = () => {
         setDetail(latest);
       }
     } finally {
-      setIsBusy(false);
+      markBusy(false);
       setIsCancelling(false);
     }
   };
@@ -206,12 +225,15 @@ export const Screening: React.FC = () => {
   };
 
   const startScreeningWithPaths = async (filePaths: string[]) => {
+    if (busyRef.current) {
+      return;
+    }
     if (filePaths.length === 0) {
       setError(canResolvePaths ? '没有拿到可用的 PDF 路径。' : '当前环境无法读取真实本地路径，请使用桌面文件选择器或拖拽真实 PDF。');
       return;
     }
 
-    setIsBusy(true);
+    markBusy(true);
     setError(null);
     setImportedPapers([]);
     setIsAlreadyImported(false);
@@ -234,7 +256,7 @@ export const Screening: React.FC = () => {
       await runExtraction(session.id);
     } catch (cause) {
       setError(errorToUserMessage(cause, '初始化 Screening 失败'));
-      setIsBusy(false);
+      markBusy(false);
     }
   };
 
@@ -249,6 +271,10 @@ export const Screening: React.FC = () => {
   };
 
   const handleInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (busyRef.current) {
+      event.target.value = '';
+      return;
+    }
     const files = Array.from(event.target.files ?? []);
     try {
       const paths = await resolveInputPaths(files);
@@ -264,6 +290,9 @@ export const Screening: React.FC = () => {
     event.preventDefault();
     event.stopPropagation();
     setDropActive(false);
+    if (busyRef.current) {
+      return;
+    }
     try {
       const paths = await resolveInputPaths(Array.from(event.dataTransfer.files ?? []));
       await startScreeningWithPaths(paths);
@@ -281,11 +310,11 @@ export const Screening: React.FC = () => {
   };
 
   const handleContinue = async () => {
-    if (!sessionId || !currentNode || selectedOptions.length === 0) {
+    if (busyRef.current || !sessionId || !currentNode || selectedOptions.length === 0) {
       return;
     }
 
-    setIsBusy(true);
+    markBusy(true);
     setError(null);
 
     try {
@@ -303,17 +332,17 @@ export const Screening: React.FC = () => {
         setError(errorToUserMessage(cause, '提交筛选选择失败'));
       }
     } finally {
-      setIsBusy(false);
+      markBusy(false);
       setIsCancelling(false);
     }
   };
 
   const handleImport = async () => {
-    if (!sessionId) {
+    if (busyRef.current || !sessionId) {
       return;
     }
 
-    setIsBusy(true);
+    markBusy(true);
     setError(null);
 
     try {
@@ -332,7 +361,7 @@ export const Screening: React.FC = () => {
     } catch (cause) {
       setError(errorToUserMessage(cause, '导入论文库失败'));
     } finally {
-      setIsBusy(false);
+      markBusy(false);
     }
   };
 
@@ -405,6 +434,7 @@ export const Screening: React.FC = () => {
                 multiple
                 accept=".pdf"
                 className="hidden"
+                disabled={isBusy}
                 onChange={(event) => void handleInputChange(event)}
               />
               {isBusy ? '处理中...' : '选择 PDF 文件'}
@@ -494,7 +524,7 @@ export const Screening: React.FC = () => {
       </p>
 
       {error && (
-        <div className="mt-4 border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-3 py-2 text-sm text-[var(--de-danger)]">
+        <div className="mt-4 border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-3 py-2 text-sm text-[var(--de-danger)]" role="alert">
           {error}
         </div>
       )}
@@ -520,6 +550,7 @@ export const Screening: React.FC = () => {
         {papers.some((paper) => paper.status === 'extracted') && (
           <button
             onClick={() => sessionId && void proceedToAnalysis(sessionId)}
+            disabled={isBusy}
             className="de-button-secondary px-4 py-2 text-sm"
           >
             基于已完成论文继续筛选
@@ -669,14 +700,14 @@ export const Screening: React.FC = () => {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28 pt-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6">
         <div className="mx-auto grid max-w-6xl gap-5 lg:grid-cols-[0.92fr_1.08fr]">
           <div className="space-y-5">
             {currentStage === 'extract' ? renderExtractCard() : renderUploadCard()}
           </div>
           <div className="space-y-5">
             {error && currentStage !== 'extract' && (
-              <div className="border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-4 py-3 text-sm text-[var(--de-danger)]">
+              <div className="border border-[var(--de-rule-strong)] bg-[var(--de-surface-muted)] px-4 py-3 text-sm text-[var(--de-danger)]" role="alert">
                 {error}
               </div>
             )}
@@ -697,34 +728,34 @@ export const Screening: React.FC = () => {
             )}
           </div>
         </div>
-      </div>
 
-      {showActionBar && (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-6xl -translate-x-1/2 px-6">
-          <div className="pointer-events-auto mx-auto flex max-w-xl items-center justify-between rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-4 py-3 shadow-md">
-            <div className="text-sm text-[var(--de-ink-muted)]">
-              保留 <span className="font-semibold text-[var(--de-accent)]">{resultPapers.length}</span> 篇论文
-            </div>
-            <div className="flex gap-2">
-              {currentStage === 'results' && importedPapers.length === 0 && !isAlreadyImported && (
+        {showActionBar && (
+          <div className="mx-auto mt-6 w-full max-w-6xl">
+            <div className="mx-auto flex max-w-xl items-center justify-between rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-4 py-3 shadow-md">
+              <div className="text-sm text-[var(--de-ink-muted)]">
+                保留 <span className="font-semibold text-[var(--de-accent)]">{resultPapers.length}</span> 篇论文
+              </div>
+              <div className="flex gap-2">
+                {currentStage === 'results' && importedPapers.length === 0 && !isAlreadyImported && (
+                  <button
+                    onClick={() => void handleImport()}
+                    disabled={isBusy || resultPapers.length === 0}
+                    className="de-button-primary px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : '导入到文库'}
+                  </button>
+                )}
                 <button
-                  onClick={() => void handleImport()}
-                  disabled={isBusy || resultPapers.length === 0}
-                  className="de-button-primary px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={resetFlow}
+                  className="de-button-secondary px-4 py-2 text-sm"
                 >
-                  {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : '导入到文库'}
+                  开始新的筛选
                 </button>
-              )}
-              <button
-                onClick={resetFlow}
-                className="de-button-secondary px-4 py-2 text-sm"
-              >
-                开始新的筛选
-              </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

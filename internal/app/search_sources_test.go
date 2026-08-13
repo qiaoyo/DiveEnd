@@ -123,6 +123,12 @@ func TestSearchOpenReviewPreservesForumStatusAndPDF(t *testing.T) {
 	if len(papers) != 1 || papers[0].ExternalIDs["OpenReview"] != "forum-1" {
 		t.Fatalf("unexpected OpenReview result: %+v", papers)
 	}
+	if papers[0].Category != "" || containsString(papers[0].Tags, "ICLR 2026 rejected submission") {
+		t.Fatalf("expected venue metadata to stay separate from directions and tags, got %+v", papers[0])
+	}
+	if papers[0].Authors != "A. Author, B. Author" || !containsString(papers[0].Keywords, "evaluation") {
+		t.Fatalf("expected OpenReview authors and keywords, got %+v", papers[0])
+	}
 	if !strings.Contains(papers[0].Journal, "rejected") {
 		t.Fatalf("expected venue status to remain visible, got %q", papers[0].Journal)
 	}
@@ -173,6 +179,72 @@ func TestSearchDBLPParsesMetadataWithoutAbstract(t *testing.T) {
 	}
 }
 
+func TestSearchDBLPParsesSingleHitObject(t *testing.T) {
+	client := singleSourceSearchTestClient("dblp")
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(bytes.NewBufferString(`{
+  "result":{"hits":{"hit":{
+    "info":{
+      "authors":{"author":{"text":"Ada Researcher"}},
+      "title":"A Single DBLP Hit",
+      "venue":"ICML",
+      "year":"2026",
+      "url":"https://dblp.org/rec/conf/icml/example"
+    }
+  }}}
+}`)),
+			Request: request,
+		}, nil
+	})}
+
+	papers, err := client.Search("a single dblp hit", 10)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(papers) != 1 || papers[0].Title != "A Single DBLP Hit" {
+		t.Fatalf("expected one parsed DBLP paper, got %+v", papers)
+	}
+	if papers[0].Authors != "Ada Researcher" || papers[0].Year != 2026 {
+		t.Fatalf("unexpected single-hit metadata: %+v", papers[0])
+	}
+}
+
+func TestSearchDBLPTreatsEmptyResponseAsAvailableSource(t *testing.T) {
+	client := singleSourceSearchTestClient("dblp")
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(bytes.NewBufferString(`{
+  "result":{"hits":{"@total":"0"}}
+}`)),
+			Request: request,
+		}, nil
+	})}
+
+	var finalProgress SearchProgressEvent
+	client.SetProgressReporter(func(progress SearchProgressEvent) {
+		if progress.Phase == "completed" {
+			finalProgress = progress
+		}
+	})
+
+	papers, err := client.Search("no matching dblp records", 10)
+	if err != nil {
+		t.Fatalf("expected empty DBLP response to be successful, got %v", err)
+	}
+	if len(papers) != 0 {
+		t.Fatalf("expected no papers, got %+v", papers)
+	}
+	if len(finalProgress.Sources) != 1 || !finalProgress.Sources[0].Success ||
+		finalProgress.Sources[0].Status != "success" || finalProgress.Sources[0].ResultCount != 0 {
+		t.Fatalf("expected DBLP to be available with zero results, got %+v", finalProgress)
+	}
+}
+
 func TestMergeDuplicateSearchPapersUsesStableIDsAndCombinesProvenance(t *testing.T) {
 	merged := mergeDuplicateSearchPapers([]SearchPaper{
 		{
@@ -205,6 +277,39 @@ func TestMergeDuplicateSearchPapersUsesStableIDsAndCombinesProvenance(t *testing
 	}
 	if merged[0].Journal != "SIGIR" || merged[0].Abstract == "" {
 		t.Fatalf("expected complementary metadata, got %+v", merged[0])
+	}
+}
+
+func TestMergeDuplicateSearchPapersPrefersAcceptedVenueOverCoRR(t *testing.T) {
+	merged := mergeDuplicateSearchPapers([]SearchPaper{
+		{
+			ID:               "corr-version",
+			Title:            "A Long Benchmark for Embodied Agents",
+			Authors:          "Alice Researcher",
+			Year:             2026,
+			PublicationYear:  2026,
+			PublicationVenue: "CoRR 2026",
+			Journal:          "CoRR 2026",
+			Source:           "openreview",
+			Sources:          []string{"openreview"},
+		},
+		{
+			ID:               "rss-version",
+			Title:            "A Long Benchmark for Embodied Agents",
+			Authors:          "Alice Researcher",
+			Year:             2026,
+			PublicationYear:  2026,
+			PublicationVenue: "RSS 2026 RoboData Workshop",
+			Journal:          "RSS 2026 RoboData Workshop",
+			Source:           "openreview",
+			Sources:          []string{"openreview"},
+		},
+	})
+	if len(merged) != 1 {
+		t.Fatalf("expected archive and venue versions to merge, got %+v", merged)
+	}
+	if merged[0].PublicationVenue != "RSS 2026 RoboData Workshop" {
+		t.Fatalf("expected accepted venue to win over CoRR archive, got %q", merged[0].PublicationVenue)
 	}
 }
 

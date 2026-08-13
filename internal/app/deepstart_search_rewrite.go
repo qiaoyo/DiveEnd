@@ -4,117 +4,55 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/qiaoyo/DiveEnd/internal/contracts"
 )
 
 type deepStartQueryRewriter = contracts.QueryRewriter
 
-func (a *App) rewriteDeepStartQueries(ctx context.Context, query string) ([]string, string) {
+func (a *App) rewriteDeepStartQueries(ctx context.Context, query string) ([]string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return []string{""}, ""
+		return []string{""}, nil
 	}
 
-	fallback := fallbackDeepStartRewriteQueries(query)
-	if weak := a.currentWeakLLM(); weak != nil {
+	weak := a.currentWeakLLM()
+	if weak == nil {
+		return nil, deepStartAIUnavailableError("弱模型未初始化，无法完成 query 重写", nil)
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return fallback, fmt.Sprintf("弱模型 query 重写已取消，已回退：%v", err)
+			return nil, err
 		}
+
+		var (
+			rewritten []string
+			err       error
+		)
 		if rewriter, ok := weak.(contextQueryRewriter); ok {
-			rewritten, err := rewriter.RewriteSearchQueriesWithContext(ctx, query)
-			if err == nil {
-				queries := uniqueStrings(append(compactStrings(rewritten, 3), fallback...))
-				if len(queries) > 3 {
-					queries = queries[:3]
-				}
-				if len(queries) > 0 {
-					return queries, ""
-				}
-			}
-			queries := fallback
-			if len(queries) > 0 {
-				return queries, fmt.Sprintf("弱模型 query 重写失败，已回退：%v", err)
-			}
-			return []string{query}, fmt.Sprintf("弱模型 query 重写失败，已回退原始 query：%v", err)
+			rewritten, err = rewriter.RewriteSearchQueriesWithContext(ctx, query)
+		} else if rewriter, ok := weak.(deepStartQueryRewriter); ok {
+			rewritten, err = rewriter.RewriteSearchQueries(query)
+		} else {
+			return nil, deepStartAIUnavailableError("弱模型不支持 query 重写", nil)
 		}
-		if rewriter, ok := weak.(deepStartQueryRewriter); ok {
-			rewritten, err := rewriter.RewriteSearchQueries(query)
-			if err == nil {
-				queries := uniqueStrings(append(compactStrings(rewritten, 3), fallback...))
-				if len(queries) > 3 {
-					queries = queries[:3]
-				}
-				if len(queries) > 0 {
-					return queries, ""
-				}
-			}
-			queries := fallback
-			if len(queries) > 0 {
-				return queries, fmt.Sprintf("弱模型 query 重写失败，已回退：%v", err)
-			}
-			return []string{query}, fmt.Sprintf("弱模型 query 重写失败，已回退原始 query：%v", err)
+		queries := compactStrings(uniqueStrings(rewritten), 3)
+		if err == nil && len(queries) > 0 {
+			return queries, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("弱模型返回了空的检索词")
+		}
+		if attempt == 2 || !isRetryableLLMError(err) {
+			return nil, deepStartAIUnavailableError("query 重写失败", err)
+		}
+		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			return nil, err
 		}
 	}
-
-	if len(fallback) > 0 {
-		return fallback, ""
-	}
-	return []string{query}, ""
-}
-
-func fallbackDeepStartRewriteQueries(query string) []string {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return []string{}
-	}
-
-	candidates := make([]string, 0, 4)
-	asciiKeywords := extractASCIISearchKeywords(query, 8)
-	if len(asciiKeywords) > 0 {
-		candidates = append(candidates, strings.Join(asciiKeywords, " "))
-	}
-
-	for _, candidate := range buildSearchQueryCandidates(query) {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if isMostlyASCIIQuery(candidate) {
-			candidates = append(candidates, candidate)
-		}
-	}
-
-	if len(candidates) == 0 {
-		candidates = append(candidates, query)
-	}
-	candidates = uniqueStrings(candidates)
-	if len(candidates) > 3 {
-		candidates = candidates[:3]
-	}
-	return candidates
-}
-
-func isMostlyASCIIQuery(query string) bool {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return false
-	}
-	total := 0
-	ascii := 0
-	for _, r := range query {
-		if r == ' ' || r == '\t' {
-			continue
-		}
-		total++
-		if r <= 127 {
-			ascii++
-		}
-	}
-	if total == 0 {
-		return false
-	}
-	return ascii*100/total >= 70
+	return nil, deepStartAIUnavailableError("query 重写失败", nil)
 }
 
 func (a *App) deepStartSearchWithRewrittenQueries(
@@ -132,14 +70,14 @@ func (a *App) deepStartSearchWithRewrittenQueries(
 		return []SearchPaper{}, "搜索服务当前不可用。", stats, nil
 	}
 
-	queries, rewriteWarning := a.rewriteDeepStartQueries(ctx, originalQuery)
+	queries, rewriteErr := a.rewriteDeepStartQueries(ctx, originalQuery)
+	if rewriteErr != nil {
+		return nil, "", stats, rewriteErr
+	}
 	stats.RewrittenQueries = append([]string{}, queries...)
 
 	results := make([]SearchPaper, 0, limit)
 	var warningParts []string
-	if strings.TrimSpace(rewriteWarning) != "" {
-		warningParts = append(warningParts, strings.TrimSpace(rewriteWarning))
-	}
 
 	totalRaw := 0
 	lastStats := SearchRetrievalStats{Query: strings.TrimSpace(originalQuery)}

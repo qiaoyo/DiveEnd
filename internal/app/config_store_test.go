@@ -50,9 +50,45 @@ func TestLoadAppConfigReturnsDefaultWhenMissing(t *testing.T) {
 	if config.DataPath != filepath.Join(tempDir, "DiveEndData") {
 		t.Fatalf("expected default data path in temp home, got %q", config.DataPath)
 	}
-	if config.Search.EnableSemanticScholar || !config.Search.EnableArxiv ||
+	if !config.Search.EnableSemanticScholar || !config.Search.EnableArxiv ||
 		!config.Search.EnableOpenAlex || !config.Search.EnableOpenReview || !config.Search.EnableDBLP {
 		t.Fatalf("unexpected default academic source set: %+v", config.Search)
+	}
+}
+
+func TestResolveConfigAssetPathWalksParentDirectories(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "internal", "app")
+	if err := os.MkdirAll(filepath.Join(child), 0755); err != nil {
+		t.Fatalf("MkdirAll child error = %v", err)
+	}
+	seedPath := filepath.Join(root, "config", "strong_llm.json")
+	if err := os.MkdirAll(filepath.Dir(seedPath), 0755); err != nil {
+		t.Fatalf("MkdirAll config error = %v", err)
+	}
+	if err := os.WriteFile(seedPath, []byte(`{"model":"test"}`), 0600); err != nil {
+		t.Fatalf("WriteFile seed error = %v", err)
+	}
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd error = %v", err)
+	}
+	if err := os.Chdir(child); err != nil {
+		t.Fatalf("Chdir child error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	got := resolveConfigAssetPath(filepath.Join("config", "strong_llm.json"))
+	gotResolved, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks resolved asset error = %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(seedPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks seed asset error = %v", err)
+	}
+	if gotResolved != wantResolved {
+		t.Fatalf("expected parent config asset %q, got %q", wantResolved, gotResolved)
 	}
 }
 
@@ -182,6 +218,48 @@ func TestLoadAppConfigMigratesLegacyProviderFields(t *testing.T) {
 	}
 	if config.Search.SemanticScholarAPIKey != "legacy-semantic" {
 		t.Fatalf("expected legacy Semantic Scholar key to migrate")
+	}
+}
+
+func TestLLMConfigFromVolcengineSeedUsesChatCompletions(t *testing.T) {
+	config := llmConfigFromSeed(llmSeedConfig{
+		Provider: "openai",
+		Model:    "doubao-seed-2.1-turbo",
+		BaseURL:  "https://ark.cn-beijing.volces.com/api/coding/v3",
+		APIKey:   "volc-key",
+	})
+
+	if config.ProviderID != "volcengine-coding" || config.ProviderName != "Volcengine Coding" {
+		t.Fatalf("expected Volcengine route metadata, got id=%q name=%q", config.ProviderID, config.ProviderName)
+	}
+	if config.WireAPI != "chat_completions" {
+		t.Fatalf("expected chat completions for Volcengine, got %q", config.WireAPI)
+	}
+	if config.BaseURL != "https://ark.cn-beijing.volces.com/api/coding/v3" {
+		t.Fatalf("unexpected base URL %q", config.BaseURL)
+	}
+}
+
+func TestMergeLLMSeedConfigReplacesStaleProviderRoute(t *testing.T) {
+	stored := defaultOpenAICompatibleLLMConfig()
+	stored.ProviderID = "duckcoding"
+	stored.ProviderName = "DuckCoding"
+	stored.BaseURL = "https://api.duckcoding.ai/v1"
+	stored.WireAPI = "responses"
+	stored.Model = "old-model"
+
+	merged := mergeLLMSeedConfig(stored, llmSeedConfig{
+		Provider: "openai",
+		Model:    "deepseek-v4-flash",
+		BaseURL:  "https://ark.cn-beijing.volces.com/api/coding/v3",
+		APIKey:   "new-key",
+	})
+
+	if merged.ProviderID != "volcengine-coding" || merged.ProviderName != "Volcengine Coding" {
+		t.Fatalf("stale provider route survived seed merge: %+v", merged)
+	}
+	if merged.WireAPI != "chat_completions" || merged.Model != "deepseek-v4-flash" {
+		t.Fatalf("seed route/model not applied: wire=%q model=%q", merged.WireAPI, merged.Model)
 	}
 }
 

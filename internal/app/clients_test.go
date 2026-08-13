@@ -401,6 +401,28 @@ func TestLLMClientAnalyzeDeepStartParsesStructuredJSON(t *testing.T) {
 	}
 }
 
+func TestNormalizeDeepStartAnalysisDropsVenueDirections(t *testing.T) {
+	request := DeepStartAIRequest{Results: []SearchPaper{
+		{ID: "paper-1", Title: "VLA benchmark", PublicationVenue: "RSS 2026", Journal: "RSS 2026"},
+		{ID: "paper-2", Title: "VLA policy", PublicationVenue: "ICLR 2026", Journal: "ICLR 2026"},
+	}}
+	analysis := normalizeDeepStartAnalysis(DeepStartAnalysis{
+		Directions: []DeepStartDirection{
+			{ID: "venue", Name: "CORR 2026", PaperIDs: []string{"paper-1"}},
+			{ID: "content", Name: "Dataset and benchmark design", PaperIDs: []string{"paper-1", "paper-2"}},
+		},
+		PaperNotes: []DeepStartPaperNote{
+			{PaperID: "paper-1", DirectionIDs: []string{"venue", "content"}},
+		},
+	}, request)
+	if len(analysis.Directions) != 1 || analysis.Directions[0].ID != "content" {
+		t.Fatalf("expected venue direction to be removed, got %+v", analysis.Directions)
+	}
+	if len(analysis.PaperNotes) != 1 || len(analysis.PaperNotes[0].DirectionIDs) != 1 || analysis.PaperNotes[0].DirectionIDs[0] != "content" {
+		t.Fatalf("expected venue direction reference to be removed, got %+v", analysis.PaperNotes)
+	}
+}
+
 func TestSearchClientSearchUsesFocusedDefaultPerSourceLimit(t *testing.T) {
 	config := twoSourceSearchTestConfig()
 	config.Search.SemanticScholarAPIKey = "semantic-key"
@@ -1230,6 +1252,12 @@ func TestSearchClientSemanticStopsAfterTryingAllEmptyQueryVariants(t *testing.T)
 	config.Search.RetryIntervalSeconds = 1
 	client := NewSearchClient(config)
 	client.retryInterval = 0
+	var finalProgress SearchProgressEvent
+	client.SetProgressReporter(func(progress SearchProgressEvent) {
+		if progress.Phase == "completed" {
+			finalProgress = progress
+		}
+	})
 
 	query := "我想梳理这两年关于 world model的论文."
 	candidates := buildSearchQueryCandidates(query)
@@ -1250,14 +1278,18 @@ func TestSearchClientSemanticStopsAfterTryingAllEmptyQueryVariants(t *testing.T)
 		}),
 	}
 
-	_, err := client.Search(query, 100)
-	if err == nil {
-		t.Fatal("expected search to fail when all query variants return empty results")
+	papers, err := client.Search(query, 100)
+	if err != nil {
+		t.Fatalf("expected an empty successful search, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "no results after trying") {
-		t.Fatalf("expected terminal no-result error, got %v", err)
+	if len(papers) != 0 {
+		t.Fatalf("expected no papers, got %+v", papers)
 	}
 	if attempts != len(candidates) {
 		t.Fatalf("expected %d semantic attempts (one per query variant), got %d", len(candidates), attempts)
+	}
+	if len(finalProgress.Sources) != 1 || !finalProgress.Sources[0].Success ||
+		finalProgress.Sources[0].Status != "success" || finalProgress.Sources[0].ResultCount != 0 {
+		t.Fatalf("expected empty source to be reported as successful with zero results, got %+v", finalProgress)
 	}
 }

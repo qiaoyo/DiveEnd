@@ -12,11 +12,12 @@ func TestRealDeepReadGroundingE2E(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("DIVEEND_REAL_DEEPREAD_E2E")) != "1" {
 		t.Skip("set DIVEEND_REAL_DEEPREAD_E2E=1 to run grounded DeepRead against the configured strong LLM")
 	}
-	strongSeed, ok := readStrongLLMSeed()
-	if !ok {
-		t.Fatal("config/strong_llm.json is unavailable or incomplete")
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("load configured strong LLM: %v", err)
 	}
-	client := newLLMClientFromConfig(llmConfigFromSeed(strongSeed))
+	config = normalizeAppConfig(config)
+	client := NewStrongLLMClient(config)
 	client.tokenBudget = newDailyTokenBudget(t.TempDir(), defaultDailyLLMTokenBudget)
 
 	sectionContext := `[section-1] Results
@@ -54,11 +55,12 @@ func TestRealDeepReadFastQuestionE2E(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("DIVEEND_REAL_DEEPREAD_E2E")) != "1" {
 		t.Skip("set DIVEEND_REAL_DEEPREAD_E2E=1 to run grounded DeepRead against the configured weak LLM")
 	}
-	weakSeed, ok := readWeakLLMSeed()
-	if !ok {
-		t.Fatal("config/weak_llm.json is unavailable or incomplete")
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("load configured weak LLM: %v", err)
 	}
-	client := newLLMClientFromConfig(llmConfigFromSeed(weakSeed))
+	config = normalizeAppConfig(config)
+	client := NewWeakLLMClient(config)
 	client.tokenBudget = newDailyTokenBudget(t.TempDir(), defaultDailyLLMTokenBudget)
 	sectionContext := `[section-1] Results
 Accuracy improved by 12 percent on ExampleBench after adding retrieval.

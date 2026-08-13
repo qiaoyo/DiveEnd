@@ -5,6 +5,7 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronUp,
+  Copy,
   ExternalLink,
   FolderPlus,
   Loader2,
@@ -23,6 +24,7 @@ import {
   getPapers,
   importPapersWithAssets,
   onDeepStartProgress,
+  openExternalURL,
   replyDeepStartSession,
   rerunDeepStartSearch,
   supplementDeepStartSearch,
@@ -85,7 +87,14 @@ function institutionLabel(paper: SearchPaper): string {
 }
 
 function paperKeywords(paper: SearchPaper): string[] {
-  const values = [...paper.keywords, ...paper.tags].map((item) => item.trim()).filter(Boolean);
+  const publicationMetadata = new Set(
+    [paper.publicationVenue, paper.journal, paper.category]
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const values = [...paper.keywords, ...paper.tags]
+    .map((item) => item.trim())
+    .filter((item) => item && !publicationMetadata.has(item.toLowerCase()) && !/^.{1,28}\s20\d{2}$/.test(item));
   return [...new Set(values)].slice(0, 6);
 }
 
@@ -183,38 +192,6 @@ function extractKeySentences(text: string, tokens: string[]): string[] {
   return sentences.slice(0, Math.min(2, sentences.length));
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// 保留旧版词级高亮逻辑，默认不启用，必要时可快速回滚。
-function renderLegacyHighlightedText(text: string, tokens: string[]): ReactNode {
-  const content = text.trim();
-  if (!content) {
-    return '暂无摘要。';
-  }
-  if (tokens.length === 0) {
-    return content;
-  }
-
-  const escaped = tokens.map((token) => escapeRegExp(token)).join('|');
-  if (!escaped) {
-    return content;
-  }
-  const pattern = new RegExp(`(${escaped})`, 'ig');
-  const chunks = content.split(pattern);
-  if (chunks.length === 1) {
-    return content;
-  }
-
-  return chunks.map((chunk, index) => {
-    if (index % 2 === 1) {
-      return <mark key={`${chunk}-${index}`}>{chunk}</mark>;
-    }
-    return <span key={`${chunk}-${index}`}>{chunk}</span>;
-  });
-}
-
 function renderInlineHighlightedAbstract(text: string, tokens: string[]): ReactNode {
   const content = text.trim();
   if (!content) {
@@ -238,7 +215,7 @@ function renderInlineHighlightedAbstract(text: string, tokens: string[]): ReactN
         return (
           <span key={`abstract-sentence-${index}`}>
             {highlighted ? (
-              <mark className="rounded bg-amber-100/90 px-1 py-0.5 text-slate-900 dark:bg-amber-400/30 dark:text-amber-50">
+              <mark className="rounded-[var(--de-radius)] border-l-2 border-[var(--de-accent)] bg-[var(--de-accent-soft)] px-1 py-0.5 text-[var(--de-ink)]">
                 <strong>{sentence}</strong>
               </mark>
             ) : (
@@ -307,6 +284,14 @@ function flattenFolderNodes(nodes: FolderNode[]): Folder[] {
   return list;
 }
 
+function storageOverviewHasPendingWork(nodes: FolderStorageTreeOverview['directories']): boolean {
+  return nodes.some((node) => (
+    node.queued > 0 ||
+    node.downloading > 0 ||
+    storageOverviewHasPendingWork(node.children)
+  ));
+}
+
 export function SessionDetailPanel() {
   const navigate = useNavigate();
   const routeSessionId = typeof window === 'undefined'
@@ -372,25 +357,38 @@ export function SessionDetailPanel() {
     eta: 0,
     message: '',
   });
-  const useLegacyAbstractHighlight = false;
   const skipStoragePollingInTests = import.meta.env.MODE === 'test';
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastSessionRefreshAtRef = useRef(0);
+  const storageOverviewLoadedRef = useRef(false);
+  const shouldPollStorageOverview =
+    activeDeepStartSession?.summary.processingStatus === 'background_processing' ||
+    Boolean(storageTreeOverview && storageOverviewHasPendingWork(storageTreeOverview.directories));
 
   useEffect(() => {
-    if (activeDeepStartSession) {
-      setRerunQuery(activeDeepStartSession.summary.currentQuery);
-      setInitialSuggestedQueries(activeDeepStartSession.currentAnalysis?.suggestedQueries ?? []);
-      setChatRuntime({
-        status: 'idle',
-        phase: 'idle',
-        percent: 0,
-        eta: 0,
-        message: '',
-      });
-      setOptimisticUserMessage('');
+    if (!activeDeepStartSession) {
+      return;
     }
-  }, [activeDeepStartSession?.summary.currentQuery, activeDeepStartSession, activeFolderId]);
+    setRerunQuery(activeDeepStartSession.summary.currentQuery);
+  }, [activeDeepStartSession?.summary.id, activeDeepStartSession?.summary.currentQuery]);
+
+  useEffect(() => {
+    setInitialSuggestedQueries(activeDeepStartSession?.currentAnalysis?.suggestedQueries ?? []);
+  }, [activeDeepStartSession?.summary.id, activeDeepStartSession?.currentAnalysis?.suggestedQueries]);
+
+  useEffect(() => {
+    if (!activeDeepStartSession) {
+      return;
+    }
+    setChatRuntime({
+      status: 'idle',
+      phase: 'idle',
+      percent: 0,
+      eta: 0,
+      message: '',
+    });
+    setOptimisticUserMessage('');
+  }, [activeDeepStartSession?.summary.id]);
 
   useEffect(() => {
     const targetFolderId = activeDeepStartSession?.summary.targetFolderId;
@@ -419,13 +417,22 @@ export function SessionDetailPanel() {
   }, [activeDeepStartSession?.summary.targetFolderId, setActiveFolderId, setError, setPapers]);
 
   useEffect(() => {
+    storageOverviewLoadedRef.current = false;
+  }, [activeDeepStartSession?.summary.id]);
+
+  useEffect(() => {
     if (skipStoragePollingInTests) {
       return;
     }
 
     let cancelled = false;
+    let requestInFlight = false;
 
     const refreshOverview = async (markLoading: boolean) => {
+      if (requestInFlight) {
+        return;
+      }
+      requestInFlight = true;
       if (markLoading) {
         setLoadingStorageOverview(true);
       }
@@ -438,6 +445,7 @@ export function SessionDetailPanel() {
           setStorageTreeOverview(overview);
           setFolderTree(tree);
           setFolders(flattenFolderNodes(tree));
+          storageOverviewLoadedRef.current = true;
         }
       } catch (error) {
         if (!cancelled) {
@@ -445,13 +453,22 @@ export function SessionDetailPanel() {
           setError(errorToUserMessage(error, '读取本地存储速览失败'));
         }
       } finally {
+        requestInFlight = false;
         if (!cancelled && markLoading) {
           setLoadingStorageOverview(false);
         }
       }
     };
 
-    void refreshOverview(true);
+    if (!storageOverviewLoadedRef.current) {
+      void refreshOverview(true);
+    }
+    if (!shouldPollStorageOverview) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const timer = window.setInterval(() => {
       void refreshOverview(false);
     }, 3000);
@@ -460,7 +477,7 @@ export function SessionDetailPanel() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [setError, setFolders, skipStoragePollingInTests]);
+  }, [activeDeepStartSession?.summary.id, setError, setFolders, shouldPollStorageOverview, skipStoragePollingInTests]);
 
   useEffect(() => {
     const sessionID = activeDeepStartSession?.summary.id;
@@ -515,6 +532,20 @@ export function SessionDetailPanel() {
           percent: progress.overallPercent,
           eta: 0,
           message: runtimeMessage(progress.message, '本次任务已停止并回滚'),
+        });
+        setOptimisticUserMessage('');
+        setBusyAction(null);
+        refreshSessionIfNeeded(true);
+        return;
+      }
+
+      if (progress.phase === 'failed') {
+        setChatRuntime({
+          status: 'failed',
+          phase: progress.phase,
+          percent: progress.overallPercent,
+          eta: 0,
+          message: runtimeMessage(progress.message, 'AI 处理失败，未合并半成品'),
         });
         setOptimisticUserMessage('');
         setBusyAction(null);
@@ -604,7 +635,7 @@ export function SessionDetailPanel() {
       return base.slice(-20);
     }
     const optimistic = {
-      id: `optimistic-${Date.now()}`,
+      id: `optimistic-${activeDeepStartSession?.summary.id ?? 'session'}`,
       sessionId: activeDeepStartSession?.summary.id ?? '',
       role: 'user' as const,
       content: optimisticUserMessage,
@@ -877,7 +908,7 @@ export function SessionDetailPanel() {
   };
 
   const handleCancelRunningTask = async () => {
-    if (!activeDeepStartSession) {
+    if (!activeDeepStartSession || chatRuntime.status === 'cancelling') {
       return;
     }
 
@@ -1097,6 +1128,39 @@ export function SessionDetailPanel() {
     }
   };
 
+  const handleCopyActiveTitle = async () => {
+    const title = (activePaper?.title || '').trim();
+    if (!title) {
+      setCopyFeedback('没有可复制的标题');
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setCopyFeedback('当前环境不支持剪贴板写入');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(title);
+      setCopyFeedback('标题已复制到剪贴板');
+    } catch (error) {
+      const message = errorToUserMessage(error, '复制标题失败');
+      setCopyFeedback(message);
+      setError(message);
+    }
+  };
+
+  const handleOpenActivePaper = () => {
+    const url = (activePaper?.url || '').trim();
+    if (!url) {
+      setError('这篇论文没有可打开的外部链接');
+      return;
+    }
+    try {
+      openExternalURL(url);
+    } catch (error) {
+      setError(errorToUserMessage(error, '打开论文链接失败'));
+    }
+  };
+
   const renderStorageNode = (node: FolderStorageTreeOverview['directories'][number], depth = 0) => {
     const queueing = node.queued + node.downloading;
     const isTarget = activeTargetFolderId === node.folderId;
@@ -1123,7 +1187,7 @@ export function SessionDetailPanel() {
               const folder = folders.find((item) => item.id === node.folderId);
               if (folder?.isSystem) {
                 return (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                  <span className="rounded-[var(--de-radius)] border border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-2 py-0.5 text-[10px] text-[var(--de-ink-muted)]">
                     系统
                   </span>
                 );
@@ -1180,7 +1244,7 @@ export function SessionDetailPanel() {
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="line-clamp-2 text-sm font-semibold leading-6">{paper.title}</h3>
               {note && (
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tierStyle(note.tier)}`}>
+                <span className={`rounded-[var(--de-radius)] border border-[var(--de-rule)] px-2 py-0.5 text-[11px] font-medium ${tierStyle(note.tier)}`}>
                   {note.tier}
                 </span>
               )}
@@ -1219,7 +1283,7 @@ export function SessionDetailPanel() {
             {keywords.slice(0, 4).map((keyword) => (
               <span
                 key={`${paper.id}-${keyword}`}
-                className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-700/70 dark:text-slate-200"
+                className="border-b border-[var(--de-rule-strong)] pb-0.5 text-[11px] text-[var(--de-ink-muted)]"
               >
                 {keyword}
               </span>
@@ -1227,7 +1291,7 @@ export function SessionDetailPanel() {
           </div>
         )}
         {paper.enrichmentNote && (
-          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{paper.enrichmentNote}</p>
+          <p className="mt-2 border-l-2 border-[var(--de-warning)] pl-2 text-xs text-[var(--de-warning)]">{paper.enrichmentNote}</p>
         )}
         <p className="mt-3 line-clamp-4 text-sm leading-6 text-slate-600 dark:text-slate-200">
           {paper.abstract || '暂无摘要。'}
@@ -1254,7 +1318,6 @@ export function SessionDetailPanel() {
 
   const activeTargetFolderId =
     activeDeepStartSession.summary.targetFolderId || activeFolderId || folderOptions[0]?.id || folders[0]?.id || '';
-  const searchStats = currentAnalysis?.searchStats;
   const currentPoolCount = activeDeepStartSession.currentResults.length;
   const selectedCount = selectedPaperIds.size;
   const isSelectionActionBlocked = busyAction === 'selecting' || busyAction === 'importing' || busyAction === 'undoing';
@@ -1359,7 +1422,7 @@ export function SessionDetailPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-28">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
         <div className="sticky top-0 z-30 -mx-6 border-b border-[var(--de-rule)] bg-[var(--de-paper)] px-6 py-3">
           <section className="mx-auto max-w-7xl border border-[var(--de-rule)] bg-[var(--de-surface)] p-4">
             <div className="flex items-center justify-between gap-3">
@@ -1409,7 +1472,7 @@ export function SessionDetailPanel() {
                   </div>
                 )}
 
-                <div className="max-h-48 space-y-2 overflow-y-auto">
+                <div className="max-h-48 space-y-2 overflow-y-auto overscroll-y-contain">
                   {chatMessages.map((message) => (
                     <div
                       key={message.id}
@@ -1521,81 +1584,18 @@ export function SessionDetailPanel() {
                 <p className="mt-2 text-sm leading-7 text-[var(--de-ink-muted)]">
                   {currentAnalysis?.overview || 'AI 正在构建这轮检索的分组策略。'}
                 </p>
-                {searchStats && (
-                  <dl className="mt-3 border-t border-[var(--de-rule)] text-xs text-[var(--de-ink-muted)]">
-                    {searchStats.originalQuery && (
-                      <div className="border-b border-[var(--de-rule)] py-2">
-                        <dt className="font-medium text-[var(--de-ink)]">原始问题</dt>
-                        <dd className="mt-1 leading-5">{searchStats.originalQuery}</dd>
-                      </div>
-                    )}
-                    {(searchStats.rewrittenQueries?.length ?? 0) > 0 && (
-                      <div className="border-b border-[var(--de-rule)] py-2">
-                        <dt className="font-medium text-[var(--de-ink)]">英文检索词</dt>
-                        <dd className="mt-1 leading-5">{(searchStats.rewrittenQueries ?? []).join(' | ')}</dd>
-                      </div>
-                    )}
-                    {searchStats.queryHits && Object.keys(searchStats.queryHits).length > 0 && (
-                      <div className="border-b border-[var(--de-rule)] py-2">
-                        <dt className="font-medium text-[var(--de-ink)]">重写命中</dt>
-                        <dd className="mt-1 leading-5">
-                        {Object.entries(searchStats.queryHits)
-                          .map(([query, count]) => `${query}=${count}`)
-                          .join('；')}
-                        </dd>
-                      </div>
-                    )}
-                    <div className="border-b border-[var(--de-rule)] py-2">
-                      <dt className="font-medium text-[var(--de-ink)]">首轮检索基线</dt>
-                      <dd className="mt-1">原始 {searchStats.rawCount} · 去重后 {searchStats.dedupCount} · 入池 {searchStats.finalCount}</dd>
-                    </div>
-                    <div className="border-b border-[var(--de-rule)] py-2">
-                      <dt className="font-medium text-[var(--de-ink)]">当前候选池</dt>
-                      <dd className="mt-1">{currentPoolCount} 篇</dd>
-                    </div>
-                    {(activeDeepStartSession.summary.totalPlannedCount ?? 0) > 0 && (
-                      <div className="py-2">
-                        <dt className="font-medium text-[var(--de-ink)]">处理状态</dt>
-                        <dd className="mt-1 leading-5">
-                          {activeDeepStartSession.summary.processingStatus === 'background_processing' ? '后台处理中' : '已完成'} · 首批就绪 {activeDeepStartSession.summary.initialReadyCount || currentPoolCount} / 总计划 {activeDeepStartSession.summary.totalPlannedCount} · 后台剩余 {activeDeepStartSession.summary.backgroundRemaining || 0}
-                        </dd>
-                      </div>
-                    )}
-                  </dl>
-                )}
-              </section>
-
-              <section className="de-panel p-4">
-                <h3 className="text-sm font-semibold text-[var(--de-ink)]">研究方向</h3>
-                <div className="mt-3 space-y-2">
-                  {groupedDirections.map((direction) => {
-                    const selectedCount = direction.paperIds.filter((paperId) => selectedPaperIds.has(paperId)).length;
-                    return (
-                      <div key={direction.id} className="border-b border-[var(--de-rule)] py-3 last:border-b-0">
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm font-medium">{direction.name}</div>
-                          <span className="text-[11px] tabular-nums text-[var(--de-ink-muted)]">{direction.paperIds.length} 篇</span>
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-300">{direction.summary}</p>
-                        <div className="mt-2 flex gap-2">
-                          <button
-                            onClick={() => void toggleDirection(direction, true)}
-                            disabled={isSelectionActionBlocked}
-                            className="de-button-secondary px-2.5 py-1 text-[11px] disabled:opacity-60"
-                          >
-                            全选 {selectedCount}/{direction.paperIds.length}
-                          </button>
-                          <button
-                            onClick={() => void toggleDirection(direction, false)}
-                            disabled={isSelectionActionBlocked}
-                            className="de-button-secondary px-2.5 py-1 text-[11px] disabled:opacity-60"
-                          >
-                            清空
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-[var(--de-rule)] pt-3 text-xs text-[var(--de-ink-muted)]">
+                  <span>当前候选池 {currentPoolCount} 篇</span>
+                  {(activeDeepStartSession.summary.totalPlannedCount ?? 0) > 0 && (
+                    <span>
+                      {activeDeepStartSession.summary.processingStatus === 'background_processing'
+                        ? '后台处理中'
+                        : activeDeepStartSession.summary.processingStatus === 'failed'
+                          ? '处理失败，未合并剩余结果'
+                          : '已完成'}{' '}
+                      · 待处理 {activeDeepStartSession.summary.backgroundRemaining || 0}
+                    </span>
+                  )}
                 </div>
               </section>
 
@@ -1620,13 +1620,31 @@ export function SessionDetailPanel() {
               {currentResults.length > 0 ? (
                 groupedDirections.map((direction) => (
                   <section key={direction.id} className="border-t border-[var(--de-rule-strong)] pt-4 first:border-t-0 first:pt-0">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-base font-semibold">{direction.name}</h3>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{direction.why}</p>
-                      </div>
-                      <span className="text-xs tabular-nums text-[var(--de-ink-muted)]">{direction.paperIds.length} 篇</span>
-                    </div>
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold">{direction.name}</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{direction.why}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs tabular-nums text-[var(--de-ink-muted)]">{direction.paperIds.length} 篇</span>
+                    <button
+                      type="button"
+                      onClick={() => void toggleDirection(direction, true)}
+                      disabled={isSelectionActionBlocked}
+                      className="de-button-secondary px-2 py-1 text-[11px] disabled:opacity-60"
+                    >
+                      全选 {direction.paperIds.filter((paperId) => selectedPaperIds.has(paperId)).length}/{direction.paperIds.length}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void toggleDirection(direction, false)}
+                      disabled={isSelectionActionBlocked}
+                      className="de-button-secondary px-2 py-1 text-[11px] disabled:opacity-60"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       {direction.paperIds
                         .map((paperId) => paperById.get(paperId))
@@ -1646,6 +1664,54 @@ export function SessionDetailPanel() {
             </section>
           </div>
         </div>
+
+        <div className="mx-auto mt-6 w-full max-w-7xl">
+          <div className="mx-auto max-w-xl rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-4 py-3 shadow-md">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-200">
+                <CheckCheck className="h-4 w-4 text-[var(--de-accent)]" />
+                当前已选 <span className="font-semibold text-[var(--de-accent)]">{selectedCount}</span> 篇论文
+              </div>
+              <button
+                onClick={() => void handleImportSelected()}
+                disabled={Boolean(importDisabledReason)}
+                title={importDisabledReason || '导入到目标文件夹并后台下载 PDF'}
+                className="de-button-primary inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busyAction === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                {busyAction === 'importing' ? '导入中' : '导入选中'}
+              </button>
+            </div>
+            {(importDisabledReason || importFeedback) && (
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{importFeedback || importDisabledReason}</p>
+            )}
+            {importFeedback && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/deepread')}
+                  className="de-button-secondary px-2.5 py-1 text-xs"
+                >
+                  去 DeepRead
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/history')}
+                  className="de-button-secondary px-2.5 py-1 text-xs"
+                >
+                  去历史
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/home')}
+                  className="de-button-secondary px-2.5 py-1 text-xs"
+                >
+                  回首页
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {activePaper && (
@@ -1656,11 +1722,22 @@ export function SessionDetailPanel() {
             className="fixed inset-0 z-30 bg-slate-950/35"
             aria-label="关闭详情抽屉"
           />
-          <aside className="fixed right-0 top-0 z-40 flex h-full w-full max-w-2xl flex-col border-l border-[var(--de-rule)] bg-[var(--de-surface)] p-5 shadow-lg">
+          <aside className="fixed right-0 top-14 z-40 flex h-[calc(100%-3.5rem)] w-full max-w-2xl flex-col overflow-y-auto border-l border-[var(--de-rule)] bg-[var(--de-surface)] p-5 shadow-lg">
             <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Paper Detail</p>
-                <h3 className="mt-2 text-lg font-semibold leading-7 text-slate-950 dark:text-slate-50">{activePaper.title}</h3>
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-[var(--de-ink-muted)]">论文详情</p>
+                <div className="mt-2 flex items-start gap-2">
+                  <h3 className="min-w-0 text-lg font-semibold leading-7 text-slate-950 dark:text-slate-50">{activePaper.title}</h3>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyActiveTitle()}
+                    aria-label="复制论文标题"
+                    title="复制论文标题"
+                    className="de-button-secondary mt-0.5 shrink-0 p-1.5 text-[var(--de-ink-muted)]"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                   {publicationLabel(activePaper)}
                 </p>
@@ -1691,19 +1768,18 @@ export function SessionDetailPanel() {
                 {selectedPaperIds.has(activePaper.id) ? '已选中' : '加入选中'}
               </button>
               {activePaper.url && (
-                <a
-                  href={activePaper.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={handleOpenActivePaper}
                   className="de-button-secondary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   打开链接
-                </a>
+                </button>
               )}
             </div>
 
-            <div className="mt-4 grid gap-3 overflow-y-auto pr-1">
+            <div className="mt-4 grid gap-3 pr-1">
               {activePaper.matchReason ? (
                 <section className="border-y border-[var(--de-rule)] bg-[var(--de-surface-muted)] px-3 py-2.5">
                   <h4 className="text-xs font-semibold text-[var(--de-accent)]">检索匹配</h4>
@@ -1719,7 +1795,7 @@ export function SessionDetailPanel() {
                 <h4 className="text-xs font-semibold text-[var(--de-ink-muted)]">机构 / 学校</h4>
                 <p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{institutionLabel(activePaper)}</p>
                 {activePaper.enrichmentNote && (
-                  <p className="mt-2 text-xs leading-5 text-amber-700 dark:text-amber-300">{activePaper.enrichmentNote}</p>
+                  <p className="mt-2 border-l-2 border-[var(--de-warning)] pl-2 text-xs leading-5 text-[var(--de-warning)]">{activePaper.enrichmentNote}</p>
                 )}
               </section>
 
@@ -1730,7 +1806,7 @@ export function SessionDetailPanel() {
                     paperKeywords(activePaper).map((keyword) => (
                       <span
                         key={`drawer-${activePaper.id}-${keyword}`}
-                        className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                        className="border-b border-[var(--de-rule-strong)] pb-0.5 text-xs text-[var(--de-ink-muted)]"
                       >
                         {keyword}
                       </span>
@@ -1748,7 +1824,7 @@ export function SessionDetailPanel() {
                     splitAuthors(activePaper.authors).map((author) => (
                       <span
                         key={`author-${activePaper.id}-${author}`}
-                        className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        className="border-b border-[var(--de-rule-strong)] pb-0.5 text-xs text-[var(--de-ink-muted)]"
                       >
                         {author}
                       </span>
@@ -1765,18 +1841,18 @@ export function SessionDetailPanel() {
                   <button
                     type="button"
                     onClick={() => void handleCopyActiveAbstract()}
-                    className="de-button-secondary px-2 py-1 text-xs"
+                    aria-label="复制摘要"
+                    title="复制摘要"
+                    className="de-button-secondary p-1.5 text-[var(--de-ink-muted)]"
                   >
-                    复制摘要
+                    <Copy className="h-3.5 w-3.5" />
                   </button>
                 </div>
                 {copyFeedback && (
                   <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{copyFeedback}</p>
                 )}
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
-                  {useLegacyAbstractHighlight
-                    ? renderLegacyHighlightedText(activePaper.abstract || '', summaryHighlightTokens)
-                    : renderInlineHighlightedAbstract(activePaper.abstract || '', summaryHighlightTokens)}
+                  {renderInlineHighlightedAbstract(activePaper.abstract || '', summaryHighlightTokens)}
                 </p>
               </section>
             </div>
@@ -1834,53 +1910,6 @@ export function SessionDetailPanel() {
         </div>
       )}
 
-      <div className="pointer-events-none fixed bottom-6 left-1/2 z-30 w-full max-w-7xl -translate-x-1/2 px-6">
-        <div className="pointer-events-auto mx-auto max-w-xl rounded-[var(--de-radius)] border border-[var(--de-rule-strong)] bg-[var(--de-surface)] px-4 py-3 shadow-md">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-200">
-              <CheckCheck className="h-4 w-4 text-[var(--de-accent)]" />
-              当前已选 <span className="font-semibold text-[var(--de-accent)]">{selectedCount}</span> 篇论文
-            </div>
-            <button
-              onClick={() => void handleImportSelected()}
-              disabled={Boolean(importDisabledReason)}
-              title={importDisabledReason || '导入到目标文件夹并后台下载 PDF'}
-              className="de-button-primary inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {busyAction === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              {busyAction === 'importing' ? '导入中' : '导入选中'}
-            </button>
-          </div>
-          {(importDisabledReason || importFeedback) && (
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-300">{importFeedback || importDisabledReason}</p>
-          )}
-          {importFeedback && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => navigate('/deepread')}
-                className="de-button-secondary px-2.5 py-1 text-xs"
-              >
-                去 DeepRead
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/history')}
-                className="de-button-secondary px-2.5 py-1 text-xs"
-              >
-                去历史
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/')}
-                className="de-button-secondary px-2.5 py-1 text-xs"
-              >
-                回首页
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

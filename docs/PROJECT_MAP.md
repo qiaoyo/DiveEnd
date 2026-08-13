@@ -71,6 +71,26 @@ Tests:
 - `frontend/src/components/settings/SettingsPanel.test.tsx`
 - `frontend/src/stores/appStore.test.ts`
 
+### Research Home
+
+Purpose:
+
+- Give the DiveEnd brand entry a real destination instead of routing back to the discovery page.
+- Show the local research workspace at a glance and offer direct entry into discovery, reading, analysis, and saved research.
+- Carry a question typed on the home page into the discovery prompt without adding another backend request.
+
+Frontend files:
+
+- `frontend/src/components/home/HomePanel.tsx`
+- `frontend/src/components/layout/GlobalNav.tsx`
+- `frontend/src/components/layout/Router.tsx`
+- `frontend/src/components/layout/AppLayout.tsx`
+- `frontend/src/components/deepstart/DeepStartPanel.tsx` (receives the optional home-page prompt)
+
+Tests:
+
+- `frontend/src/components/home/HomePanel.test.tsx`
+
 ### 2. DeepStart Discovery
 
 Purpose:

@@ -28,6 +28,7 @@ type DeepStartEnricher struct {
 }
 
 type deepStartPublicationMetadata struct {
+	Authors       string
 	Venue         string
 	Year          int
 	CitationCount int
@@ -106,6 +107,9 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 	cacheKey := deepStartEnrichmentCacheKey(paper)
 	if e.db != nil && cacheKey != "" {
 		if cached, err := e.db.GetDeepStartEnrichmentCache(cacheKey); err == nil && cached != nil {
+			if strings.TrimSpace(paper.Authors) == "" {
+				paper.Authors = strings.TrimSpace(cached.Authors)
+			}
 			paper.Institutions = normalizeInstitutionList(cached.Institutions)
 			paper.Keywords = buildPaperKeywords(paper, query, cached.Keywords)
 			if strings.TrimSpace(cached.SourceLabel) != "" {
@@ -127,7 +131,9 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 				paper.CitationCount = cached.CitationCount
 			}
 			paper.EnrichmentNote = strings.TrimSpace(cached.ErrorMessage)
-			return paper, "使用缓存补全"
+			if strings.TrimSpace(paper.Authors) != "" || strings.TrimSpace(cached.Authors) != "" {
+				return paper, "使用缓存补全"
+			}
 		}
 	}
 
@@ -138,6 +144,7 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 	var errorParts []string
 
 	publication := deepStartPublicationMetadata{
+		Authors:       strings.TrimSpace(paper.Authors),
 		Venue:         strings.TrimSpace(paper.PublicationVenue),
 		Year:          paper.PublicationYear,
 		CitationCount: paper.CitationCount,
@@ -171,6 +178,9 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 	}
 
 	paper.Institutions = institutions
+	if strings.TrimSpace(paper.Authors) == "" {
+		paper.Authors = strings.TrimSpace(publication.Authors)
+	}
 	paper.Keywords = keywords
 	if len(publication.PDFURLs) > 0 {
 		paper.PDFCandidates = uniqueStrings(append(paper.PDFCandidates, publication.PDFURLs...))
@@ -192,6 +202,7 @@ func (e *DeepStartEnricher) enrichSinglePaper(ctx context.Context, query string,
 	if e.db != nil && cacheKey != "" {
 		cacheEntry := &DeepStartEnrichmentCache{
 			CacheKey:          cacheKey,
+			Authors:           paper.Authors,
 			Institutions:      institutions,
 			Keywords:          keywords,
 			SourceLabel:       paper.SourceLabel,
@@ -243,6 +254,9 @@ func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper Sea
 				} `json:"source"`
 			} `json:"primary_location"`
 			Authorships []struct {
+				Author struct {
+					DisplayName string `json:"display_name"`
+				} `json:"author"`
 				Institutions []struct {
 					DisplayName string `json:"display_name"`
 				} `json:"institutions"`
@@ -265,8 +279,15 @@ func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper Sea
 	}
 
 	best := chooseOpenAlexResult(result.Results, paper)
+	if !trustedMetadataTitleMatch(best.Title, paper.Title, openAlexMatchScore(best.Title, best.PublicationYear, normalizedDedupeToken(paper.Title), paper.Year)) {
+		return nil, nil, deepStartPublicationMetadata{}, fmt.Errorf("title match below trust threshold")
+	}
+	authors := make([]string, 0, len(best.Authorships))
 	institutions := make([]string, 0, 4)
 	for _, authorship := range best.Authorships {
+		if name := strings.TrimSpace(authorship.Author.DisplayName); name != "" {
+			authors = appendNonEmptyUnique(authors, name)
+		}
 		for _, institution := range authorship.Institutions {
 			if name := strings.TrimSpace(institution.DisplayName); name != "" {
 				institutions = append(institutions, name)
@@ -295,6 +316,7 @@ func (e *DeepStartEnricher) fetchOpenAlexMetadata(ctx context.Context, paper Sea
 		venue = strings.TrimSpace(best.HostVenue.DisplayName)
 	}
 	publication := deepStartPublicationMetadata{
+		Authors:       strings.Join(authors, ", "),
 		Venue:         venue,
 		Year:          best.PublicationYear,
 		CitationCount: best.CitedByCount,
@@ -325,6 +347,9 @@ func chooseOpenAlexResult(results []struct {
 		} `json:"source"`
 	} `json:"primary_location"`
 	Authorships []struct {
+		Author struct {
+			DisplayName string `json:"display_name"`
+		} `json:"author"`
 		Institutions []struct {
 			DisplayName string `json:"display_name"`
 		} `json:"institutions"`
@@ -350,6 +375,9 @@ func chooseOpenAlexResult(results []struct {
 		} `json:"source"`
 	} `json:"primary_location"`
 	Authorships []struct {
+		Author struct {
+			DisplayName string `json:"display_name"`
+		} `json:"author"`
 		Institutions []struct {
 			DisplayName string `json:"display_name"`
 		} `json:"institutions"`
@@ -416,6 +444,9 @@ func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper Sea
 				ContainerTitle      []string `json:"container-title"`
 				IsReferencedByCount int      `json:"is-referenced-by-count"`
 				Author              []struct {
+					Given       string `json:"given"`
+					Family      string `json:"family"`
+					Name        string `json:"name"`
 					Affiliation []struct {
 						Name string `json:"name"`
 					} `json:"affiliation"`
@@ -434,8 +465,23 @@ func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper Sea
 	}
 
 	best := chooseCrossrefItem(result.Message.Items, paper)
+	bestTitle := ""
+	if len(best.Title) > 0 {
+		bestTitle = best.Title[0]
+	}
+	if !trustedMetadataTitleMatch(bestTitle, paper.Title, crossrefMatchScore(best.Title, extractCrossrefYear(best.Issued.DateParts), normalizedDedupeToken(paper.Title), paper.Year)) {
+		return nil, nil, deepStartPublicationMetadata{}, fmt.Errorf("title match below trust threshold")
+	}
+	authors := make([]string, 0, len(best.Author))
 	institutions := make([]string, 0, 4)
 	for _, author := range best.Author {
+		name := strings.TrimSpace(author.Name)
+		if name == "" {
+			name = strings.TrimSpace(strings.Join([]string{author.Given, author.Family}, " "))
+		}
+		if name != "" {
+			authors = appendNonEmptyUnique(authors, name)
+		}
 		for _, affiliation := range author.Affiliation {
 			if name := strings.TrimSpace(affiliation.Name); name != "" {
 				institutions = append(institutions, name)
@@ -455,6 +501,7 @@ func (e *DeepStartEnricher) fetchCrossrefMetadata(ctx context.Context, paper Sea
 		publicationVenue = strings.TrimSpace(best.ContainerTitle[0])
 	}
 	publication := deepStartPublicationMetadata{
+		Authors:       strings.Join(authors, ", "),
 		Venue:         publicationVenue,
 		Year:          extractCrossrefYear(best.Issued.DateParts),
 		CitationCount: best.IsReferencedByCount,
@@ -469,6 +516,9 @@ func chooseCrossrefItem(items []struct {
 	ContainerTitle      []string `json:"container-title"`
 	IsReferencedByCount int      `json:"is-referenced-by-count"`
 	Author              []struct {
+		Given       string `json:"given"`
+		Family      string `json:"family"`
+		Name        string `json:"name"`
 		Affiliation []struct {
 			Name string `json:"name"`
 		} `json:"affiliation"`
@@ -482,6 +532,9 @@ func chooseCrossrefItem(items []struct {
 	ContainerTitle      []string `json:"container-title"`
 	IsReferencedByCount int      `json:"is-referenced-by-count"`
 	Author              []struct {
+		Given       string `json:"given"`
+		Family      string `json:"family"`
+		Name        string `json:"name"`
 		Affiliation []struct {
 			Name string `json:"name"`
 		} `json:"affiliation"`
@@ -554,7 +607,10 @@ func (e *DeepStartEnricher) getJSON(ctx context.Context, endpoint string, accept
 }
 
 func mergePublicationMetadata(base deepStartPublicationMetadata, candidate deepStartPublicationMetadata) deepStartPublicationMetadata {
-	if strings.TrimSpace(base.Venue) == "" && strings.TrimSpace(candidate.Venue) != "" {
+	if strings.TrimSpace(base.Authors) == "" && strings.TrimSpace(candidate.Authors) != "" {
+		base.Authors = strings.TrimSpace(candidate.Authors)
+	}
+	if strings.TrimSpace(base.Venue) == "" || publicationVenueReliability(candidate.Venue) > publicationVenueReliability(base.Venue) {
 		base.Venue = strings.TrimSpace(candidate.Venue)
 	}
 	if base.Year <= 0 && candidate.Year > 0 {
@@ -578,7 +634,90 @@ func buildPaperKeywords(paper SearchPaper, query string, candidates []string) []
 	if len(keywords) == 0 {
 		keywords = append(keywords, extractKeywordsFromText(strings.Join([]string{paper.Title, paper.Abstract}, " "))...)
 	}
-	return uniqueStrings(trimKeywordList(keywords, query, 10))
+	clean := trimKeywordList(keywords, query, 10)
+	filtered := make([]string, 0, len(clean))
+	for _, keyword := range clean {
+		if isPublicationMetadataKeyword(keyword, paper) {
+			continue
+		}
+		filtered = append(filtered, keyword)
+	}
+	return uniqueStrings(filtered)
+}
+
+func isPublicationMetadataKeyword(value string, paper SearchPaper) bool {
+	normalized := normalizedDedupeToken(value)
+	if normalized == "" {
+		return true
+	}
+	for _, metadata := range []string{paper.PublicationVenue, paper.Journal, paper.Category} {
+		if candidate := normalizedDedupeToken(metadata); candidate != "" && normalized == candidate {
+			return true
+		}
+	}
+	// Venue strings such as "CoRR 2025" or "ICLR 2026" are metadata, not
+	// paper keywords. Keep this deliberately narrow so normal terms like
+	// "VLA benchmark" remain visible.
+	if extractPublicationYear(value) > 0 && len(strings.Fields(value)) <= 4 {
+		return true
+	}
+	return false
+}
+
+func trustedMetadataTitleMatch(candidate, target string, score int) bool {
+	candidate = strings.TrimSpace(candidate)
+	target = strings.TrimSpace(target)
+	if candidate == "" || target == "" {
+		return false
+	}
+	if score >= 100 || normalizedDedupeToken(candidate) == normalizedDedupeToken(target) {
+		return true
+	}
+	candidateTokens := metadataTitleTokens(candidate)
+	targetTokens := metadataTitleTokens(target)
+	if len(candidateTokens) == 0 || len(targetTokens) == 0 {
+		return false
+	}
+	set := make(map[string]struct{}, len(candidateTokens))
+	for _, token := range candidateTokens {
+		set[token] = struct{}{}
+	}
+	overlap := 0
+	seenTarget := make(map[string]struct{}, len(targetTokens))
+	for _, token := range targetTokens {
+		if _, seen := seenTarget[token]; seen {
+			continue
+		}
+		seenTarget[token] = struct{}{}
+		if _, ok := set[token]; ok {
+			overlap++
+		}
+	}
+	if overlap == 0 {
+		return false
+	}
+	return float64(overlap)/float64(len(targetTokens)) >= 0.9 &&
+		float64(overlap)/float64(len(candidateTokens)) >= 0.75
+}
+
+func metadataTitleTokens(value string) []string {
+	words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	result := make([]string, 0, len(words))
+	seen := make(map[string]struct{}, len(words))
+	for _, word := range words {
+		word = strings.TrimSpace(word)
+		if word == "" {
+			continue
+		}
+		if _, ok := seen[word]; ok {
+			continue
+		}
+		seen[word] = struct{}{}
+		result = append(result, word)
+	}
+	return result
 }
 
 func trimKeywordList(values []string, query string, limit int) []string {
@@ -698,9 +837,9 @@ func deepStartEnrichmentCacheKey(paper SearchPaper) string {
 		return ""
 	}
 	if paper.Year > 0 {
-		return fmt.Sprintf("%s|%d", title, paper.Year)
+		return fmt.Sprintf("v2|%s|%d", title, paper.Year)
 	}
-	return title
+	return "v2|" + title
 }
 
 func shouldSkipExternalEnrichment(paper SearchPaper) bool {

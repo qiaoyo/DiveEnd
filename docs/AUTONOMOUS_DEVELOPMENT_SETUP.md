@@ -31,7 +31,7 @@
 | 百度网盘 | 可用 | 原 access token 已过期，正式客户端成功使用 refresh token 更新并以 `0600` 落盘；真实 E2E 完成数据库、PDF、manifest 上传、列举、下载和隔离测试目录清理。 |
 | GitHub Git 远端 | 可用 | SSH 可读取 `qiaoyo/DiveEnd`，push dry-run 验证可创建远端分支。 |
 | GitHub CLI | 可用 | `gh` 已通过 keyring 登录 `qiaoyo`；对 `qiaoyo/DiveEnd` 具有 `ADMIN` 权限和 `repo` scope，可用于创建 PR。 |
-| Semantic Scholar | Key 不可用 | 2026-07-31 对同一论文详情接口复测：无 key 返回 `200`，当前 key 返回 `403 Forbidden`。配置为 `0600`、JSON 字段、40 字符 ASCII token 和 `x-api-key` 请求头均正确。`~/setup_proxy.sh` 已执行，但代理端点连接超时。需要 Semantic Scholar 支持或重新签发 key；代码继续保留 arXiv、缓存和明确失败提示。 |
+| Semantic Scholar | Key 已可用 | 2026-08-07：本地 JSON 配置为 `0600` 且字段有效；直连 `paper/search` 返回 `200`。DiveEnd 客户端的第一次请求遇到 `429`，第 2 次按现有退避策略成功并返回论文。`~/setup_proxy.sh` 的代理端点仍连接超时，因此当前使用直连。 |
 
 2026-07-30 后续实现验证：
 
@@ -40,7 +40,7 @@
 - 重写后的最多 3 个检索 query 会全部执行，再按原始问题和扩展词的标题/摘要匹配度统一排序，不再由第一个填满上限的 query 独占结果。
 - 强弱模型共享每日 1 亿 token 硬预算；当日使用量保存到数据目录 `.diveend/llm_usage.json`，设置页可查看使用量并调整上限。
 - Python PDF 服务会汇总两次结构抽取的 provider usage 并返回 Go 后端，Screening 不再绕过共享预算。
-- Semantic Scholar 的 `403` 被视为永久性来源错误，首轮即停止该来源；arXiv 部分结果继续完成研究地图，不再等待几十次无效重试。
+- Semantic Scholar 的 `429` 按临时限流处理并执行有界退避；其他永久性错误仍会在首轮停止该来源，arXiv 和其他来源继续完成研究地图。
 - 桌面启动不再同步等待 PDF service 冷启动；服务在后台预热，DeepStart、DeepRead 和 Screening 首次需要 PDF 时统一等待 readiness。
 - DeepRead 问答优先使用弱模型，真实验证约 4.33 秒返回有依据回答；全文总结保留强模型质量。长论文上下文按问题相关性和核心章节分配，模型返回的 section ID 和摘录必须能在输入上下文中验证。
 - DeepRead 长请求支持前端主动取消和应用退出取消；已发送但失败或超时的模型请求保留保守 token 预留，避免潜在计费绕过每日上限。
@@ -196,7 +196,7 @@ Apple Developer 不是本地开发和 `wails build` 的前提。只有分发目�
 ### 暂时不要申请
 
 - 不需要为 arXiv 检索申请账号。
-- OpenAlex key 已配置并验证；OpenReview 和 DBLP 无需账号。Semantic Scholar 当前关闭，不需要更新 key。
+- OpenAlex key 已配置并验证；OpenReview 和 DBLP 无需账号。Semantic Scholar key 已配置并通过真实 smoke test，现已加入默认搜索源集合，也可在配置中显式关闭。
 - 不要为常规 CI 配置真实 LLM key 或百度个人 token；CI 应使用 mock 和 fixture。
 - 暂时不申请 Sentry 等遥测服务，先对齐隐私策略和是否真的需要收集崩溃信息。
 - 暂时不新增云数据库、对象存储或账号系统；DiveEnd 当前是本地优先桌面工具。

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
@@ -191,10 +192,10 @@ func (s *SearchClient) searchOpenReview(
 			}
 			authors := openReviewStrings(note.Content["authors"])
 			keywords := openReviewStrings(note.Content["keywords"])
-			venue := cleanSearchText(openReviewString(note.Content["venue"]))
-			if venue == "" {
-				venue = cleanSearchText(openReviewString(note.Content["venueid"]))
-			}
+			venue := normalizeOpenReviewVenue(
+				cleanSearchText(openReviewString(note.Content["venue"])),
+				cleanSearchText(openReviewString(note.Content["venueid"])),
+			)
 			year := extractPublicationYear(venue)
 			externalIDs := map[string]string{"OpenReview": forumID}
 			if doi := normalizeDOI(openReviewString(note.Content["doi"])); doi != "" {
@@ -213,14 +214,16 @@ func (s *SearchClient) searchOpenReview(
 				PublicationVenue: venue,
 				PublicationYear:  year,
 				URL:              "https://openreview.net/forum?id=" + url.QueryEscape(forumID),
-				Category:         venue,
-				Tags:             appendNonEmptyUnique(keywords, venue),
-				Source:           "openreview",
-				Sources:          []string{"openreview"},
-				ExternalIDs:      externalIDs,
-				PDFCandidates:    []string{"https://openreview.net/pdf?id=" + url.QueryEscape(forumID)},
-				Keywords:         keywords,
-				SourceLabel:      searchSourceReview,
+				// Venue is publication metadata, never a research direction or
+				// keyword. The strong model owns topic grouping later.
+				Category:      "",
+				Tags:          keywords,
+				Source:        "openreview",
+				Sources:       []string{"openreview"},
+				ExternalIDs:   externalIDs,
+				PDFCandidates: []string{"https://openreview.net/pdf?id=" + url.QueryEscape(forumID)},
+				Keywords:      keywords,
+				SourceLabel:   searchSourceReview,
 			})
 		}
 		if len(papers) == 0 {
@@ -228,6 +231,59 @@ func (s *SearchClient) searchOpenReview(
 		}
 		return papers, nil
 	}, onAttempt)
+}
+
+func normalizeOpenReviewVenue(venue, venueID string) string {
+	venue = strings.Join(strings.Fields(strings.TrimSpace(venue)), " ")
+	if venue != "" {
+		fields := strings.Fields(venue)
+		if len(fields) > 0 && strings.EqualFold(fields[0], "corr") {
+			fields[0] = "CoRR"
+			venue = strings.Join(fields, " ")
+		}
+		return venue
+	}
+
+	parts := strings.Split(strings.Trim(strings.TrimSpace(venueID), "/"), "/")
+	year := ""
+	name := ""
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || strings.EqualFold(part, "conference") || strings.EqualFold(part, "workshop") || strings.EqualFold(part, "journal") || strings.EqualFold(part, "venues") || strings.EqualFold(part, "events") {
+			continue
+		}
+		if strings.Contains(part, ".") {
+			// OpenReview venue IDs commonly start with ICLR.cc or
+			// NeurIPS.cc. Preserve the meaningful prefix instead of
+			// treating the whole domain as a venue name.
+			part = strings.TrimSpace(strings.SplitN(part, ".", 2)[0])
+			if part == "" {
+				continue
+			}
+		}
+		if len(part) == 4 {
+			if _, err := strconv.Atoi(part); err == nil {
+				year = part
+				continue
+			}
+		}
+		if name == "" {
+			name = part
+		}
+	}
+	if name == "" {
+		return ""
+	}
+	name = strings.ReplaceAll(name, "_", " ")
+	name = strings.ReplaceAll(name, "-", " ")
+	name = strings.Join(strings.Fields(name), " ")
+	if strings.EqualFold(name, "corr") {
+		name = "CoRR"
+	}
+	if year != "" {
+		return name + " " + year
+	}
+	return name
 }
 
 func (s *SearchClient) searchDBLP(
@@ -247,27 +303,20 @@ func (s *SearchClient) searchDBLP(
 		var payload struct {
 			Result struct {
 				Hits struct {
-					Hit []struct {
-						Info struct {
-							Authors json.RawMessage `json:"authors"`
-							Title   string          `json:"title"`
-							Venue   string          `json:"venue"`
-							Year    any             `json:"year"`
-							DOI     string          `json:"doi"`
-							URL     string          `json:"url"`
-							EE      json.RawMessage `json:"ee"`
-							Type    string          `json:"type"`
-						} `json:"info"`
-					} `json:"hit"`
+					Hit json.RawMessage `json:"hit"`
 				} `json:"hits"`
 			} `json:"result"`
 		}
 		if err := s.getSearchJSON(ctx, "https://dblp.org/search/publ/api?"+params.Encode(), &payload); err != nil {
 			return nil, err
 		}
+		hits, err := decodeDBLPHits(payload.Result.Hits.Hit)
+		if err != nil {
+			return nil, fmt.Errorf("decode DBLP hits: %w", err)
+		}
 
-		papers := make([]SearchPaper, 0, len(payload.Result.Hits.Hit))
-		for _, hit := range payload.Result.Hits.Hit {
+		papers := make([]SearchPaper, 0, len(hits))
+		for _, hit := range hits {
 			title := cleanSearchText(hit.Info.Title)
 			if title == "" {
 				continue
@@ -304,6 +353,39 @@ func (s *SearchClient) searchDBLP(
 		}
 		return papers, nil
 	}, onAttempt)
+}
+
+type dblpSearchHit struct {
+	Info struct {
+		Authors json.RawMessage `json:"authors"`
+		Title   string          `json:"title"`
+		Venue   string          `json:"venue"`
+		Year    any             `json:"year"`
+		DOI     string          `json:"doi"`
+		URL     string          `json:"url"`
+		EE      json.RawMessage `json:"ee"`
+		Type    string          `json:"type"`
+	} `json:"info"`
+}
+
+// DBLP's XML-to-JSON response uses an array for multiple hits but may encode
+// a single hit as an object. Accept both forms so one-result queries remain
+// successful instead of being reported as a source outage.
+func decodeDBLPHits(raw json.RawMessage) ([]dblpSearchHit, error) {
+	if strings.TrimSpace(string(raw)) == "" || strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+
+	var hits []dblpSearchHit
+	if err := json.Unmarshal(raw, &hits); err == nil {
+		return hits, nil
+	}
+
+	var hit dblpSearchHit
+	if err := json.Unmarshal(raw, &hit); err != nil {
+		return nil, err
+	}
+	return []dblpSearchHit{hit}, nil
 }
 
 func (s *SearchClient) getSearchJSON(ctx context.Context, requestURL string, target any) error {
@@ -752,6 +834,17 @@ func mergeSearchPaperMetadata(existing, candidate SearchPaper) SearchPaper {
 	if preferred.Category == "" {
 		preferred.Category = other.Category
 	}
+	if authorListScore(other.Authors) > authorListScore(preferred.Authors) {
+		preferred.Authors = other.Authors
+	}
+	if venue, year := chooseSearchPaperPublication(existing, candidate); venue != "" {
+		preferred.PublicationVenue = venue
+		preferred.Journal = venue
+		if year > 0 {
+			preferred.PublicationYear = year
+			preferred.Year = year
+		}
+	}
 	if other.CitationCount > preferred.CitationCount {
 		preferred.CitationCount = other.CitationCount
 	}
@@ -783,4 +876,87 @@ func mergeSearchPaperMetadata(existing, candidate SearchPaper) SearchPaper {
 	}
 	preferred.SourceLabel = strings.Join(labels, " + ")
 	return preferred
+}
+
+func chooseSearchPaperPublication(existing, candidate SearchPaper) (string, int) {
+	existingVenue := searchPaperPublicationVenue(existing)
+	candidateVenue := searchPaperPublicationVenue(candidate)
+	if existingVenue == "" {
+		return candidateVenue, searchPaperPublicationYear(candidate)
+	}
+	if candidateVenue == "" {
+		return existingVenue, searchPaperPublicationYear(existing)
+	}
+	if publicationVenueReliability(candidateVenue) > publicationVenueReliability(existingVenue) {
+		return candidateVenue, searchPaperPublicationYear(candidate)
+	}
+	return existingVenue, searchPaperPublicationYear(existing)
+}
+
+func searchPaperPublicationVenue(paper SearchPaper) string {
+	if venue := strings.TrimSpace(paper.PublicationVenue); venue != "" {
+		return venue
+	}
+	return strings.TrimSpace(paper.Journal)
+}
+
+func searchPaperPublicationYear(paper SearchPaper) int {
+	if paper.PublicationYear > 0 {
+		return paper.PublicationYear
+	}
+	return paper.Year
+}
+
+func authorListScore(authors string) int {
+	authors = strings.TrimSpace(authors)
+	if authors == "" {
+		return 0
+	}
+	parts := strings.FieldsFunc(authors, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	return len(parts)*100 + len([]rune(authors))
+}
+
+func publicationVenueReliability(value string) int {
+	value = normalizedDedupeToken(value)
+	if value == "" {
+		return 0
+	}
+	// Archive and review-state labels are useful provenance, but they must not
+	// displace an accepted conference/workshop or journal record for the same
+	// title.
+	for _, marker := range []string{"submitted", "under review", "rejected", "withdrawn", "desk rejected", "public article", "archive"} {
+		if strings.Contains(value, marker) {
+			return 2
+		}
+	}
+	if strings.HasPrefix(value, "corr ") || value == "corr" || strings.HasPrefix(value, "arxiv ") || value == "arxiv" {
+		return 8
+	}
+
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	knownVenues := map[string]struct{}{
+		"aaai": {}, "acl": {}, "aistats": {}, "corl": {}, "cvpr": {}, "eccv": {}, "emnlp": {},
+		"iccv": {}, "iclr": {}, "icml": {}, "icra": {}, "ijcai": {}, "iros": {}, "kdd": {},
+		"neurips": {}, "nips": {}, "naacl": {}, "rss": {}, "sigir": {}, "uai": {},
+	}
+	score := 10
+	if len(fields) > 0 {
+		if _, ok := knownVenues[fields[0]]; ok {
+			score += 30
+		}
+	}
+	for _, marker := range []string{"conference", "workshop", "poster", "regular", "oral", "spotlight", "accepted", "journal"} {
+		if strings.Contains(value, marker) {
+			score += 10
+			break
+		}
+	}
+	if strings.Contains(value, "submission") {
+		score -= 8
+	}
+	return score
 }

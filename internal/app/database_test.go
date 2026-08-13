@@ -550,6 +550,7 @@ func TestDeepStartEnrichmentCacheRoundTrip(t *testing.T) {
 
 	entry := &DeepStartEnrichmentCache{
 		CacheKey:          "test-key|2025",
+		Authors:           "Author One, Author Two",
 		Institutions:      []string{"CMU", "OpenAI"},
 		Keywords:          []string{"embodied", "agent"},
 		SourceLabel:       "arXiv",
@@ -577,6 +578,9 @@ func TestDeepStartEnrichmentCacheRoundTrip(t *testing.T) {
 	}
 	if loaded.SourceLabel != "arXiv" {
 		t.Fatalf("expected source label to round-trip, got %q", loaded.SourceLabel)
+	}
+	if loaded.Authors != entry.Authors {
+		t.Fatalf("expected authors to round-trip, got %q", loaded.Authors)
 	}
 	if loaded.PublicationVenue != "NeurIPS" || loaded.PublicationYear != 2025 || loaded.CitationCount != 123 {
 		t.Fatalf("expected publication metadata to round-trip, got %+v", loaded)

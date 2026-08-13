@@ -485,6 +485,9 @@ Rules:
 - Do not invent paper IDs. Only use IDs that exist in the provided results.
 - Prefer grouping by topicLabel/methodLabel/taskLabel/domainLabel when these fields are available.
 - Group the papers into meaningful directions or sub-topics.
+- Research directions must describe research content, methods, tasks, datasets, or benchmarks. Never use a venue, journal, repository, source name, year, or API status as a direction.
+- Treat publicationVenue, journal, year, authors, keywords, and source as metadata to display, not as research directions. Do not invent or correct those fields in the answer.
+- Base every direction assignment and paper note only on the supplied title, abstract, extracted fields, and explicit metadata.
 - Mark recommended papers with tier "core", "important", or "optional".
 - If the result set is weak or empty, explain that honestly and propose better follow-up questions and search queries.
 - Keep overviews and reasons concise but useful.
@@ -1027,6 +1030,9 @@ func normalizeDeepStartAnalysis(analysis DeepStartAnalysis, request DeepStartAIR
 	cleanDirections := make([]DeepStartDirection, 0, len(analysis.Directions))
 	seenDirectionIDs := make(map[string]struct{})
 	for index, direction := range analysis.Directions {
+		if isVenueLikeDeepStartDirection(direction.Name, request.Results) {
+			continue
+		}
 		directionID := strings.TrimSpace(direction.ID)
 		if directionID == "" {
 			directionID = fmt.Sprintf("direction-%d", index+1)
@@ -1044,6 +1050,10 @@ func normalizeDeepStartAnalysis(analysis DeepStartAnalysis, request DeepStartAIR
 			Why:      strings.TrimSpace(direction.Why),
 			PaperIDs: paperIDs,
 		})
+	}
+	validDirectionIDs := make(map[string]struct{}, len(cleanDirections))
+	for _, direction := range cleanDirections {
+		validDirectionIDs[direction.ID] = struct{}{}
 	}
 
 	cleanNotes := make([]DeepStartPaperNote, 0, len(analysis.PaperNotes))
@@ -1063,7 +1073,7 @@ func normalizeDeepStartAnalysis(analysis DeepStartAnalysis, request DeepStartAIR
 			if directionID == "" {
 				continue
 			}
-			if _, exists := seenDirectionIDs[directionID]; exists {
+			if _, exists := validDirectionIDs[directionID]; exists {
 				directionIDs = append(directionIDs, directionID)
 			}
 		}
@@ -1085,6 +1095,29 @@ func normalizeDeepStartAnalysis(analysis DeepStartAnalysis, request DeepStartAIR
 		RecommendedPaperIDs: filterExistingPaperIDs(analysis.RecommendedPaperIDs, validPaperIDs),
 		RetainedPaperIDs:    filterExistingPaperIDs(analysis.RetainedPaperIDs, validPaperIDs),
 	}
+}
+
+func isVenueLikeDeepStartDirection(name string, papers []SearchPaper) bool {
+	name = normalizedDedupeToken(name)
+	if name == "" {
+		return true
+	}
+	if extractPublicationYear(name) > 0 {
+		return true
+	}
+	for _, paper := range papers {
+		for _, metadata := range []string{paper.PublicationVenue, paper.Journal, paper.Category, paper.SourceLabel} {
+			if metadata != "" && name == normalizedDedupeToken(metadata) {
+				return true
+			}
+		}
+	}
+	for _, token := range []string{"corr", "arxiv", "openreview", "dblp", "iclr", "icml", "neurips", "nips", "rss", "icra", "iros", "corl", "aaai", "acl", "emnlp", "cvpr", "eccv", "iccv"} {
+		if name == token || strings.HasPrefix(name, token+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeDeepStartTitle(title, rootPrompt, currentQuery string) string {
@@ -1880,10 +1913,17 @@ func (s *SearchClient) retrySourceSearch(
 			if candidateCount <= 0 {
 				candidateCount = 1
 			}
-			if attempt >= candidateCount {
-				done = true
-				err = fmt.Errorf("no results after trying %d query variants", candidateCount)
+			if attempt >= candidateCount || attempt == s.retryMax {
+				// A successful provider response with no matching records is not a
+				// provider outage. Keep the source green with a zero count so the
+				// UI does not report "source unavailable" for a valid empty search.
+				log.Printf("[Search][%s] no papers matched after %d query variants", sourceName, attempt)
+				if onAttempt != nil {
+					onAttempt(sourceName, attempt, true, true, 0, nil)
+				}
+				return []SearchPaper{}, nil
 			}
+			done = false
 		} else if !isRetryableSearchError(err) {
 			done = true
 		}

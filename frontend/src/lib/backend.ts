@@ -40,7 +40,7 @@ import type {
   TranslationRecord,
 } from '../types';
 import { defaultConfig, defaultInitialState } from '../types';
-import { CanResolveFilePaths, EventsOn, ResolveFilePaths } from '../../wailsjs/runtime/runtime';
+import { BrowserOpenURL, CanResolveFilePaths, EventsOn, ResolveFilePaths } from '../../wailsjs/runtime/runtime';
 import { sanitizeUserVisibleError } from './errors';
 
 interface DiveEndWailsApp {
@@ -139,6 +139,7 @@ declare global {
       EventsOff(eventName: string, ...args: string[]): void;
       CanResolveFilePaths(): boolean;
       ResolveFilePaths(files: File[]): string[];
+      BrowserOpenURL(url: string): void;
     };
   }
 }
@@ -585,7 +586,12 @@ function normalizeExtractProgress(
     total: progress?.total ?? 0,
     completed: progress?.completed ?? 0,
     currentFile: progress?.currentFile ?? '',
-    status: progress?.status === 'completed' || progress?.status === 'error' ? progress.status : 'processing',
+    status:
+      progress?.status === 'completed' ||
+      progress?.status === 'cancelled' ||
+      progress?.status === 'error'
+        ? progress.status
+        : 'processing',
     errorMessage: sanitizeUserVisibleError(progress?.errorMessage ?? ''),
   };
 }
@@ -1957,6 +1963,18 @@ export function resolveFilePaths(files: File[]): string[] {
   }
 
   return (ResolveFilePaths(files) as unknown as string[]) ?? [];
+}
+
+export function openExternalURL(url: string): void {
+  const normalized = url.trim();
+  if (!/^https?:\/\//i.test(normalized)) {
+    throw new Error('外部链接格式无效');
+  }
+  if (hasWailsRuntime()) {
+    BrowserOpenURL(normalized);
+    return;
+  }
+  window.open(normalized, '_blank', 'noopener,noreferrer');
 }
 
 export function hasNativeFilePicker(): boolean {

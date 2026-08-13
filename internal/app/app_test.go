@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -26,6 +27,7 @@ type fakeWeakLLM struct {
 	summary        string
 	profile        *PaperProfileExtraction
 	rewrittenQuery []string
+	rewriteQueries map[string][]string
 	rewriteErr     error
 }
 
@@ -143,6 +145,7 @@ func (f fakeWeakLLM) ExtractPaperProfile(markdown string) (*PaperProfileExtracti
 	}
 	return &PaperProfileExtraction{
 		Title:                    "",
+		Authors:                  []string{"Extracted Author"},
 		Abstract:                 "",
 		Keywords:                 []string{"baseline"},
 		RelevanceTags:            []string{"survey"},
@@ -157,6 +160,9 @@ func (f fakeWeakLLM) ExtractPaperProfile(markdown string) (*PaperProfileExtracti
 func (f fakeWeakLLM) RewriteSearchQueries(query string) ([]string, error) {
 	if f.rewriteErr != nil {
 		return nil, f.rewriteErr
+	}
+	if rewritten, ok := f.rewriteQueries[query]; ok {
+		return append([]string{}, rewritten...), nil
 	}
 	if len(f.rewrittenQuery) > 0 {
 		return append([]string{}, f.rewrittenQuery...), nil
@@ -911,6 +917,12 @@ func TestAppDeepStartSessionFlow(t *testing.T) {
 			},
 		},
 	}
+	app.weakLLM = fakeWeakLLM{
+		rewriteQueries: map[string][]string{
+			"llm agents":           {"llm agents"},
+			"llm agents benchmark": {"llm agents benchmark"},
+		},
+	}
 
 	session, err := app.StartDeepStartSession("llm agents", folder.ID)
 	if err != nil {
@@ -1011,6 +1023,7 @@ func TestAppDeepStartReplyNarrowAndUndo(t *testing.T) {
 			},
 		},
 	}
+	app.weakLLM = fakeWeakLLM{rewrittenQuery: []string{"embodied intelligence"}}
 
 	session, err := app.StartDeepStartSession("embodied intelligence", "")
 	if err != nil {
@@ -1052,6 +1065,7 @@ func TestAppCancelDeepStartStartRollback(t *testing.T) {
 	blocking := &blockingSearch{started: make(chan struct{}, 1)}
 	app.search = blocking
 	app.llm = panicDeepStartLLM{}
+	app.weakLLM = fakeWeakLLM{rewrittenQuery: []string{"cancel me"}}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1132,6 +1146,7 @@ func TestAppCancelDeepStartRerunRollback(t *testing.T) {
 			},
 		},
 	}
+	app.weakLLM = fakeWeakLLM{rewrittenQuery: []string{"seed"}}
 
 	session, err := app.StartDeepStartSession("seed", "")
 	if err != nil {
@@ -1216,7 +1231,8 @@ func TestAppDeepStartUsesConfiguredResultLimitAndPersistsSearchStats(t *testing.
 		},
 	}
 	app.search = search
-	app.llm = nil
+	app.llm = fakeLLM{}
+	app.weakLLM = fakeWeakLLM{rewrittenQuery: []string{"embodied intelligence"}}
 
 	session, err := app.StartDeepStartSession("embodied intelligence", "")
 	if err != nil {
@@ -1352,6 +1368,7 @@ func TestAppReplyDeepStartSessionAppendsNarrowingSummary(t *testing.T) {
 			},
 		},
 	}
+	app.weakLLM = fakeWeakLLM{rewrittenQuery: []string{"vla"}}
 
 	session, err := app.StartDeepStartSession("vla", "")
 	if err != nil {
@@ -1367,7 +1384,7 @@ func TestAppReplyDeepStartSessionAppendsNarrowingSummary(t *testing.T) {
 	}
 }
 
-func TestAppDeepStartFallsBackWithoutLLM(t *testing.T) {
+func TestAppDeepStartRequiresLLM(t *testing.T) {
 	app := NewApp()
 	config := defaultAppConfig()
 	config.DataPath = t.TempDir()
@@ -1385,19 +1402,12 @@ func TestAppDeepStartFallsBackWithoutLLM(t *testing.T) {
 	}
 	app.llm = nil
 
-	session, err := app.StartDeepStartSession("world model", "")
-	if err != nil {
-		t.Fatalf("StartDeepStartSession() error = %v", err)
-	}
-	if session.CurrentAnalysis == nil {
-		t.Fatal("expected fallback analysis to be generated")
-	}
-	if session.CurrentAnalysis.Overview == "" {
-		t.Fatal("expected fallback overview to be populated")
+	if _, err := app.StartDeepStartSession("world model", ""); err == nil || !errors.Is(err, ErrDeepStartAIUnavailable) {
+		t.Fatalf("expected explicit AI unavailable error, got %v", err)
 	}
 }
 
-func TestAppDeepStartSkipsLLMWhenSearchFailsWithNoResults(t *testing.T) {
+func TestAppDeepStartReportsAIUnavailableWhenSearchFailsWithNoResults(t *testing.T) {
 	app := NewApp()
 	config := defaultAppConfig()
 	config.DataPath = t.TempDir()
@@ -1409,15 +1419,8 @@ func TestAppDeepStartSkipsLLMWhenSearchFailsWithNoResults(t *testing.T) {
 	app.search = &fakeSearch{results: map[string][]SearchPaper{}}
 	app.llm = panicDeepStartLLM{}
 
-	session, err := app.StartDeepStartSession("embodied intelligence", "")
-	if err != nil {
-		t.Fatalf("StartDeepStartSession() error = %v", err)
-	}
-	if session.CurrentAnalysis == nil {
-		t.Fatal("expected fallback analysis to be present")
-	}
-	if !strings.Contains(session.CurrentAnalysis.Overview, "暂时没有检索到稳定结果") {
-		t.Fatalf("expected search failure warning in overview, got %q", session.CurrentAnalysis.Overview)
+	if _, err := app.StartDeepStartSession("embodied intelligence", ""); err == nil || !errors.Is(err, ErrDeepStartAIUnavailable) {
+		t.Fatalf("expected explicit AI unavailable error, got %v", err)
 	}
 }
 

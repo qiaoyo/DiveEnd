@@ -15,6 +15,15 @@ const deepStartBatchDefaultPerSourceLimit = 20
 const deepStartInitialReadyLimit = 20
 const deepStartEagerPreprocessLimit = 4
 
+var ErrDeepStartAIUnavailable = errors.New("DeepStart AI unavailable")
+
+func deepStartAIUnavailableError(stage string, err error) error {
+	if err == nil {
+		return fmt.Errorf("%w: %s", ErrDeepStartAIUnavailable, stage)
+	}
+	return fmt.Errorf("%w: %s: %v", ErrDeepStartAIUnavailable, stage, err)
+}
+
 var deepStartCacheNamePattern = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 type deepStartBatchStats struct {
@@ -99,39 +108,12 @@ func fillSearchPaperClassification(paper *SearchPaper, profile *PaperProfileExtr
 		return
 	}
 
-	keywordFallback := func(defaultValue string) string {
-		defaultValue = strings.TrimSpace(defaultValue)
-		if defaultValue != "" {
-			return defaultValue
-		}
-		if len(paper.Keywords) > 0 {
-			return strings.TrimSpace(paper.Keywords[0])
-		}
-		if len(paper.Tags) > 0 {
-			return strings.TrimSpace(paper.Tags[0])
-		}
-		return ""
-	}
-
 	if profile != nil {
-		paper.TopicLabel = keywordFallback(profile.TopicLabel)
-		paper.MethodLabel = keywordFallback(profile.MethodLabel)
-		paper.TaskLabel = keywordFallback(profile.TaskLabel)
-		paper.DomainLabel = keywordFallback(profile.DomainLabel)
+		paper.TopicLabel = strings.TrimSpace(profile.TopicLabel)
+		paper.MethodLabel = strings.TrimSpace(profile.MethodLabel)
+		paper.TaskLabel = strings.TrimSpace(profile.TaskLabel)
+		paper.DomainLabel = strings.TrimSpace(profile.DomainLabel)
 		paper.ClassificationConfidence = profile.ClassificationConfidence
-	}
-
-	if strings.TrimSpace(paper.TopicLabel) == "" {
-		paper.TopicLabel = keywordFallback(paper.Category)
-	}
-	if strings.TrimSpace(paper.MethodLabel) == "" {
-		paper.MethodLabel = keywordFallback(paper.Method)
-	}
-	if strings.TrimSpace(paper.TaskLabel) == "" {
-		paper.TaskLabel = keywordFallback(paper.Problem)
-	}
-	if strings.TrimSpace(paper.DomainLabel) == "" {
-		paper.DomainLabel = keywordFallback(paper.Journal)
 	}
 
 	paper.TopicLabel = strings.TrimSpace(paper.TopicLabel)
@@ -139,14 +121,6 @@ func fillSearchPaperClassification(paper *SearchPaper, profile *PaperProfileExtr
 	paper.TaskLabel = strings.TrimSpace(paper.TaskLabel)
 	paper.DomainLabel = strings.TrimSpace(paper.DomainLabel)
 
-	if paper.ClassificationConfidence <= 0 {
-		if strings.TrimSpace(paper.TopicLabel) != "" ||
-			strings.TrimSpace(paper.MethodLabel) != "" ||
-			strings.TrimSpace(paper.TaskLabel) != "" ||
-			strings.TrimSpace(paper.DomainLabel) != "" {
-			paper.ClassificationConfidence = 0.55
-		}
-	}
 	if paper.ClassificationConfidence < 0 {
 		paper.ClassificationConfidence = 0
 	}
@@ -201,7 +175,18 @@ func (a *App) preprocessDeepStartResults(
 	papers []SearchPaper,
 	stats SearchRetrievalStats,
 ) ([]SearchPaper, deepStartBatchStats, error) {
-	eagerPapers, deferredPapers := splitDeepStartEagerPreprocess(papers, deepStartEagerPreprocessLimit)
+	return a.preprocessDeepStartResultsWithLimit(ctx, sessionID, startedAt, papers, stats, deepStartEagerPreprocessLimit)
+}
+
+func (a *App) preprocessDeepStartResultsWithLimit(
+	ctx context.Context,
+	sessionID string,
+	startedAt time.Time,
+	papers []SearchPaper,
+	stats SearchRetrievalStats,
+	eagerLimit int,
+) ([]SearchPaper, deepStartBatchStats, error) {
+	eagerPapers, deferredPapers := splitDeepStartEagerPreprocess(papers, eagerLimit)
 	batch := deepStartBatchStats{
 		Total: len(eagerPapers),
 	}
@@ -234,6 +219,9 @@ func (a *App) preprocessDeepStartResults(
 		)
 		if err != nil {
 			return processed, batch, err
+		}
+		if weak == nil {
+			return processed, batch, deepStartAIUnavailableError("弱模型未初始化，无法完成论文信息抽取", nil)
 		}
 
 		paper.PreprocessStatus = "pending"
@@ -407,19 +395,6 @@ func (a *App) preprocessDeepStartResults(
 		paper.Title = firstNonBlankString(strings.TrimSpace(paper.Title), metadataString(parseResult.Metadata, "title"))
 		paper.ProcessingStage = "parsing"
 
-		if weak == nil {
-			paper.ExtractStatus = "skipped"
-			paper.ExtractError = "weak llm unavailable"
-			paper.PreprocessStatus = "parsed"
-			fillSearchPaperClassification(&paper, nil)
-			paper.ProcessingStage = "ready"
-			paper.ProcessingError = ""
-			batch.Success++
-			batch.Completed++
-			processed = append(processed, paper)
-			continue
-		}
-
 		a.emitDeepStartBatchProgress(
 			sessionID,
 			"weak_extracting",
@@ -441,16 +416,19 @@ func (a *App) preprocessDeepStartResults(
 			paper.ProcessingStage = "failed"
 			paper.ProcessingError = err.Error()
 			processed = append(processed, paper)
-			continue
+			return processed, batch, deepStartAIUnavailableError("弱模型论文信息抽取失败", err)
 		}
 
 		paper.Title = firstNonBlankString(strings.TrimSpace(profile.Title), strings.TrimSpace(paper.Title))
+		if strings.TrimSpace(paper.Authors) == "" {
+			paper.Authors = strings.Join(compactStrings(profile.Authors, 32), ", ")
+		}
 		if strings.TrimSpace(paper.Abstract) == "" {
 			paper.Abstract = strings.TrimSpace(profile.Abstract)
 		}
 		paper.Problem = strings.TrimSpace(profile.Problem)
 		paper.Method = strings.TrimSpace(profile.Method)
-		paper.Keywords = uniqueStrings(append(paper.Keywords, profile.Keywords...))
+		paper.Keywords = buildPaperKeywords(paper, stats.Query, append(paper.Keywords, profile.Keywords...))
 		paper.Tags = uniqueStrings(append(paper.Tags, profile.RelevanceTags...))
 		fillSearchPaperClassification(&paper, profile)
 		paper.ExtractStatus = "success"
@@ -630,28 +608,59 @@ func deepStartCachePaperID(paper SearchPaper, idx int) string {
 }
 
 func mergeSearchPaperPools(existing []SearchPaper, added []SearchPaper) []SearchPaper {
-	merged := make(map[string]SearchPaper, len(existing)+len(added))
-	order := make([]string, 0, len(existing)+len(added))
+	groups := make([]SearchPaper, 0, len(existing)+len(added))
+	active := make([]bool, 0, len(existing)+len(added))
+	aliases := make(map[string]int, (len(existing)+len(added))*2)
 	appendPaper := func(paper SearchPaper) {
-		key := dedupeSearchPaperKey(paper)
-		if key == "" {
-			key = strings.TrimSpace(paper.ID)
-		}
-		if key == "" {
-			key = strings.TrimSpace(paper.URL)
-		}
-		if key == "" {
-			key = fmt.Sprintf("fallback-%d", len(order)+1)
+		keys := dedupeSearchPaperKeys(paper)
+		if len(keys) == 0 {
+			if value := strings.TrimSpace(paper.ID); value != "" {
+				keys = []string{"id|" + value}
+			} else if value := strings.TrimSpace(paper.URL); value != "" {
+				keys = []string{"url|" + normalizedDedupeToken(value)}
+			} else {
+				keys = []string{fmt.Sprintf("pool-fallback-%d", len(groups)+1)}
+			}
 		}
 
-		if prev, ok := merged[key]; ok {
-			if deepStartPaperPoolScore(paper) > deepStartPaperPoolScore(prev) {
-				merged[key] = paper
+		matched := make(map[int]struct{})
+		for _, key := range keys {
+			if index, ok := aliases[key]; ok && index < len(active) && active[index] {
+				matched[index] = struct{}{}
+			}
+		}
+		if len(matched) == 0 {
+			index := len(groups)
+			groups = append(groups, normalizeSearchPaperProvenance(paper))
+			active = append(active, true)
+			for _, key := range keys {
+				aliases[key] = index
 			}
 			return
 		}
-		merged[key] = paper
-		order = append(order, key)
+
+		indices := make([]int, 0, len(matched))
+		for index := range matched {
+			indices = append(indices, index)
+		}
+		sort.Ints(indices)
+		target := indices[0]
+		groups[target] = mergeSearchPaperMetadata(groups[target], paper)
+		for _, index := range indices[1:] {
+			groups[target] = mergeSearchPaperMetadata(groups[target], groups[index])
+			active[index] = false
+		}
+		for key, index := range aliases {
+			for _, mergedIndex := range indices[1:] {
+				if index == mergedIndex {
+					aliases[key] = target
+					break
+				}
+			}
+		}
+		for _, key := range dedupeSearchPaperKeys(groups[target]) {
+			aliases[key] = target
+		}
 	}
 
 	for _, paper := range existing {
@@ -661,9 +670,11 @@ func mergeSearchPaperPools(existing []SearchPaper, added []SearchPaper) []Search
 		appendPaper(paper)
 	}
 
-	result := make([]SearchPaper, 0, len(order))
-	for _, key := range order {
-		result = append(result, merged[key])
+	result := make([]SearchPaper, 0, len(groups))
+	for index, paper := range groups {
+		if active[index] {
+			result = append(result, paper)
+		}
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		return result[i].Year > result[j].Year
@@ -772,10 +783,13 @@ func (a *App) SupplementDeepStartSearch(sessionID, query string, perSourceLimit 
 		}
 	}
 
-	processed, batch, batchErr := a.preprocessDeepStartResults(taskCtx, sessionID, startedAt, added, searchStats)
+	processed, batch, batchErr := a.preprocessDeepStartResultsWithLimit(taskCtx, sessionID, startedAt, added, searchStats, len(added))
 	if batchErr != nil {
 		if isDeepStartCancelledError(batchErr) || isDeepStartCancelledError(taskCtx.Err()) {
 			return nil, abortIfCancelled("补充检索已停止，原会话保持不变", &searchStats)
+		}
+		if errors.Is(batchErr, ErrDeepStartAIUnavailable) {
+			return nil, deepStartAIUnavailableError("补充检索的 AI 处理失败", batchErr)
 		}
 		if strings.TrimSpace(searchWarning) == "" {
 			searchWarning = fmt.Sprintf("补充批处理阶段发生部分失败：%v", batchErr)
@@ -819,7 +833,7 @@ func (a *App) SupplementDeepStartSearch(sessionID, query string, perSourceLimit 
 		Stats:                     &searchStats,
 	})
 
-	analysisTitle, analysis, assistantContent := a.generateDeepStartAnalysis(
+	analysisTitle, analysis, assistantContent, analysisErr := a.generateDeepStartAnalysis(
 		taskCtx,
 		detail.Summary,
 		messages,
@@ -828,6 +842,9 @@ func (a *App) SupplementDeepStartSearch(sessionID, query string, perSourceLimit 
 		searchWarning,
 		searchStats,
 	)
+	if analysisErr != nil {
+		return nil, deepStartAIUnavailableError("强模型分析失败", analysisErr)
+	}
 	detail.Summary.Title = analysisTitle
 	detail.CurrentAnalysis = analysis
 

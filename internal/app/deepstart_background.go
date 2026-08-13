@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -72,10 +73,26 @@ func (a *App) runDeepStartBackgroundProcessing(
 		processed := enriched
 		batch := deepStartBatchStats{Total: len(enriched), Completed: 0}
 		if len(enriched) > 0 {
-			results, batchStats, batchErr := a.preprocessDeepStartResults(taskCtx, sessionID, startedAt, enriched, searchStats)
+			results, batchStats, batchErr := a.preprocessDeepStartResultsWithLimit(taskCtx, sessionID, startedAt, enriched, searchStats, len(enriched))
 			batch = batchStats
 			if isDeepStartCancelledError(batchErr) || isDeepStartCancelledError(taskCtx.Err()) {
 				abortIfCancelled("后台批处理已停止，本次补充未写入会话")
+				return
+			}
+			if errors.Is(batchErr, ErrDeepStartAIUnavailable) {
+				a.emitDeepStartProgress(DeepStartProgressEvent{
+					SessionID:                 sessionID,
+					Phase:                     "failed",
+					Message:                   fmt.Sprintf("后台 AI 补全失败，未合并半成品：%s", trimErrorForProgress(batchErr)),
+					ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
+					EstimatedRemainingSeconds: 0,
+					Total:                     len(enriched),
+					Completed:                 batch.Completed,
+					OverallPercent:            100,
+					FailedCount:               batch.Failed,
+					Stats:                     &searchStats,
+				})
+				_ = a.markDeepStartBackgroundFailed(sessionID)
 				return
 			}
 			if batchErr == nil {
@@ -91,8 +108,8 @@ func (a *App) runDeepStartBackgroundProcessing(
 		if err := a.mergeDeepStartBackgroundResults(sessionID, processed); err != nil {
 			a.emitDeepStartProgress(DeepStartProgressEvent{
 				SessionID:                 sessionID,
-				Phase:                     "background_processing",
-				Message:                   fmt.Sprintf("后台合并结果失败：%v", err),
+				Phase:                     "failed",
+				Message:                   fmt.Sprintf("后台合并结果失败，候选池未更新：%s", trimErrorForProgress(err)),
 				ElapsedSeconds:            int(time.Since(startedAt).Seconds()),
 				EstimatedRemainingSeconds: 0,
 				Total:                     len(processed),
@@ -104,7 +121,7 @@ func (a *App) runDeepStartBackgroundProcessing(
 				BackgroundCompleted:       batch.Completed,
 				Stats:                     &searchStats,
 			})
-			_ = a.markDeepStartBackgroundComplete(sessionID, 0, false)
+			_ = a.markDeepStartBackgroundFailed(sessionID)
 			return
 		}
 
@@ -182,6 +199,20 @@ func (a *App) markDeepStartBackgroundComplete(sessionID string, backgroundRemain
 	if !preserveProcessing {
 		detail.Summary.ProcessingStatus = "completed"
 	}
+	detail.Summary.UpdatedAt = time.Now()
+	if detail.Summary.TotalPlannedCount < detail.Summary.InitialReadyCount {
+		detail.Summary.TotalPlannedCount = detail.Summary.InitialReadyCount
+	}
+	return a.db.UpsertDeepStartSession(detail)
+}
+
+func (a *App) markDeepStartBackgroundFailed(sessionID string) error {
+	detail, err := a.db.GetDeepStartSession(sessionID)
+	if err != nil {
+		return err
+	}
+	detail.Summary.BackgroundRemaining = 0
+	detail.Summary.ProcessingStatus = "failed"
 	detail.Summary.UpdatedAt = time.Now()
 	if detail.Summary.TotalPlannedCount < detail.Summary.InitialReadyCount {
 		detail.Summary.TotalPlannedCount = detail.Summary.InitialReadyCount

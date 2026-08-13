@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Cloud, RefreshCw, ShieldAlert } from 'lucide-react';
 import type { DatabaseRestoreStatus, SyncConflict, SyncPreview, SyncProgress, SyncRecord, SyncSettings, SyncStatus } from '../types';
 import * as backend from '../lib/backend';
@@ -127,32 +127,60 @@ export const Sync: React.FC = () => {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const syncLoadVersionRef = useRef(0);
+  const syncLoadPromiseRef = useRef<Promise<string[]> | null>(null);
 
-  const loadSyncState = async (): Promise<string[]> => {
-    const [status, progress, conflicts, records, settings, restore] = await Promise.allSettled([
-      backend.getSyncStatus(),
-      backend.getSyncProgress(),
-      backend.getSyncConflicts(),
-      backend.getSyncRecords(30),
-      backend.getSyncSettings(),
-      backend.getPendingDatabaseRestore(),
-    ] as const);
+  const loadSyncState = (): Promise<string[]> => {
+    if (syncLoadPromiseRef.current) {
+      return syncLoadPromiseRef.current;
+    }
 
-    if (status.status === 'fulfilled') setSyncStatus(status.value);
-    if (progress.status === 'fulfilled') setSyncProgress(progress.value);
-    if (conflicts.status === 'fulfilled') setSyncConflicts(conflicts.value);
-    if (records.status === 'fulfilled') setSyncHistory(records.value);
-    if (settings.status === 'fulfilled') setSyncSettings(settings.value);
-    if (restore.status === 'fulfilled') setDatabaseRestore(restore.value);
+    const loadVersion = ++syncLoadVersionRef.current;
+    const request = (async () => {
+      const [status, progress, conflicts, records, settings, restore] = await Promise.allSettled([
+        backend.getSyncStatus(),
+        backend.getSyncProgress(),
+        backend.getSyncConflicts(),
+        backend.getSyncRecords(30),
+        backend.getSyncSettings(),
+        backend.getPendingDatabaseRestore(),
+      ] as const);
 
-    return [
-      status.status === 'rejected' ? '连接状态' : '',
-      progress.status === 'rejected' ? '同步进度' : '',
-      conflicts.status === 'rejected' ? '冲突列表' : '',
-      records.status === 'rejected' ? '同步记录' : '',
-      settings.status === 'rejected' ? '自动同步设置' : '',
-      restore.status === 'rejected' ? '数据库恢复状态' : '',
-    ].filter(Boolean);
+      if (loadVersion !== syncLoadVersionRef.current) {
+        return [];
+      }
+
+      if (status.status === 'fulfilled') setSyncStatus(status.value);
+      if (progress.status === 'fulfilled') setSyncProgress(progress.value);
+      if (conflicts.status === 'fulfilled') setSyncConflicts(conflicts.value);
+      if (records.status === 'fulfilled') setSyncHistory(records.value);
+      if (settings.status === 'fulfilled') setSyncSettings(settings.value);
+      if (restore.status === 'fulfilled') setDatabaseRestore(restore.value);
+
+      return [
+        status.status === 'rejected' ? '连接状态' : '',
+        progress.status === 'rejected' ? '同步进度' : '',
+        conflicts.status === 'rejected' ? '冲突列表' : '',
+        records.status === 'rejected' ? '同步记录' : '',
+        settings.status === 'rejected' ? '自动同步设置' : '',
+        restore.status === 'rejected' ? '数据库恢复状态' : '',
+      ].filter(Boolean);
+    })();
+
+    syncLoadPromiseRef.current = request;
+    void request.then(
+      () => {
+        if (syncLoadPromiseRef.current === request) {
+          syncLoadPromiseRef.current = null;
+        }
+      },
+      () => {
+        if (syncLoadPromiseRef.current === request) {
+          syncLoadPromiseRef.current = null;
+        }
+      },
+    );
+    return request;
   };
 
   useEffect(() => {
@@ -607,7 +635,7 @@ export const Sync: React.FC = () => {
               </div>
 
               {(syncStatus.syncInProgress || syncProgress.currentFile || syncProgress.message) && (
-                <div className="mt-4 border-y border-[var(--de-rule)] p-3">
+                <div className="mt-4 border-y border-[var(--de-rule)] p-3" aria-live="polite">
                   <div className="flex items-center justify-between text-xs text-[var(--de-ink-muted)]">
                     <span>{syncProgress.message || syncProgress.currentFile || '准备中'}</span>
                     <span>{syncProgress.completed}/{syncProgress.total}</span>

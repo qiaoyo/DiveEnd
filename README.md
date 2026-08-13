@@ -6,19 +6,19 @@ DiveEnd 是一个本地优先的论文研究工作台，用 Wails 桌面壳把 R
 
 ## 当前状态
 
-更新时间：2026-08-05
+更新时间：2026-08-10
 
 项目已完成 Phase 1-6 的功能骨架，并完成一轮 P0-P3 code review remediation。当前阶段是可靠性、真实环境验收、发布安全和体验打磨。
 
 已落地的主流程：
 
-- **DeepStart**：自然语言输入研究方向，对每个原始/改写 query 并行检索 OpenAlex、arXiv、OpenReview 和 DBLP，再按 DOI、arXiv ID、OpenReview forum 和规范化题名合并版本，使用统一的短语/词项覆盖、元数据质量、来源一致性、引用与时间信号过滤排序。所有主题使用同一套来源和规则，默认收敛到约 20 篇高相关候选；只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
+- **DeepStart**：自然语言输入研究方向，对每个原始/改写 query 并行检索 OpenAlex、Semantic Scholar、arXiv、OpenReview 和 DBLP，再按 DOI、arXiv ID、OpenReview forum 和规范化题名合并版本，使用统一的短语/词项覆盖、元数据质量、来源一致性、引用与时间信号过滤排序。所有主题使用同一套来源和规则，默认收敛到约 20 篇高相关候选；只为排名最前的 4 篇预取和结构抽取，其余候选按需处理。
 - **Screening**：批量选择本地 PDF，复制到 DiveEnd managed data 目录，调用 PDF service 解析，再用 LLM 决策树逐轮筛选并导入选中论文；抽取、首次分析和后续决策均可非破坏性停止，节点、路径和论文状态以 SQLite 事务一次提交，取消或模型失败不会留下半完成选择。分析页列出最近的本地会话，可恢复提取、筛选或已入库状态且不会自动重跑模型。
 - **DeepRead**：按文库论文打开阅读区，加载 managed PDF，解析章节，保存翻译、摘要和笔记；低延迟问答优先走弱模型，全文总结走强模型，二者都只保留能在已解析章节中逐字验证的依据。长论文上下文按问题相关性和核心章节公平分配，AI 请求可主动取消。PDF 优先通过 Wails asset server 同源 URL 加载，大文件避免全量 base64。
 - **Sync**：Google Drive 主同步、百度云 fallback，同步本地 SQLite 快照和 managed PDF。数据库同步使用 staging、manifest、稳定 remote keys、冲突检测和恢复向导，而不是直接上传 live DB；同步工作台使用统一中文操作语义，集中呈现 provider 预检、进度、历史、冲突和自动化设置。
 - **Library**：右侧论文库支持文件夹树、创建、删除、重命名、移动、单篇移动、批量移动，并同步维护 managed PDF 路径和 DeepRead cache。
 - **安全与可靠性**：配置和 token 脱敏、用户可见错误脱敏、context cancellation、覆盖 Go 与 Python 抽取链路的每日共享 LLM token 硬预算、PDF/URL 边界校验、symlink 防护、原子文件写入、同步进度事件和大量回归测试已落地。
-- **当前信息架构**：一级任务收敛为“发现 / 阅读 / 分析”，研究记录、同步和设置作为工具入口；检索页不再展示伪造预览数据，阅读页默认提供可收起论文库的专注三栏工作区。
+- **当前信息架构**：启动默认进入研究首页，一级任务收敛为“发现 / 阅读 / 分析”，研究记录、同步和设置作为可重复点击收起的工具入口，主题切换位于右上角；检索页不再展示伪造预览数据，阅读页默认提供可收起论文库的专注三栏工作区。
 
 ## 架构
 
@@ -67,6 +67,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 - [docs/PAPER_SEARCH_SOURCE_EVALUATION.md](docs/PAPER_SEARCH_SOURCE_EVALUATION.md): tested academic search sources, agent tools, integration roles, and account prerequisites.
 - [docs/GOOGLE_DRIVE_SYNC_SETUP.md](docs/GOOGLE_DRIVE_SYNC_SETUP.md): Google Cloud OAuth client setup, local authorization, provider fallback policy, and troubleshooting.
 - [docs/AUTONOMOUS_DEVELOPMENT_SETUP.md](docs/AUTONOMOUS_DEVELOPMENT_SETUP.md): responsibility boundaries, design decisions, account prerequisites, and the long-running autonomous development loop.
+- [docs/USER_ACCEPTANCE_MANUAL.md](docs/USER_ACCEPTANCE_MANUAL.md): real-user full workflow acceptance, failure recovery, and developer verification procedures.
 - [docs/superpowers/plans/2026-06-10-code-review-remediation.md](docs/superpowers/plans/2026-06-10-code-review-remediation.md): detailed remediation record.
 - [docs/superpowers/plans/2026-06-11-secret-history-remediation.md](docs/superpowers/plans/2026-06-11-secret-history-remediation.md): Git history secret cleanup plan.
 - `docs/superpowers/specs/*` and older `docs/superpowers/plans/*`: historical design and implementation plans. Treat them as background unless they conflict with `README.md`, `AGENTS.md`, or `docs/PROJECT_MAP.md`.
@@ -77,7 +78,7 @@ Important correction for older docs: the current PDF service uses **PyMuPDF4LLM/
 - Packaged-window Computer Use passed on 2026-07-31: a real DeepStart run received live progress events and completed a 20-paper research map; DeepRead loaded a 10-page PDF and returned a grounded answer with three source excerpts; Sync and Settings loaded real backend state.
 - Real Baidu Cloud sync passed an authorized upload/list/download/cleanup E2E on 2026-07-30, including automatic refresh and secure persistence of an expired access token.
 - Google Drive sync code, OAuth loopback authorization, resumable uploads, atomic downloads, token refresh persistence, and Baidu fallback are implemented; real Google Drive E2E awaits the Desktop OAuth client JSON and browser authorization.
-- Semantic Scholar is disabled and its local key is intentionally empty. OpenAlex, arXiv, OpenReview and DBLP now provide the default retrieval path; each source degrades independently.
+- Semantic Scholar 已配置本地 key 并纳入默认检索源；2026-08-07 的直接 smoke test 返回 `200`，客户端在一次 `429` 后按退避策略重试成功。OpenAlex、Semantic Scholar、arXiv、OpenReview 和 DBLP 使用同一套通用检索与过滤流程，各来源独立降级。
 - GitHub SSH read/write and authenticated `gh` API access are available for `qiaoyo/DiveEnd`; the current account has `ADMIN` repository permission.
 - DeepRead can still be improved with finer page-level cache/prefetch, PDF 页码级证据定位、跨论文对比和更好的长文档导航。
 - High-DPI polish remains useful; library, sync, and settings have completed the current shared-token cleanup, and the main workflows pass narrow-window smoke coverage.
@@ -231,12 +232,12 @@ Passed:
 - Opt-in PDF extraction E2E (`DIVEEND_REAL_PDF_EXTRACTION_E2E=1`) verifies managed service startup, real parsing/extraction, provider usage reporting, and exact shared-budget settlement.
 - Real Baidu upload/list/download/cleanup E2E with automatic OAuth refresh persistence.
 - Browser and real-backend E2E through search degradation, focused 20-paper discovery, top-4 PDF preprocessing, AI map generation, DeepRead PDF display, Screening decisions, and sync workflows.
-- Browser UI smoke covers 24 visible states across discovery, reading, screening, and sync at 1440, 900, and 720 px widths with no console errors; the narrow runs assert zero page-level horizontal overflow before every screenshot.
+- Browser UI smoke covers 25 visible states across the home dashboard, discovery, reading, screening, and sync at 1440, 900, and 720 px widths with no console errors; the narrow runs assert zero page-level horizontal overflow before every screenshot.
 - Packaged Wails build and managed PDF-service startup/shutdown lifecycle.
 - Direct packaged-window Computer Use: real DeepStart progress events and completed research map, DeepRead 10-page PDF rendering and grounded weak-model Q&A, Baidu Sync state, and Settings budget/provider state.
 
 Notes:
 
 - `npm audit --omit=dev` reports the React Router RSC-mode advisory against `react-router@7.18.2`. DiveEnd uses a client-only `HashRouter` and does not use RSC; the currently published `react-router-dom` line has no version that clears this advisory without a React 19/Router 8 migration. Keep this scoped exception under review.
-- The configured OpenAlex key passed a real skill rate-limit probe and product retrieval E2E. Semantic Scholar remains disabled until a future need justifies obtaining a replacement key.
+- The configured OpenAlex key passed a real skill rate-limit probe and product retrieval E2E. Semantic Scholar is enabled by default with the locally configured key; its direct smoke test and client-side retry behavior have passed, while the key remains local-only and is never committed.
 - Workspace pages now load by route: the common entry bundle is about 236 KiB before gzip, while the roughly 407 KiB PDF reader chunk loads only when DeepRead is opened.

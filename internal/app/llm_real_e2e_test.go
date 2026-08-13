@@ -11,20 +11,24 @@ func TestRealStrongAndWeakLLMBudgetE2E(t *testing.T) {
 		t.Skip("set DIVEEND_REAL_LLM_E2E=1 to run against configured strong and weak LLM providers")
 	}
 
-	strongSeed, ok := readStrongLLMSeed()
-	if !ok {
-		t.Fatal("config/strong_llm.json is unavailable or incomplete")
+	config, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("load configured LLMs: %v", err)
 	}
-	weakSeed, ok := readWeakLLMSeed()
-	if !ok {
-		t.Fatal("config/weak_llm.json is unavailable or incomplete")
+	config = normalizeAppConfig(config)
+	if isVolcengineBaseURL(config.LLM.BaseURL) && config.LLM.WireAPI != "chat_completions" {
+		t.Fatalf("strong Volcengine config selected the wrong wire API: %q", config.LLM.WireAPI)
 	}
+	if isVolcengineBaseURL(config.WeakLLM.BaseURL) && config.WeakLLM.WireAPI != "chat_completions" {
+		t.Fatalf("weak Volcengine config selected the wrong wire API: %q", config.WeakLLM.WireAPI)
+	}
+	t.Logf("configured LLM routes: strong=%s/%s weak=%s/%s", config.LLM.ProviderName, config.LLM.WireAPI, config.WeakLLM.ProviderName, config.WeakLLM.WireAPI)
 
 	dataPath := t.TempDir()
 	budget := newDailyTokenBudget(dataPath, defaultDailyLLMTokenBudget)
 	clients := []*LLMClient{
-		newLLMClientFromConfig(llmConfigFromSeed(strongSeed)),
-		newLLMClientFromConfig(llmConfigFromSeed(weakSeed)),
+		NewStrongLLMClient(config),
+		NewWeakLLMClient(config),
 	}
 	for _, client := range clients {
 		client.tokenBudget = budget

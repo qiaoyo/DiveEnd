@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Save,
   Square,
-  SunMoon,
 } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -30,7 +29,6 @@ import {
   retryFolderPendingDownloads,
   retryPaperDownload,
   retryPaperDownloadWithURL,
-  saveConfig,
   saveDeepReadNote,
   selectAndAttachPaperPDF,
   translatePaperSection,
@@ -158,20 +156,17 @@ function queryTokens(query: string): string[] {
 export function DeepReadPanel() {
   const {
     activeFolderId,
-    config,
     folders,
     isTranslating,
     papers,
     prependTranslation,
     selectedPaper,
     setActiveFolderId,
-    setConfig,
     setError,
     setFolders,
     setIsTranslating,
     setPapers,
     setSelectedPaper,
-    theme,
   } = useAppStore();
 
   const [folderTree, setFolderTree] = useState<FolderNode[]>([]);
@@ -189,7 +184,6 @@ export function DeepReadPanel() {
   const [originalText, setOriginalText] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
-  const [switchingTheme, setSwitchingTheme] = useState(false);
   const [pageNumber, setPageNumber] = useState(1);
   const [numPages, setNumPages] = useState(0);
   const [pdfZoom, setPDFZoom] = useState(0.9);
@@ -210,6 +204,7 @@ export function DeepReadPanel() {
   const manualURLInputRef = useRef<HTMLInputElement | null>(null);
   const pdfViewportRef = useRef<HTMLDivElement | null>(null);
   const aiRequestGenerationRef = useRef(0);
+  const folderLoadGenerationRef = useRef(0);
   const pdfPageRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const sections = deepReadState?.sections ?? [];
@@ -313,7 +308,11 @@ export function DeepReadPanel() {
   };
 
   const loadFolderPapers = async (folderId: string, preserveSelection = true): Promise<Paper[]> => {
+    const requestGeneration = ++folderLoadGenerationRef.current;
     const nextPapers = await getPapers(folderId);
+    if (requestGeneration !== folderLoadGenerationRef.current) {
+      return [];
+    }
     setActiveFolderId(folderId);
     setPapers(nextPapers);
 
@@ -415,10 +414,10 @@ export function DeepReadPanel() {
       void getPapers(activeFolderId)
         .then((nextPapers) => {
           setPapers(nextPapers);
-          if (!selectedPaper) {
+          if (!selectedPaperId) {
             return;
           }
-          const matched = nextPapers.find((paper) => paper.id === selectedPaper.id);
+          const matched = nextPapers.find((paper) => paper.id === selectedPaperId);
           if (matched) {
             setSelectedPaper(matched);
           }
@@ -429,7 +428,7 @@ export function DeepReadPanel() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [activeFolderId, loadingDownloads, selectedPaper, setPapers, setSelectedPaper]);
+  }, [activeFolderId, loadingDownloads, selectedPaperId, setPapers, setSelectedPaper]);
 
   useEffect(() => {
     setAskingAI(false);
@@ -679,25 +678,6 @@ export function DeepReadPanel() {
     }
   };
 
-  const handleToggleTheme = async () => {
-    if (switchingTheme) {
-      return;
-    }
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
-    setSwitchingTheme(true);
-    try {
-      const result = await saveConfig({
-        ...config,
-        theme: nextTheme,
-      });
-      setConfig(result.config);
-    } catch (error) {
-      setError(errorToUserMessage(error, '切换主题失败'));
-    } finally {
-      setSwitchingTheme(false);
-    }
-  };
-
   const handleRetryDownload = async (paper: Paper) => {
     if (retryingPaperId) {
       return;
@@ -809,7 +789,9 @@ export function DeepReadPanel() {
       <div key={node.folder.id} className="space-y-1">
         <button
           type="button"
-          onClick={() => void loadFolderPapers(node.folder.id, true)}
+          onClick={() => void loadFolderPapers(node.folder.id, true).catch((error) => {
+            setError(errorToUserMessage(error, '加载文件夹论文失败'));
+          })}
           style={{ paddingLeft: 10 + depth * 12 }}
           className={`flex w-full items-center gap-2 rounded-[var(--de-radius)] py-1.5 pr-2 text-left text-xs transition-colors ${
             isActive
@@ -1043,15 +1025,6 @@ export function DeepReadPanel() {
                 </button>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => void handleToggleTheme()}
-              disabled={switchingTheme}
-              className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 transition hover:border-indigo-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            >
-              {switchingTheme ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <SunMoon className="h-3.5 w-3.5" />}
-              切换全局到{theme === 'dark' ? '浅色' : '深色'}模式
-            </button>
           </div>
         </aside>
 

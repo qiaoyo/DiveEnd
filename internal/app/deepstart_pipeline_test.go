@@ -54,7 +54,7 @@ func TestPreprocessDeepStartResultsWritesMarkdownCacheAtomically(t *testing.T) {
 	app.pdfService = NewPDFServiceClient(pdfService.URL)
 	app.llm = nil
 	app.strongLLM = nil
-	app.weakLLM = nil
+	app.weakLLM = fakeWeakLLM{}
 	t.Cleanup(func() {
 		app.stopDownloadWorkers()
 		if app.db != nil {
@@ -79,6 +79,9 @@ func TestPreprocessDeepStartResultsWritesMarkdownCacheAtomically(t *testing.T) {
 	}
 	if batch.Parsed != 1 || batch.Failed != 0 {
 		t.Fatalf("unexpected batch stats: %+v", batch)
+	}
+	if papers[0].Authors != "Extracted Author" {
+		t.Fatalf("expected extracted authors to persist, got %q", papers[0].Authors)
 	}
 	if len(papers) != 1 || strings.TrimSpace(papers[0].MarkdownPath) == "" {
 		t.Fatalf("expected one paper with markdown cache path, got papers=%+v", papers)
@@ -144,6 +147,37 @@ func TestEstimateDeepStartETAUsesObservedThroughput(t *testing.T) {
 	}
 }
 
+func TestMergeSearchPaperPoolsUsesAllDedupeAliases(t *testing.T) {
+	existing := []SearchPaper{{
+		ID:      "openreview-paper",
+		Title:   "A Long Benchmark for Embodied Agents",
+		Authors: "Alice Researcher",
+		Year:    2026,
+		Source:  "openreview",
+		Sources: []string{"openreview"},
+	}}
+	added := []SearchPaper{{
+		ID:       "semantic-paper",
+		Title:    "A Long Benchmark for Embodied Agents",
+		Authors:  "Alice Researcher",
+		Year:     2026,
+		Source:   "semantic_scholar",
+		Sources:  []string{"semantic_scholar"},
+		Abstract: "A richer abstract from another query variant.",
+	}}
+
+	merged := mergeSearchPaperPools(existing, added)
+	if len(merged) != 1 {
+		t.Fatalf("expected query variants to merge into one paper, got %d: %+v", len(merged), merged)
+	}
+	if len(merged[0].Sources) != 2 {
+		t.Fatalf("expected merged provenance from both sources, got %v", merged[0].Sources)
+	}
+	if merged[0].Abstract == "" {
+		t.Fatal("expected metadata from the richer duplicate to be preserved")
+	}
+}
+
 func TestPreprocessDeepStartResultsSanitizesSessionCacheDirectory(t *testing.T) {
 	pdfService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/parse/upload" {
@@ -168,7 +202,7 @@ func TestPreprocessDeepStartResultsSanitizesSessionCacheDirectory(t *testing.T) 
 	app.pdfService = NewPDFServiceClient(pdfService.URL)
 	app.llm = nil
 	app.strongLLM = nil
-	app.weakLLM = nil
+	app.weakLLM = fakeWeakLLM{}
 	t.Cleanup(func() {
 		app.stopDownloadWorkers()
 		if app.db != nil {

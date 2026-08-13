@@ -1,6 +1,11 @@
 package app
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
 
 func appContext(ctx context.Context) context.Context {
 	if ctx == nil {
@@ -52,6 +57,49 @@ func analyzeDeepStartWithContext(ctx context.Context, service interface {
 		return serviceWithContext.AnalyzeDeepStartWithContext(ctx, request)
 	}
 	return service.AnalyzeDeepStart(request)
+}
+
+func analyzeDeepStartWithRetry(ctx context.Context, service interface {
+	AnalyzeDeepStart(DeepStartAIRequest) (*DeepStartAIResponse, error)
+}, request DeepStartAIRequest) (*DeepStartAIResponse, error) {
+	const maxAttempts = 2
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		response, err := analyzeDeepStartWithContext(ctx, service, request)
+		if err == nil {
+			if response == nil {
+				return nil, fmt.Errorf("AI returned an empty DeepStart analysis")
+			}
+			return response, nil
+		}
+		lastErr = err
+		if ctx == nil || ctx.Err() != nil || attempt == maxAttempts || !isRetryableLLMError(err) {
+			break
+		}
+		if err := sleepWithContext(ctx, 700*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, lastErr
+}
+
+func isRetryableLLMError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"429", "rate limit", "timeout", "timed out", "deadline exceeded",
+		"connection reset", "connection refused", "temporarily unavailable",
+		"service unavailable", "status 500", "status 502", "status 503", "status 504",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func analyzeScreeningWithContext(ctx context.Context, service interface {

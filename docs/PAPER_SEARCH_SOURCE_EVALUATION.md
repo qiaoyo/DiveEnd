@@ -13,7 +13,7 @@ DiveEnd 不应再寻找一个替代 Semantic Scholar 的单一来源。更稳定
 5. `Hugging Face Daily Papers`：LLM、agent、robotics、world model 的近期趋势信号。
 6. `Crossref`、`CORE`、`Europe PMC`：分别用于 DOI 元数据补全、开放全文补充和生医交叉领域补充。
 
-`OpenAlex + OpenReview + DBLP` 已在 2026-07-31 接入，与 arXiv 共同使用同一套查询、合并、过滤、排序和降级流程。Hugging Face Daily Papers 仍适合未来做成独立的“趋势”入口。Semantic Scholar 当前关闭，未来恢复时也只能作为额外来源。
+`OpenAlex + OpenReview + DBLP` 已在 2026-07-31 接入，与 arXiv 共同使用同一套查询、合并、过滤、排序和降级流程。Hugging Face Daily Papers 仍适合未来做成独立的“趋势”入口。Semantic Scholar 现在加入默认来源集合：2026-08-07 的真实 key smoke test 直连返回 `200`，DiveEnd 客户端在一次 `429` 后按退避策略重试成功；用户仍可通过显式配置关闭它。
 
 ## 真实请求结果
 
@@ -31,6 +31,7 @@ DiveEnd 不应再寻找一个替代 Semantic Scholar 的单一来源。更稳定
 | Hugging Face Daily Papers | 无需 key | `200`；最近 100 篇中命中 TurboVLA、PhiZero、agent benchmark、world model 等大量强相关新论文 | AI 趋势、热度和每日发现 | 公开端点缺少稳定契约，不应作为唯一检索源 |
 | Europe PMC | 无需 key | `200`；返回 robotics/VLA 交叉论文 | 生医、神经、医疗机器人补充 | 对纯 CS、agent、world model 覆盖较弱 |
 | OpenAlex | 免费 key，匿名额度很低 | 匿名搜索返回 `429`；官方文档确认免费 key 每日提供 1,000 次 search、10,000 次 filter、100 次内容下载 | 最适合替代 Semantic Scholar 的全局召回与引用图 | 实际使用应先申请免费 key；内容下载需要计量 |
+| Semantic Scholar | `x-api-key`，需要本地 key | 2026-08-07：直连 `200`；DiveEnd 客户端首请求 `429`，第 2 次重试 `200` 并返回 1 条论文 | 论文元数据、引用数和开放 PDF 候选的补充召回 | 无 key 时匿名额度低；瞬时 `429` 需要退避，不能作为唯一来源 |
 | Crossref | 无需 key | 当前出口返回 `429` | DOI、出版信息、撤稿/更新和期刊元数据补全 | 摘要不完整；不适合承担首要召回 |
 | CORE | 可匿名，注册后额度更好 | 当前出口返回 `429` | 开放获取全文和仓储版本补充 | 限流较严格，搜索质量和 CS 新论文时效需继续评估 |
 | Papers with Code legacy API | 已失效 | 请求重定向至 Hugging Face Papers HTML | 不再接入 | 旧 JSON API 不可作为生产依赖 |

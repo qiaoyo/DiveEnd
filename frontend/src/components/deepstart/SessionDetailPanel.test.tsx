@@ -12,6 +12,7 @@ const backendMocks = vi.hoisted(() => ({
   getPapers: vi.fn(),
   importPapersWithAssets: vi.fn(),
   onDeepStartProgress: vi.fn(),
+  openExternalURL: vi.fn(),
   replyDeepStartSession: vi.fn(),
   rerunDeepStartSearch: vi.fn(),
   undoDeepStartNarrow: vi.fn(),
@@ -221,12 +222,31 @@ describe('SessionDetailPanel', () => {
 
     fireEvent.click(screen.getByText('Unified Embodied Agent Benchmark'));
 
-    expect(screen.getByText('Paper Detail')).toBeInTheDocument();
+    expect(screen.getByText('论文详情')).toBeInTheDocument();
     expect(screen.getByText('作者列表')).toBeInTheDocument();
     expect(screen.getByText('检索匹配')).toBeInTheDocument();
     expect(screen.getByText('命中词：embodied · benchmark')).toBeInTheDocument();
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('完整摘要')).toBeInTheDocument();
+  });
+
+  it('copies the active title and opens its external link from the drawer', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<SessionDetailPanel />);
+
+    fireEvent.click(screen.getByText('Unified Embodied Agent Benchmark'));
+    fireEvent.click(screen.getByRole('button', { name: '复制论文标题' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开链接' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('Unified Embodied Agent Benchmark');
+    });
+    expect(backendMocks.openExternalURL).toHaveBeenCalledWith('https://example.org/paper-1');
   });
 
   it('redacts sensitive values in clipboard copy failures', async () => {

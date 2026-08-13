@@ -133,6 +133,7 @@ func (db *DB) migrate() error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS deepstart_enrichment_cache (
 			cache_key TEXT PRIMARY KEY,
+			authors TEXT NOT NULL DEFAULT '',
 			institutions_json TEXT NOT NULL DEFAULT '[]',
 			keywords_json TEXT NOT NULL DEFAULT '[]',
 			source_label TEXT NOT NULL DEFAULT '',
@@ -217,6 +218,7 @@ func (db *DB) migrate() error {
 		name string
 		typ  string
 	}{
+		{name: "authors", typ: "TEXT NOT NULL DEFAULT ''"},
 		{name: "publication_venue", typ: "TEXT NOT NULL DEFAULT ''"},
 		{name: "publication_year", typ: "INTEGER NOT NULL DEFAULT 0"},
 		{name: "citation_count", typ: "INTEGER NOT NULL DEFAULT 0"},
@@ -1411,13 +1413,14 @@ func (db *DB) GetDeepStartEnrichmentCache(cacheKey string) (*DeepStartEnrichment
 		crossrefAttempt  int
 	)
 	err := db.conn.QueryRow(`
-		SELECT cache_key, institutions_json, keywords_json, source_label,
+		SELECT cache_key, authors, institutions_json, keywords_json, source_label,
 		       publication_venue, publication_year, citation_count,
 		       openalex_attempted, crossref_attempted, error_message, updated_at
 		FROM deepstart_enrichment_cache
 		WHERE cache_key = ?
 	`, cacheKey).Scan(
 		&entry.CacheKey,
+		&entry.Authors,
 		&institutionsJSON,
 		&keywordsJSON,
 		&entry.SourceLabel,
@@ -1465,11 +1468,12 @@ func (db *DB) UpsertDeepStartEnrichmentCache(entry *DeepStartEnrichmentCache) er
 
 	_, err = db.conn.Exec(`
 		INSERT INTO deepstart_enrichment_cache (
-			cache_key, institutions_json, keywords_json, source_label,
+			cache_key, authors, institutions_json, keywords_json, source_label,
 			publication_venue, publication_year, citation_count,
 			openalex_attempted, crossref_attempted, error_message, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(cache_key) DO UPDATE SET
+			authors = excluded.authors,
 			institutions_json = excluded.institutions_json,
 			keywords_json = excluded.keywords_json,
 			source_label = excluded.source_label,
@@ -1482,6 +1486,7 @@ func (db *DB) UpsertDeepStartEnrichmentCache(entry *DeepStartEnrichmentCache) er
 			updated_at = excluded.updated_at
 	`,
 		cacheKey,
+		strings.TrimSpace(entry.Authors),
 		string(institutionsJSON),
 		string(keywordsJSON),
 		strings.TrimSpace(entry.SourceLabel),

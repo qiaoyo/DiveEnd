@@ -450,6 +450,19 @@ class SmokePage {
     await sleep(options.afterMs ?? 250);
   }
 
+  async clickAriaLabel(label) {
+    const clicked = await this.eval((wanted) => {
+      const element = document.querySelector(`[aria-label="${CSS.escape(wanted)}"]`);
+      if (!element) return false;
+      element.click();
+      return true;
+    }, label);
+    if (!clicked) {
+      throw new Error(`Could not click aria label: ${label}`);
+    }
+    await sleep(300);
+  }
+
   async fillPlaceholder(placeholder, value) {
     const filled = await this.eval((wanted, nextValue) => {
       const inputs = Array.from(document.querySelectorAll('input,textarea'));
@@ -515,6 +528,17 @@ class SmokePage {
     }
   }
 
+  async assertStartButtonEnabled() {
+    const enabled = await this.eval(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      const start = buttons.find((button) => button.textContent.includes('开始检索'));
+      return Boolean(start && !start.disabled);
+    });
+    if (!enabled) {
+      throw new Error('Expected DeepStart start button to be enabled after choosing a target folder');
+    }
+  }
+
   async emitRuntimeEvent(eventName, payload) {
     await this.eval((name, data) => window.__diveendSmoke?.emit?.(name, data), eventName, payload);
     await sleep(250);
@@ -544,14 +568,35 @@ async function main() {
     await waitForHTTP(baseURL);
 
     await page.navigate('/');
+    await page.assertText('从问题到结论');
+    await page.clickAriaLabel('研究记录');
+    await page.waitForText('已保存的检索');
+    await page.clickAriaLabel('研究记录');
+    await page.assertText('从问题到结论');
+    await page.clickAriaLabel('同步');
+    await page.waitForText('云端同步');
+    await page.clickAriaLabel('同步');
+    await page.assertText('从问题到结论');
+    await page.clickAriaLabel('切换到深色模式');
+    await page.waitFor(() => document.documentElement.classList.contains('dark'));
+    await page.clickAriaLabel('切换到浅色模式');
+    await page.waitFor(() => !document.documentElement.classList.contains('dark'));
+    await shot('home-dashboard', 'Home 研究工作台与快捷入口');
+
+    await page.navigate('/discover');
     log('bridge injected: ' + await page.eval(() => Boolean(window.__diveendSmoke)));
     await page.assertText('DiveEnd');
-    await shot('home', 'Home 初始工作台与全局导航');
+    await shot('discovery', '论文发现入口与全局导航');
 
     await page.navigate('/deepstart');
     await page.assertStartButtonDisabled();
     await shot('deepstart-empty-disabled', 'DeepStart 空输入时开始按钮禁用态');
     await page.fillPlaceholder('哪些方法真正提升了代码智能体', 'scientific reading assistant');
+    await page.clickText('新建文件夹');
+    await page.waitForText('新建保存文件夹');
+    await page.fillPlaceholder('例如 VLA / Benchmark', 'VLA Benchmarks');
+    await page.clickText('创建并选中');
+    await page.assertStartButtonEnabled();
     await shot('deepstart-ready', 'DeepStart 输入后可执行状态');
     await page.clickText('开始检索');
     await shot('deepstart-loading', 'DeepStart 检索/分析 loading 状态');
@@ -561,7 +606,7 @@ async function main() {
     await page.clickText('embodied benchmark');
     await shot('deepstart-suggested-query', 'DeepStart 建议 query 只填入输入框，不误触发重搜');
     await page.clickText('Unified Embodied Agent Benchmark');
-    await page.waitForText('Paper Detail');
+    await page.waitForText('论文详情');
     await shot('deepstart-paper-detail', 'DeepStart 论文详情抽屉');
 
     await page.navigate('/deepread');

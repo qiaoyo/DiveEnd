@@ -7,6 +7,9 @@ import { GlobalNav } from './GlobalNav';
 const DeepStartPanel = lazy(() =>
   import('../deepstart/DeepStartPanel').then((module) => ({ default: module.DeepStartPanel })),
 );
+const HomePanel = lazy(() =>
+  import('../home/HomePanel').then((module) => ({ default: module.HomePanel })),
+);
 const SessionDetailPanel = lazy(() =>
   import('../deepstart/SessionDetailPanel').then((module) => ({ default: module.SessionDetailPanel })),
 );
@@ -37,7 +40,8 @@ function WorkspaceLoading() {
 }
 
 function WorkspaceContent({ pathname }: { pathname: string }) {
-  if (pathname === '/' || pathname === '/deepstart') return <DeepStartPanel />;
+  if (pathname === '/home') return <HomePanel />;
+  if (pathname === '/discover' || pathname === '/deepstart') return <DeepStartPanel />;
   if (pathname === '/history') return <HistoryPanel />;
   if (pathname.startsWith('/session/')) return <SessionDetailPanel />;
   if (pathname === '/deepread') return <DeepReadPanel />;
@@ -89,7 +93,9 @@ export function AppLayout() {
           <WorkspaceLoading />
         ) : (
           <Suspense fallback={<WorkspaceLoading />}>
-            <WorkspaceContent pathname={pathname} />
+            <div key={pathname} className="de-page-enter h-full min-h-0">
+              <WorkspaceContent pathname={pathname} />
+            </div>
           </Suspense>
         )}
       </main>

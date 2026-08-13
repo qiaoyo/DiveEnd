@@ -41,7 +41,7 @@ llm:
 
 # Search runtime configuration (non-secret)
 search:
-  enable_semantic_scholar: false
+  enable_semantic_scholar: true
   enable_arxiv: true
   enable_openalex: true
   enable_openreview: true

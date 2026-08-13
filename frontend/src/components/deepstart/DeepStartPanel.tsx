@@ -3,14 +3,20 @@ import {
   ArrowRight,
   Check,
   Clock3,
+  ChevronDown,
   FileSearch,
+  FolderOpen,
+  FolderPlus,
   Loader2,
   Search,
   Square,
+  X,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   cancelDeepStartTask,
+  createFolderNode,
+  getFolders,
   onDeepStartProgress,
   onSearchProgress,
   startDeepStartSession,
@@ -37,6 +43,7 @@ const phaseLabels: Record<string, string> = {
   persisting: '保存工作区',
   cancelling: '正在停止',
   cancelled: '已停止',
+  failed: '处理失败',
   completed: '完成',
 };
 
@@ -51,28 +58,51 @@ function formatUpdatedAt(value: string): string {
   }).format(date);
 }
 
+const folderPathSegmentPattern = /^[A-Za-z_\u4E00-\u9FFF ]+$/;
+
+function validateFolderPathInput(path: string): string | null {
+  const normalized = path.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!normalized) return '请填写文件夹名称或路径';
+  if (normalized.length > 180) return '目录路径过长，请缩短后重试';
+  for (const segment of normalized.split('/')) {
+    const compact = segment.trim().replace(/\s+/g, ' ');
+    if (!compact) return '目录路径不能包含空层级，请检查 / 分隔';
+    if (!folderPathSegmentPattern.test(compact)) {
+      return '文件夹名称仅支持中文、英文、空格和下划线';
+    }
+  }
+  return null;
+}
+
 export function DeepStartPanel() {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
-    activeFolderId,
     deepStartSessions,
     folders,
     setActiveDeepStartSession,
     setError,
+    setFolders,
   } = useAppStore();
 
   const [prompt, setPrompt] = useState('');
-  const [targetFolderId, setTargetFolderId] = useState(activeFolderId || folders[0]?.id || '');
+  const [targetFolderId, setTargetFolderId] = useState('');
+  const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
+  const [newFolderPath, setNewFolderPath] = useState('');
+  const [newFolderError, setNewFolderError] = useState('');
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [searchProgress, setSearchProgress] = useState<SearchProgressEvent | null>(null);
   const [deepStartProgress, setDeepStartProgress] = useState<DeepStartProgressEvent | null>(null);
 
   useEffect(() => {
-    if (!targetFolderId && (activeFolderId || folders[0]?.id)) {
-      setTargetFolderId(activeFolderId || folders[0]?.id || '');
+    const state = location.state as { initialPrompt?: string } | null;
+    const initialPrompt = state?.initialPrompt?.trim() || '';
+    if (initialPrompt) {
+      setPrompt((current) => current || initialPrompt);
     }
-  }, [activeFolderId, folders, targetFolderId]);
+  }, [location.state]);
 
   useEffect(() => onSearchProgress(setSearchProgress), []);
   useEffect(() => onDeepStartProgress(setDeepStartProgress), []);
@@ -91,9 +121,16 @@ export function DeepStartPanel() {
   const recentSessions = deepStartSessions.slice(0, 6);
 
   const handleStart = async () => {
+    if (isStarting) {
+      return;
+    }
     const researchQuestion = prompt.trim();
     if (!researchQuestion) {
       setError('请输入要研究的问题、方法或领域');
+      return;
+    }
+    if (!targetFolderId) {
+      setError('请先选择保存目标文件夹，或新建一个文件夹');
       return;
     }
 
@@ -139,13 +176,42 @@ export function DeepStartPanel() {
   };
 
   const handleCancel = async () => {
-    if (!runningSessionId) return;
+    if (!runningSessionId || isCancelling) return;
     setIsCancelling(true);
     try {
       await cancelDeepStartTask(runningSessionId);
     } catch (error) {
       setError(errorToUserMessage(error, '停止检索失败'));
       setIsCancelling(false);
+    }
+  };
+
+  const openFolderModal = () => {
+    setNewFolderPath('');
+    setNewFolderError('');
+    setIsFolderModalOpen(true);
+  };
+
+  const submitCreateFolder = async () => {
+    const path = newFolderPath.trim();
+    const validationError = validateFolderPathInput(path);
+    if (validationError) {
+      setNewFolderError(validationError);
+      return;
+    }
+
+    setIsCreatingFolder(true);
+    setNewFolderError('');
+    try {
+      const folder = await createFolderNode({ path });
+      const refreshedFolders = await getFolders();
+      setFolders(refreshedFolders);
+      setTargetFolderId(folder.id);
+      setIsFolderModalOpen(false);
+    } catch (error) {
+      setNewFolderError(errorToUserMessage(error, '创建文件夹失败'));
+    } finally {
+      setIsCreatingFolder(false);
     }
   };
 
@@ -186,28 +252,49 @@ export function DeepStartPanel() {
 
             <div className="flex flex-col justify-between p-5">
               <div>
-                <label htmlFor="target-folder" className="text-xs font-semibold text-[var(--de-ink)]">
-                  保存到
-                </label>
-                <select
-                  id="target-folder"
-                  value={targetFolderId}
-                  onChange={(event) => setTargetFolderId(event.target.value)}
-                  className="de-field mt-2 w-full px-3 py-2 text-sm"
-                  disabled={isStarting}
-                >
-                  {folders.map((folder) => (
-                    <option key={folder.id} value={folder.id}>
-                      {folder.path || folder.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between gap-3">
+                  <label htmlFor="target-folder" className="text-xs font-semibold text-[var(--de-ink)]">
+                    保存到目标文件夹
+                  </label>
+                  <button
+                    type="button"
+                    onClick={openFolderModal}
+                    disabled={isStarting}
+                    className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--de-accent)] hover:underline disabled:opacity-50"
+                  >
+                    <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                    新建文件夹
+                  </button>
+                </div>
+                <div className="mt-2 flex items-center gap-2 border border-[var(--de-rule-strong)] bg-[var(--de-paper)] px-2.5">
+                  <FolderOpen className="h-4 w-4 shrink-0 text-[var(--de-ink-muted)]" aria-hidden="true" />
+                  <div className="relative min-w-0 flex-1">
+                    <select
+                      id="target-folder"
+                      value={targetFolderId}
+                      onChange={(event) => setTargetFolderId(event.target.value)}
+                      className="min-w-0 w-full appearance-none bg-transparent px-0 py-2 pr-5 text-sm text-[var(--de-ink)] outline-none"
+                      disabled={isStarting}
+                    >
+                      <option value="">请选择已有文件夹</option>
+                      {folders.map((folder) => (
+                        <option key={folder.id} value={folder.id}>
+                          {folder.path || folder.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--de-ink-muted)]" aria-hidden="true" />
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] leading-4 text-[var(--de-ink-muted)]">
+                  {targetFolderId ? '本轮结果会保存到已选文件夹。' : '请先新建文件夹，或从已有文件夹中选择一个。'}
+                </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => void handleStart()}
-                disabled={isStarting || !prompt.trim()}
+                disabled={isStarting || !prompt.trim() || !targetFolderId}
                 className="de-button-primary mt-5 inline-flex h-10 items-center justify-center gap-2 px-4 text-sm font-medium"
               >
                 {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -234,7 +321,7 @@ export function DeepStartPanel() {
         ) : null}
 
         {(isStarting || currentPhase === 'cancelled') && (
-          <section className="mt-6 border border-[var(--de-rule)] bg-[var(--de-surface)] p-5">
+          <section className="mt-6 border border-[var(--de-rule)] bg-[var(--de-surface)] p-5" aria-live="polite">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-[var(--de-ink)]">
@@ -246,7 +333,7 @@ export function DeepStartPanel() {
                   {phaseLabels[currentPhase] || '处理中'}
                 </div>
                 <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">
-                  {deepStartProgress?.message || '正在从 Semantic Scholar 与 arXiv 获取候选论文'}
+                  {deepStartProgress?.message || '正在从多个学术来源获取候选论文'}
                 </p>
               </div>
               {isStarting ? (
@@ -288,7 +375,9 @@ export function DeepStartPanel() {
                     <span className="font-medium text-[var(--de-ink)]">{source.name}</span>
                     <span className="ml-auto text-[var(--de-ink-muted)]">
                       {source.success
-                        ? `${source.resultCount} 篇`
+                        ? source.resultCount > 0
+                          ? `${source.resultCount} 篇`
+                          : '无匹配'
                         : source.status === 'failed'
                           ? '本来源暂不可用'
                           : `第 ${Math.max(source.attempt, 1)} 次尝试`}
@@ -299,13 +388,84 @@ export function DeepStartPanel() {
             ) : null}
 
             {deepStartProgress?.stats ? (
-              <p className="mt-4 text-xs leading-5 text-[var(--de-ink-muted)]">
-                已获取 {deepStartProgress.stats.rawCount} 条记录，去重后 {deepStartProgress.stats.dedupCount} 篇，
-                当前纳入 {deepStartProgress.stats.finalCount} 篇。
-              </p>
+              <div className="mt-4 text-xs leading-5 text-[var(--de-ink-muted)]">
+                <p>
+                  来源返回 {deepStartProgress.stats.rawCount} 条记录，合并重复版本后 {deepStartProgress.stats.dedupCount} 篇，
+                  当前候选池纳入 {deepStartProgress.stats.finalCount} 篇。
+                </p>
+                <p className="mt-1 text-[11px]">
+                  原始记录会汇总各来源与改写检索词；去重按 DOI、arXiv ID、OpenReview forum 和规范化标题合并，候选池受本轮上限控制。
+                </p>
+              </div>
             ) : null}
           </section>
         )}
+
+        {isFolderModalOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-5" role="presentation">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="new-folder-title"
+              className="w-full max-w-md border border-[var(--de-rule)] bg-[var(--de-surface)] p-5 shadow-xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 id="new-folder-title" className="text-base font-semibold text-[var(--de-ink)]">新建保存文件夹</h2>
+                  <p className="mt-1 text-xs leading-5 text-[var(--de-ink-muted)]">可以使用路径一次建立多级文件夹。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsFolderModalOpen(false)}
+                  className="rounded-[4px] p-1 text-[var(--de-ink-muted)] hover:bg-[var(--de-surface-muted)] hover:text-[var(--de-ink)]"
+                  aria-label="关闭新建文件夹"
+                  title="关闭"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <label htmlFor="new-folder-path" className="mt-5 block text-xs font-semibold text-[var(--de-ink)]">
+                文件夹名称或路径
+              </label>
+              <input
+                id="new-folder-path"
+                value={newFolderPath}
+                onChange={(event) => setNewFolderPath(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void submitCreateFolder();
+                  }
+                }}
+                placeholder="例如 VLA / Benchmark"
+                className="de-field mt-2 w-full px-3 py-2 text-sm"
+                autoFocus
+                disabled={isCreatingFolder}
+              />
+              <p className="mt-2 text-[11px] leading-4 text-[var(--de-ink-muted)]">支持中文、英文、空格和下划线。</p>
+              {newFolderError ? <p className="mt-3 text-xs text-[var(--de-danger)]" role="alert">{newFolderError}</p> : null}
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsFolderModalOpen(false)}
+                  className="de-button-secondary px-3 py-2 text-xs"
+                  disabled={isCreatingFolder}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submitCreateFolder()}
+                  className="de-button-primary inline-flex items-center gap-1.5 px-3 py-2 text-xs"
+                  disabled={isCreatingFolder}
+                >
+                  {isCreatingFolder ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
+                  {isCreatingFolder ? '创建中' : '创建并选中'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <section className="mt-10">
           <div className="flex items-end justify-between border-b border-[var(--de-rule)] pb-3">
